@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arena-composer"
+version = "0.1.0"
+description = "Custom IsaacLab-Arena environments for this project"
+requires-python = ">=3.10"
+dependencies = [
+    "isaaclab_arena",
+]
+
+[project.scripts]
+arena-resolve-layout = "arena_composer.resolve_layout:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+prerelease = "if-necessary-or-explicit"
+
+[[tool.uv.index]]
+url = "https://pypi.nvidia.com"
+explicit = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
