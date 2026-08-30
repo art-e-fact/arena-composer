@@ -1,21 +1,25 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
 [project]
 name = "arena-composer"
-version = "0.1.0"
-description = "Custom IsaacLab-Arena environments for this project"
-requires-python = ">=3.10"
+description = "Custom IsaacLab-Arena environments for this project, plus a Bevy viewer for them"
+# abi3-py312: the extension module is built against the 3.12 stable ABI.
+requires-python = ">=3.12"
+dynamic = ["version"]
 dependencies = [
     "isaaclab_arena",
 ]
 
 [project.scripts]
 arena-resolve-layout = "arena_composer.resolve_layout:main"
+arena-view = "arena_composer.view:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.maturin]
+features = ["extension-module"]
+module-name = "arena_composer._core"
+python-source = "python"
 
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
