@@ -1,17 +1,15 @@
 //! The viewer: a windowed Bevy app that draws one resolved layout.
 //!
-//! Bare bones on purpose — it opens each asset's USD, projects it under the
-//! pose the solver picked, and gives you an orbit camera to look at it. There
-//! is no editing, no re-resolve, and no sim.
+//! Bare bones on purpose — it uploads the geometry the payload carries under
+//! the pose the solver picked, and gives you an orbit camera to look at it.
+//! There is no editing, no re-resolve, and no sim.
 
 use bevy::asset::{AssetPlugin, UnapprovedPathMode};
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use openusd::usd::Stage;
-use usd_bevy::UsdPlugin;
 
 use crate::scene::{Asset, Scene, arena_to_bevy};
-use crate::spawn::spawn_asset;
+use crate::spawn::spawn_geometry;
 
 /// The scene the app was launched with, kept so `setup` can read it.
 #[derive(Resource)]
@@ -37,29 +35,21 @@ pub fn run(scene: Scene) {
                     }),
                     ..default()
                 })
-                // A USD's textures sit next to it out in the asset cache, and
+                // Textures sit next to their USD out in the asset cache, and
                 // Bevy refuses paths outside its own asset root by default.
                 .set(AssetPlugin {
                     unapproved_path_mode: UnapprovedPathMode::Allow,
                     ..default()
                 }),
             PanOrbitCameraPlugin,
-            // Route registry plus the projection caches that let a repeated
-            // prim share the first one's GPU meshes. Deliberately *not*
-            // `LiveStagePlugin`: each asset is its own stage, and none of them
-            // is edited here.
-            UsdPlugin,
         ))
-        // `UsdPlugin` only installs the built-in registry if none is present,
-        // which is how this one gets to replace its material route.
-        .insert_resource(crate::material::registry())
         .insert_resource(ResolvedScene(scene))
         .add_systems(Startup, setup)
         .run();
 }
 
-/// Exclusive because projecting a stage spawns entities with components the
-/// schema registry picks at runtime, which needs `&mut World`.
+/// Exclusive because building meshes and materials needs `&mut World` to reach
+/// both asset collections while spawning.
 fn setup(world: &mut World) {
     let scene = world.resource::<ResolvedScene>().0.clone();
 
@@ -72,9 +62,10 @@ fn setup(world: &mut World) {
         .id();
 
     for asset in &scene.assets {
-        let Some(usd_path) = asset.usd_to_draw() else {
+        let nodes = scene.geometry_of(asset);
+        if nodes.is_empty() {
             continue;
-        };
+        }
         let placement = world
             .spawn((
                 AssetId(asset.id.clone()),
@@ -83,16 +74,12 @@ fn setup(world: &mut World) {
                 ChildOf(root),
             ))
             .id();
-        match Stage::open(usd_path) {
-            Ok(stage) => spawn_asset(world, &stage, placement),
-            // One unreadable asset should not cost the whole scene.
-            Err(error) => warn!("{}: cannot open {usd_path}: {error}", asset.id),
-        }
+        spawn_geometry(world, nodes, placement);
     }
 
     // Arena builds the env with a dome light when neither the spec nor the
-    // background USD supplies one. Anything the background *does* supply came
-    // in with its geometry above, so this only stands in for the injected one.
+    // background USD supplies one. This only stands in for that injected light;
+    // lights authored inside an asset are not extracted.
     if scene.lighting.auto_injected_dome_light {
         world.spawn((
             DirectionalLight {
@@ -154,7 +141,11 @@ fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     let mut any = false;
-    for asset in scene.assets.iter().filter(|a| a.usd_to_draw().is_some()) {
+    for asset in scene
+        .assets
+        .iter()
+        .filter(|asset| !scene.geometry_of(asset).is_empty())
+    {
         for corner in corners(asset) {
             let point = to_bevy * asset.transform().transform_point(corner);
             min = min.min(point);
@@ -181,7 +172,7 @@ fn spawn_hud(world: &mut World, scene: &Scene) {
     let drawn = scene
         .assets
         .iter()
-        .filter(|a| a.usd_to_draw().is_some())
+        .filter(|asset| !scene.geometry_of(asset).is_empty())
         .count();
     world.spawn((
         Text::new(format!(
@@ -203,20 +194,35 @@ fn spawn_hud(world: &mut World, scene: &Scene) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `Node` is Bevy's UI node in this module's scope; the payload's is the
+    // geometry one.
+    use crate::scene::Node as GeometryNode;
 
-    fn scene_json(assets: &str) -> Scene {
-        Scene::from_json(&format!(r#"{{"env_name":"t","assets":[{assets}]}}"#)).unwrap()
+    /// One asset at `position` with the given local bounds. `drawable` decides
+    /// whether it points at a geometry entry — the node itself is degenerate,
+    /// since none of these tests upload a mesh.
+    fn scene(position: [f32; 3], bbox: ([f32; 3], [f32; 3]), drawable: bool) -> Scene {
+        Scene {
+            env_name: "t".into(),
+            assets: vec![Asset {
+                id: "a".into(),
+                role: "object".into(),
+                position_xyz: position,
+                bbox_min: bbox.0,
+                bbox_max: bbox.1,
+                geometry: drawable.then_some(0),
+                ..default()
+            }],
+            geometries: vec![vec![GeometryNode::default()]],
+            ..default()
+        }
     }
 
     /// A 1 m cube sitting 1 m up in Arena's frame is 1 m up in Bevy's too,
     /// and the camera looks at its centre rather than the world origin.
     #[test]
     fn framing_centres_on_the_layout() {
-        let scene = scene_json(
-            r#"{"id":"a","role":"object","local_usd_path":"/x.usd",
-                "position_xyz":[0,0,1],"rotation_xyzw":[0,0,0,1],
-                "bbox_min":[-0.5,-0.5,-0.5],"bbox_max":[0.5,0.5,0.5]}"#,
-        );
+        let scene = scene([0.0, 0.0, 1.0], ([-0.5; 3], [0.5; 3]), true);
         let (eye, focus) = framing(&scene);
         assert!(focus.abs_diff_eq(Vec3::Y, 1e-5), "focus {focus}");
         assert!(eye.distance(focus) > 1.0, "camera sits off the subject");
@@ -224,18 +230,15 @@ mod tests {
 
     /// The frame conversion, end to end: a pose the solver reports in Arena's
     /// Z-up world has to come out at the matching point of Bevy's Y-up one.
-    /// The USD path is deliberately bogus — this is about where the placement
-    /// lands, not what hangs off it.
     #[test]
     fn a_solved_pose_lands_in_the_bevy_frame() {
-        let scene = scene_json(
-            r#"{"id":"a","role":"object","local_usd_path":"/does-not-exist.usd",
-                "position_xyz":[1,2,3],"rotation_xyzw":[0,0,0,1],
-                "bbox_min":[0,0,0],"bbox_max":[0,0,0]}"#,
-        );
         let mut app = App::new();
         app.add_plugins(bevy::transform::TransformPlugin)
-            .insert_resource(ResolvedScene(scene))
+            .insert_resource(ResolvedScene(scene(
+                [1.0, 2.0, 3.0],
+                ([0.0; 3], [0.0; 3]),
+                true,
+            )))
             .add_systems(Startup, setup);
         app.update();
 
@@ -260,11 +263,7 @@ mod tests {
     /// origin — an empty scene falls back to a fixed view instead.
     #[test]
     fn undrawable_assets_are_left_out_of_the_bounds() {
-        let scene = scene_json(
-            r#"{"id":"ref","role":"object_reference","local_usd_path":"/x.usd",
-                "position_xyz":[10,10,10],"rotation_xyzw":[0,0,0,1],
-                "bbox_min":[0,0,0],"bbox_max":[1,1,1]}"#,
-        );
+        let scene = scene([10.0; 3], ([0.0; 3], [1.0; 3]), false);
         assert!(bounds(&scene).is_none());
     }
 }

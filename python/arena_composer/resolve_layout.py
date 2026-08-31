@@ -278,6 +278,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format (default: json)")
     parser.add_argument("--output", type=Path, help="Write to this file instead of stdout")
     parser.add_argument(
+        "--payload",
+        type=Path,
+        help="Also pack the layout and its USD geometry here, for `arena-viewer`",
+    )
+    parser.add_argument(
         "--asset-cache",
         type=Path,
         help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
@@ -294,6 +299,13 @@ def main(argv: list[str] | None = None) -> int:
         args.output.write_text(text + "\n", encoding="utf-8")
     else:
         print(text)
+
+    if args.payload:
+        # Imported here so the dump does not pay for numpy and the extractor.
+        from arena_composer.payload import encode
+
+        with contextlib.redirect_stdout(sys.stderr):
+            args.payload.write_bytes(encode(dump))
     return 0
 
 

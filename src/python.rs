@@ -1,25 +1,25 @@
-//! PyO3 wrapper. Deliberately thin: Python's job is to resolve the layout,
-//! this crate's job is to draw it, and the scene JSON is the whole contract
-//! between them — the same one `arena-viewer` reads off disk.
+//! PyO3 wrapper. Deliberately thin: Python's job is to resolve the layout and
+//! read the USD, this crate's job is to draw the result, and the packed payload
+//! is the whole contract between them — the same one `arena-viewer` reads off
+//! disk.
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::scene::Scene;
 
-/// Open a window on a resolved layout, blocking until it is closed.
+/// Open a window on a packed scene, blocking until it is closed.
 ///
-/// `scene_json` is what `arena_composer.resolve_layout.resolve_layout()`
-/// returns, serialized. Must be called from the main thread: the windowing
-/// layer requires it.
+/// `payload` is what `arena_composer.payload.encode()` returns. Must be called
+/// from the main thread: the windowing layer requires it.
 ///
-/// The GIL is released for the duration via `py.detach` — the scene is parsed
-/// out of the string first, so nothing inside the event loop touches Python,
-/// and other threads in the host interpreter keep running.
+/// The GIL is released for the duration via `py.detach` — the scene is decoded
+/// out of the buffer first, so nothing inside the event loop touches Python and
+/// other threads in the host interpreter keep running.
 #[pyfunction]
-fn run_viewer(py: Python<'_>, scene_json: &str) -> PyResult<()> {
+fn run_viewer(py: Python<'_>, payload: &[u8]) -> PyResult<()> {
     let scene =
-        Scene::from_json(scene_json).map_err(|e| PyValueError::new_err(format!("{e:#}")))?;
+        Scene::from_msgpack(payload).map_err(|e| PyValueError::new_err(format!("{e:#}")))?;
     py.detach(|| crate::viewer::run(scene));
     Ok(())
 }

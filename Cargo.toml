@@ -11,7 +11,7 @@ name = "arena_composer"
 # `rlib` is what our own `[[bin]]` and `cargo test` link against.
 crate-type = ["cdylib", "rlib"]
 
-# Opens a scene JSON straight off disk, so the viewer can be iterated on with
+# Opens a packed scene straight off disk, so the viewer can be iterated on with
 # `cargo run` without paying for Arena's import + solve on every rebuild.
 [[bin]]
 name = "arena-viewer"
@@ -19,17 +19,16 @@ path = "src/main.rs"
 
 [dependencies]
 bevy = "0.19.1"
-openusd = { git = "https://github.com/mxpv/openusd", rev = "7934d9f3a375fabc93c14dc96b7900cbd035204d", features = [
-    "geom",
-    "shade",
-] }
-# Local dev: usd_bevy = { path = "../../../bevy_openusd/crates/usd_bevy" }
-usd_bevy = { git = "https://github.com/azazdeaz/bevy_openusd", rev = "06ba93a67042cd7a9a08b6d8f8c7bb7c60bad72e" }
 # Bevy 0.19's built-in camera controllers are free-fly and pan only; a viewer
 # wants orbit. Same crate and version the sibling projects pin.
 bevy_panorbit_camera = "0.35.0"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# The payload is MessagePack: maps for the scene, `bin` blobs for the vertex
+# arrays. `serde_bytes` keeps those blobs from being decoded element by element,
+# and `bytemuck` reinterprets them as vertex arrays in one copy.
+rmp-serde = "1"
+serde_bytes = "0.11"
+bytemuck = "1"
 anyhow = "1"
 pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
 

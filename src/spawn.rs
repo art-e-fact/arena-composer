@@ -1,311 +1,273 @@
-//! Projecting one asset's USD stage into entities under its placement.
+//! Turning the payload's geometry into entities under an asset's placement.
 //!
-//! This is [`usd_bevy::live::project_stage`] with three changes. Two follow
-//! from a scene placing several assets, so prim paths are not unique in this
-//! world and there is no single stage to be the source of truth: the prims are
-//! parented under a caller-supplied entity instead of a global stage root, and
-//! the path→entity map stays local instead of populating `PrimEntities`. The
-//! third is that only the default prim's subtree is drawn — see
-//! [`default_prim_path`]. Everything below the traversal is `usd_bevy`'s:
-//! [`SchemaRegistry::project_prim`] does meshes, materials, transforms,
-//! visibility and purpose for one prim.
+//! There is no USD here. Every convention that needed OpenUSD to resolve —
+//! up axis, unit scale, xform-op order, instancing, `GeomSubset` bindings,
+//! texture path anchoring — was resolved by `arena_composer.usd`, which bakes
+//! the result into vertex positions in the asset's own frame. What arrives is a
+//! flat list of triangle meshes, so this is a mesh upload and a material build.
 
-use std::collections::HashMap;
-
+use bevy::asset::RenderAssetUsages;
+use bevy::image::ImageLoaderSettings;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use openusd::usd::{PrimPredicate, PrimStatus, Stage};
-use usd_bevy::SchemaRegistry;
 
-/// The prim subtree's parent: carries the stage's own axis and unit
-/// convention, kept off the placement entity so the solved pose stays clean.
+use crate::scene::Node;
+
+/// The prim a node was projected from, kept so a picked entity can be named.
 #[derive(Component)]
-pub struct StageRoot;
+pub struct PrimPath(pub String);
 
-/// Project every prim of `stage` into entities parented under `placement`.
+/// Spawn one entity per node, parented under `placement`.
 ///
-/// `placement` keeps its own `Transform` — the solved pose, in Arena's frame.
-/// The convention correction goes on an intermediate [`StageRoot`] child.
-pub fn spawn_asset(world: &mut World, stage: &Stage, placement: Entity) {
-    let registry = world
-        .get_resource::<SchemaRegistry>()
-        .cloned()
-        .unwrap_or_else(SchemaRegistry::builtin);
-
-    let stage_root = world
-        .spawn((
-            StageRoot,
-            convention(stage),
-            Visibility::default(),
+/// `placement` keeps its own `Transform` — the solved pose, in Arena's frame —
+/// and the nodes need none of their own.
+pub fn spawn_geometry(world: &mut World, nodes: &[Node], placement: Entity) {
+    for node in nodes {
+        let Some(mesh) = build_mesh(node) else {
+            continue;
+        };
+        let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
+        let material = build_material(node, world);
+        world.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            PrimPath(node.path.clone()),
             ChildOf(placement),
-        ))
-        .id();
-
-    let root_prim = default_prim_path(stage);
-    let mut entities: HashMap<String, Entity> = HashMap::new();
-    let _ = stage.traverse(predicate(), |path: &openusd::sdf::Path| {
-        if !under(path.as_str(), root_prim.as_deref()) {
-            return;
-        }
-        // Pre-order, so the namespace parent's entity already exists.
-        let parent = entities
-            .get(parent_path(path.as_str()))
-            .copied()
-            .unwrap_or(stage_root);
-        let entity = world.spawn(ChildOf(parent)).id();
-        entities.insert(path.as_str().to_string(), entity);
-        registry.project_prim(stage, path, world, entity);
-    });
-
-    unbake_default_prim_scale(world, stage, &entities);
-    debug!("projected {} prims under {placement}", entities.len());
+        ));
+    }
 }
 
-/// `/<defaultPrim>`, the only subtree Isaac Lab composes in when it spawns an
-/// asset: referencing a USD without a prim path targets its default prim, so
-/// everything beside that prim is authoring the file kept to itself.
-///
-/// Skipping the rest is what keeps a Kit-authored asset's leftovers out of the
-/// scene — `/Render` settings and viewport cameras, and, in a couple of the
-/// object assets, a 50 m collision ground plane that would otherwise be drawn
-/// wherever the solver placed a bagel. `None` (no default prim) draws it all.
-fn default_prim_path(stage: &Stage) -> Option<String> {
-    stage
-        .default_prim()
-        .map(|name| format!("/{}", name.as_str()))
-}
+/// Upload one node's triangles, or `None` when it carries nothing drawable.
+fn build_mesh(node: &Node) -> Option<Mesh> {
+    let positions = node.positions();
+    let indices = node.indices();
+    if positions.is_empty() || indices.len() < 3 {
+        return None;
+    }
 
-/// Whether `path` is `root` or below it. Namespace-aware: `/bagel_00` is not
-/// under `/bagel`.
-fn under(path: &str, root: Option<&str>) -> bool {
-    let Some(root) = root else {
-        return true;
-    };
-    path == root
-        || path
-            .strip_prefix(root)
-            .is_some_and(|rest| rest.starts_with('/'))
-}
-
-/// The stage's axis and unit convention, expressed **in Arena's frame**.
-///
-/// Not the same job as a general USD viewer's: Isaac Lab references assets into
-/// a Z-up metres stage without correcting either, so Z-up metres is what an
-/// asset is assumed to be unless it says otherwise. USD's own fallbacks (Y-up,
-/// centimetres) would be wrong here — Arena composes robot USDs on the fly and
-/// authors neither field, which under USD's fallbacks lands the robot on its
-/// side at 1/100 scale.
-fn convention(stage: &Stage) -> Transform {
-    let up_y = matches!(
-        stage.stage_metadata("upAxis").ok().flatten(),
-        Some(openusd::sdf::Value::Token(t)) if t.as_str() == "Y"
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
     );
-    // Y-up content stood up into the scene's Z-up frame.
-    let rotation = if up_y {
-        Quat::from_rotation_x(core::f32::consts::FRAC_PI_2)
-    } else {
-        Quat::IDENTITY
-    };
-
-    let scale = match stage.stage_metadata("metersPerUnit").ok().flatten() {
-        Some(openusd::sdf::Value::Double(m)) if m > 0.0 => m as f32,
-        _ => 1.0,
-    };
-
-    Transform::from_rotation(rotation).with_scale(Vec3::splat(scale))
-}
-
-/// Drop the default prim's own `xformOp:scale`, which Isaac Lab's spawner
-/// ignores — the `scale` the resolver reports is the only one that applies.
-///
-/// Matching this matters beyond looks: `resolve_layout`'s bounding boxes are
-/// computed with the same op unbaked, so leaving it in makes the geometry and
-/// the numbers the solver placed disagree. Clearing the entity's scale is
-/// exactly right because Bevy composes a transform as `T·R·S`, so the
-/// translate and rotate ops are left untouched.
-fn unbake_default_prim_scale(world: &mut World, stage: &Stage, entities: &HashMap<String, Entity>) {
-    let Some(default_prim) = stage.default_prim() else {
-        return;
-    };
-    let Some(entity) = entities.get(&format!("/{}", default_prim.as_str())) else {
-        return;
-    };
-    if let Some(mut transform) = world.get_mut::<Transform>(*entity) {
-        transform.scale = Vec3::ONE;
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    if let Some(uvs) = node.uvs() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     }
-}
+    mesh.insert_indices(Indices::U32(indices));
 
-/// Active, defined, non-abstract prims, descending into instance subtrees.
-///
-/// Abstract prims are `class` prototype libraries, which must not draw.
-///
-/// The instance proxies are the part that is not optional. SimReady assets
-/// author every piece of geometry as `instanceable = true` with a sub-root
-/// reference into a shared `instances.usda`, so the composed prim carries no
-/// children of its own — its subtree belongs to a prototype (spec 11.3.3), and
-/// a traversal that stops at instances walks the asset's whole skeleton and
-/// finds not one mesh. Descending costs a separate projection per instance,
-/// but `usd_bevy`'s `ProjectionCache` interns the baked meshes, so identical
-/// prims still share one GPU asset.
-fn predicate() -> PrimPredicate {
-    PrimPredicate::new(
-        PrimStatus::ACTIVE.union(PrimStatus::DEFINED),
-        PrimStatus::ABSTRACT,
-    )
-    .with_instance_proxies(true)
-}
-
-/// The namespace parent of a prim path; `/` for a top-level prim.
-fn parent_path(path: &str) -> &str {
-    match path.rfind('/') {
-        Some(0) | None => "/",
-        Some(i) => &path[..i],
+    match node.normals() {
+        Some(normals) => mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals),
+        // A USD need not author normals; smooth ones are a better guess than
+        // the flat black an absent attribute would shade to.
+        None => mesh.compute_normals(),
     }
+    // A normal map is sampled in tangent space, so Bevy drops the map entirely
+    // unless the mesh carries tangents. They need UVs, hence the failure path.
+    if node.textures.contains_key("normal") && mesh.generate_tangents().is_err() {
+        debug!("{}: no tangents, normal map will not apply", node.path);
+    }
+    Some(mesh)
+}
+
+fn build_material(node: &Node, world: &mut World) -> Handle<StandardMaterial> {
+    let server = world.resource::<AssetServer>().clone();
+    let [red, green, blue] = node.base_color;
+    let [er, eg, eb] = node.emissive;
+
+    let mut material = StandardMaterial {
+        base_color: Color::srgba(red, green, blue, node.opacity),
+        perceptual_roughness: node.roughness,
+        metallic: node.metallic,
+        emissive: LinearRgba::rgb(er, eg, eb),
+        // Bevy back-face culls by default, so a double-sided surface has to
+        // turn culling off as well as set the flag.
+        double_sided: node.double_sided,
+        cull_mode: (!node.double_sided).then_some(bevy::render::render_resource::Face::Back),
+        alpha_mode: if node.opacity < 1.0 {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        },
+        ..default()
+    };
+
+    // Paths are absolute and were checked to exist before they were sent, which
+    // is what keeps the asset server from logging a miss per texture.
+    //
+    // Colour maps are authored in sRGB, but normal, metallic/roughness and
+    // occlusion maps hold measurements, not colour. Bevy's image loader assumes
+    // sRGB for both, so the data ones have to say otherwise or every value comes
+    // back gamma-decoded — which on a normal map tilts the whole surface and
+    // reads as smeared, streaky shading.
+    let texture = |slot: &str, srgb: bool| {
+        node.textures.get(slot).map(|path| {
+            server
+                .load_builder()
+                .with_settings(move |settings: &mut ImageLoaderSettings| settings.is_srgb = srgb)
+                .load::<Image>(path.clone())
+        })
+    };
+    material.base_color_texture = texture("base_color", true);
+    material.emissive_texture = texture("emissive", true);
+    material.normal_map_texture = texture("normal", false);
+    material.metallic_roughness_texture = texture("metallic_roughness", false);
+    material.occlusion_texture = texture("occlusion", false);
+
+    world
+        .resource_mut::<Assets<StandardMaterial>>()
+        .add(material)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
 
+    fn triangle() -> Node {
+        Node {
+            positions: [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+                .iter()
+                .flat_map(|f| f.to_le_bytes())
+                .collect(),
+            indices: [0u32, 1, 2].iter().flat_map(|i| i.to_le_bytes()).collect(),
+            base_color: [1.0, 0.0, 0.0],
+            opacity: 1.0,
+            ..default()
+        }
+    }
+
+    /// A node with positions and indices but no normals still uploads, with
+    /// normals computed rather than left absent.
     #[test]
-    fn parent_path_walks_up_to_the_pseudo_root() {
-        assert_eq!(parent_path("/World/Prop/Mesh"), "/World/Prop");
-        assert_eq!(parent_path("/World"), "/");
-        assert_eq!(parent_path("/"), "/");
+    fn a_node_without_normals_still_builds_a_mesh() {
+        let mesh = build_mesh(&triangle()).expect("a drawable mesh");
+        assert_eq!(mesh.count_vertices(), 3);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
     }
 
-    /// A sibling of the default prim is somebody else's business, and a prim
-    /// whose name merely starts the same way is not a descendant.
+    /// Degenerate nodes are skipped instead of producing an empty draw call.
     #[test]
-    fn only_the_default_prims_subtree_is_drawn() {
-        assert!(under("/bagel", Some("/bagel")));
-        assert!(under("/bagel/Geometry/mesh", Some("/bagel")));
-        assert!(!under("/GroundPlane/CollisionMesh", Some("/bagel")));
-        assert!(!under("/bagel_00", Some("/bagel")));
-        // A stage without a default prim draws whatever it has.
-        assert!(under("/GroundPlane", None));
+    fn a_node_without_geometry_is_dropped() {
+        assert!(build_mesh(&Node::default()).is_none());
+        let mut node = triangle();
+        node.indices.clear();
+        assert!(build_mesh(&node).is_none());
     }
 
-    fn stage_with(metadata: &str) -> Stage {
-        let stage = Stage::builder().in_memory("conv.usda").unwrap();
-        let id = stage.root_layer().identifier().to_string();
-        let mut layer = stage.layer_mut(&id).unwrap();
-        layer
-            .edit(|edit| {
-                let mut root = edit.pseudo_root_mut()?;
-                if metadata.contains('Y') {
-                    root.set("upAxis", openusd::sdf::Value::token("Y"));
-                }
-                if let Some(m) = metadata.strip_prefix("m=") {
-                    root.set(
-                        "metersPerUnit",
-                        openusd::sdf::Value::Double(m.parse().unwrap()),
-                    );
-                }
-                Ok(())
-            })
-            .unwrap();
-        drop(layer);
-        stage
-    }
-
-    /// A Y-up asset has to be stood up into Arena's Z-up world.
-    #[test]
-    fn a_y_up_stage_is_rotated_onto_z_up() {
-        let up = convention(&stage_with("Y")).rotation * Vec3::Y;
-        assert!(
-            up.abs_diff_eq(Vec3::Z, 1e-5),
-            "asset +Y maps to +Z, got {up}"
-        );
-    }
-
-    /// The common case, and the one Arena's own generated USDs land in by
-    /// authoring no stage metadata at all.
-    #[test]
-    fn an_unauthored_or_z_up_stage_is_left_alone() {
-        assert_eq!(convention(&stage_with("")).rotation, Quat::IDENTITY);
-        assert_eq!(convention(&stage_with("")).scale, Vec3::ONE);
-    }
-
-    /// A centimetre stage placed without its scale would be 100x too big.
-    #[test]
-    fn meters_per_unit_becomes_a_uniform_scale() {
-        assert_eq!(convention(&stage_with("m=0.01")).scale, Vec3::splat(0.01));
-    }
-
-    /// The whole draw path minus the window: open a real mirrored asset,
-    /// project it, and check the world got renderable geometry whose texture
-    /// resolves to a file that is actually there.
+    /// The whole draw path minus the window: decode a real packed scene, build
+    /// every mesh and material, and check the result is renderable — geometry
+    /// present, and every texture path pointing at a file that exists.
     ///
-    /// Ignored because it needs the asset cache `arena-resolve-layout`
-    /// populates; run that on `environments/tasks/banana_in_bowl.yaml` first.
+    /// Ignored because it needs a payload to read. Make one first:
+    /// `arena-resolve-layout <spec>.yaml --payload scene.msgpack`, then
+    /// `ARENA_COMPOSER_PAYLOAD=scene.msgpack cargo test -- --ignored`.
     #[test]
-    #[ignore = "needs a mirrored asset in the arena-composer cache"]
-    fn a_real_asset_projects_with_a_resolvable_texture() {
-        use bevy::asset::{AssetPlugin, UnapprovedPathMode};
-        use bevy::image::Image;
+    #[ignore = "needs a payload from arena-resolve-layout --payload"]
+    fn a_real_payload_builds_renderable_geometry() {
+        use crate::scene::Scene;
 
-        let cache = std::env::var("ARENA_COMPOSER_ASSET_CACHE").unwrap_or_else(|_| {
-            format!(
-                "{}/.cache/arena-composer/usd",
-                std::env::var("HOME").unwrap()
-            )
-        });
-        let entry = PathBuf::from(cache)
-            .join("Assets/Isaac/6.0/Isaac/IsaacLab/Arena/assets/object_library")
-            .join("srl_robolab_assets/objects/ycb/banana.usd");
-        assert!(
-            entry.is_file(),
-            "populate the cache first: arena-resolve-layout environments/tasks/banana_in_bowl.yaml"
-        );
+        let path = std::env::var("ARENA_COMPOSER_PAYLOAD")
+            .unwrap_or_else(|_| "../scene.msgpack".to_string());
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("{path}: {e} — run arena-resolve-layout --payload first"));
+        let scene = Scene::from_msgpack(&bytes).expect("decoding the payload");
 
-        // Enough of an app for the routes to have somewhere to put their
-        // bakes; no window, no renderer.
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            AssetPlugin {
-                unapproved_path_mode: UnapprovedPathMode::Allow,
+            bevy::asset::AssetPlugin {
+                unapproved_path_mode: bevy::asset::UnapprovedPathMode::Allow,
                 ..default()
             },
         ))
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
-        .init_asset::<Image>()
-        .insert_resource(crate::material::registry())
-        .add_plugins(usd_bevy::UsdPlugin);
+        .init_asset::<Image>();
 
-        let stage = Stage::open(entry.to_str().unwrap()).expect("opening the asset");
-        let placement = app.world_mut().spawn(Transform::default()).id();
-        spawn_asset(app.world_mut(), &stage, placement);
+        let mut drawn = 0;
+        for asset in &scene.assets {
+            let nodes = scene.geometry_of(asset);
+            if nodes.is_empty() {
+                continue;
+            }
+            let placement = app.world_mut().spawn(asset.transform()).id();
+            spawn_geometry(app.world_mut(), nodes, placement);
+            drawn += 1;
+        }
+        assert!(drawn > 0, "the payload placed nothing");
 
         let world = app.world_mut();
-        let meshes = world
-            .query_filtered::<Entity, With<Mesh3d>>()
+        let meshes: Vec<_> = world
+            .query::<&Mesh3d>()
             .iter(world)
-            .count();
-        assert!(meshes > 0, "projecting the asset produced no `Mesh3d`");
-
-        // Every texture the material kept must point at a real file — the USD
-        // authors them relative to its own directory, not Bevy's asset root.
-        let handles: Vec<_> = world
-            .query::<&MeshMaterial3d<StandardMaterial>>()
-            .iter(world)
-            .map(|m| m.0.clone())
+            .map(|mesh| mesh.0.clone())
             .collect();
-        let server = world.resource::<AssetServer>().clone();
-        let materials = world.resource::<Assets<StandardMaterial>>();
-        let mut checked = 0;
-        for texture in handles
+        let triangles: usize = {
+            let assets = world.resource::<Assets<Mesh>>();
+            meshes
+                .iter()
+                .filter_map(|handle| assets.get(handle))
+                .filter_map(|mesh| mesh.indices())
+                .map(|indices| indices.len() / 3)
+                .sum()
+        };
+        assert!(triangles > 0, "meshes uploaded but carry no triangles");
+
+        // Guards the optional-blob wiring: if `Option<Vec<u8>>` silently
+        // decoded as `None`, every mesh would fall back to computed normals
+        // and lose its UVs, and nothing else here would notice.
+        let nodes: Vec<_> = scene
+            .assets
             .iter()
-            .filter_map(|h| materials.get(h))
-            .filter_map(|m| m.base_color_texture.as_ref())
-        {
-            let path = server.get_path(texture.id()).expect("a texture path");
-            assert!(path.path().is_file(), "unresolved texture {path:?}");
-            checked += 1;
+            .flat_map(|asset| scene.geometry_of(asset))
+            .collect();
+        assert!(
+            nodes.iter().filter(|node| node.normals.is_some()).count() > nodes.len() / 2,
+            "most nodes should carry authored normals"
+        );
+        assert!(
+            nodes.iter().any(|node| node.uvs.is_some()),
+            "no node carried texture coordinates"
+        );
+
+        // Python drops texture paths that do not resolve, so anything that
+        // arrived here must be loadable.
+        let mut textures = 0;
+        for asset in &scene.assets {
+            for node in scene.geometry_of(asset) {
+                for path in node.textures.values() {
+                    assert!(
+                        std::path::Path::new(path).is_file(),
+                        "payload carries an unresolved texture: {path}"
+                    );
+                    textures += 1;
+                }
+            }
         }
-        assert!(checked > 0, "the banana lost its texture binding entirely");
+        println!(
+            "{drawn} assets, {} meshes, {triangles} triangles, {textures} textures",
+            meshes.len()
+        );
+    }
+
+    /// Transparency has to reach the alpha mode, or a translucent surface
+    /// draws as an opaque one.
+    #[test]
+    fn opacity_selects_the_alpha_mode() {
+        // Enough of an app to hold assets and hand out a server; no renderer.
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>();
+
+        let mut node = triangle();
+        node.opacity = 0.5;
+        node.double_sided = true;
+        let handle = build_material(&node, app.world_mut());
+
+        let materials = app.world().resource::<Assets<StandardMaterial>>();
+        let material = materials.get(&handle).expect("the material was added");
+        assert!(matches!(material.alpha_mode, AlphaMode::Blend));
+        assert_eq!(material.base_color.alpha(), 0.5);
+        assert!(material.double_sided && material.cull_mode.is_none());
     }
 }
