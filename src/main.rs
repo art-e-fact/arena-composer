@@ -13,6 +13,9 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("usage: arena-viewer <scene.msgpack>");
     };
     let scene = Scene::from_msgpack(&std::fs::read(&path)?)?;
-    arena_composer::viewer::run(scene);
+    // Nothing sends this one a second scene. The sender is held anyway, since
+    // dropping it would read as "no more scenes" and close the window.
+    let (_sender, updates) = std::sync::mpsc::channel();
+    arena_composer::viewer::run(scene, updates);
     Ok(())
 }

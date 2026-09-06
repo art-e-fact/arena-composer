@@ -9,6 +9,7 @@
 pub mod scene;
 pub mod spawn;
 pub mod viewer;
+pub mod wire;
 
 #[cfg(feature = "python")]
 mod python;
