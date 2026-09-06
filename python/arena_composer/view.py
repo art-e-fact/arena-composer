@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import signal
 import sys
 from pathlib import Path
 
@@ -75,6 +76,21 @@ async def _run_viewer(payload: bytes) -> int:
         viewer_process.__name__,
         stdin=asyncio.subprocess.PIPE,
     )
+
+    def stop() -> None:
+        """Close the window. Safe once it has closed itself."""
+        if proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.terminate()
+
+    # Signalling this process alone would strand the window: Arena installs a
+    # SIGINT handler here, so asyncio never sees a KeyboardInterrupt, and a
+    # default SIGTERM would kill us before `finally` runs. A terminal's Ctrl-C
+    # reaches the child too; a `kill` at this process does not.
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop)
+
     try:
         assert proc.stdin is not None
         proc.stdin.write(viewer_process.pack_frame(payload))
@@ -82,11 +98,7 @@ async def _run_viewer(payload: bytes) -> int:
         # Left open on purpose: later scenes go down the same pipe.
         return await proc.wait()
     finally:
-        # Reached on Ctrl-C or a failure beside us, where the window would
-        # otherwise outlive the process that owns it.
-        if proc.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                proc.terminate()
+        stop()
 
 
 async def _watch(spec: Path, interval: float = WATCH_INTERVAL) -> None:
