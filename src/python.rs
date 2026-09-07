@@ -1,10 +1,15 @@
 //! PyO3 wrapper. Deliberately thin: Python's job is to resolve layouts and read
 //! the USD, this crate's job is to draw what comes out, and the packed payload
-//! is the whole contract between them — the same one `arena-viewer` reads off
-//! disk.
+//! is the whole contract between them — the same one `arena-viewer` and
+//! `arena-render` read off disk.
+
+use std::path::PathBuf;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+use crate::layout::View;
+use crate::scene::Scene;
 
 /// Draw the scenes arriving on stdin, blocking until the window is closed.
 ///
@@ -32,6 +37,32 @@ fn run_viewer_stdin(py: Python<'_>) -> PyResult<()> {
     Ok(())
 }
 
+/// Draw one packed scene from each named view, writing a PNG per `shots` entry.
+///
+/// `shots` pairs a view name — `default`, `top`, `front` or `side` — with the
+/// file to write. Blocks until every image is on disk, then returns; there is
+/// no window, so this needs no display server. Like the viewer it must own the
+/// process: run it in a child (`arena_composer.render`), not in a server.
+#[pyfunction]
+#[pyo3(signature = (payload, shots, width, height))]
+fn render_scene(
+    py: Python<'_>,
+    payload: &[u8],
+    shots: Vec<(String, PathBuf)>,
+    width: u32,
+    height: u32,
+) -> PyResult<()> {
+    let scene = Scene::from_msgpack(payload).map_err(|e| PyValueError::new_err(format!("{e:#}")))?;
+    let shots = shots
+        .into_iter()
+        .map(|(view, path)| Ok((view.parse::<View>().map_err(PyValueError::new_err)?, path)))
+        .collect::<PyResult<Vec<_>>>()?;
+
+    // Nothing below touches the interpreter, and a render takes seconds.
+    py.detach(|| crate::render::run(scene, shots, width, height));
+    Ok(())
+}
+
 /// The extension module is `arena_composer._core`. PyO3 takes the init symbol
 /// from this function's name, so it has to match the last component of
 /// `module-name` in `pyproject.toml`.
@@ -39,5 +70,6 @@ fn run_viewer_stdin(py: Python<'_>) -> PyResult<()> {
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(run_viewer_stdin, m)?)?;
+    m.add_function(wrap_pyfunction!(render_scene, m)?)?;
     Ok(())
 }

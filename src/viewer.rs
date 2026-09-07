@@ -12,8 +12,8 @@ use bevy::asset::{AssetPlugin, UnapprovedPathMode};
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::scene::{Asset, Scene, arena_to_bevy};
-use crate::spawn::spawn_geometry;
+use crate::layout::{ArenaRoot, View, ambient, framing, spawn_lighting, spawn_scene};
+use crate::scene::Scene;
 
 /// The scene the app was launched with, kept so `setup` can read it.
 #[derive(Resource)]
@@ -23,15 +23,6 @@ struct ResolvedScene(Scene);
 /// be `Sync` and a `Receiver` is not.
 #[derive(Resource)]
 struct SceneUpdates(Mutex<Receiver<Scene>>);
-
-/// Parent of everything in the layout; holds the Z-up → Y-up correction so
-/// every asset below it keeps the pose the solver reported, unaltered.
-#[derive(Component)]
-pub struct ArenaRoot;
-
-/// The spec node a placement came from.
-#[derive(Component)]
-pub struct AssetId(pub String);
 
 /// The status line, marked so a reload can rewrite it.
 #[derive(Component)]
@@ -71,51 +62,9 @@ fn setup(world: &mut World) {
         .expect("a scene to open the window on")
         .0;
     spawn_scene(world, &scene);
-
-    // Arena builds the env with a dome light when neither the spec nor the
-    // background USD supplies one. This only stands in for that injected light;
-    // lights authored inside an asset are not extracted. It lights whatever is
-    // drawn, so a reload leaves it alone.
-    if scene.lighting.auto_injected_dome_light {
-        world.spawn((
-            DirectionalLight {
-                illuminance: 6_000.0,
-                ..default()
-            },
-            Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.6), Vec3::Y),
-        ));
-    }
-
+    spawn_lighting(world, &scene);
     spawn_camera(world, &scene);
     spawn_hud(world, &scene);
-}
-
-/// Spawn a layout under a fresh [`ArenaRoot`] and return it.
-fn spawn_scene(world: &mut World, scene: &Scene) -> Entity {
-    let root = world
-        .spawn((
-            ArenaRoot,
-            Transform::from_rotation(arena_to_bevy()),
-            Visibility::default(),
-        ))
-        .id();
-
-    for asset in &scene.assets {
-        let nodes = scene.geometry_of(asset);
-        if nodes.is_empty() {
-            continue;
-        }
-        let placement = world
-            .spawn((
-                AssetId(asset.id.clone()),
-                asset.transform(),
-                Visibility::default(),
-                ChildOf(root),
-            ))
-            .id();
-        spawn_geometry(world, nodes, placement);
-    }
-    root
 }
 
 /// Draw the newest scene that has arrived, and close the window once no more
@@ -170,77 +119,19 @@ fn apply_updates(world: &mut World) {
 }
 
 fn spawn_camera(world: &mut World, scene: &Scene) {
-    let (eye, focus) = framing(scene);
+    let framed = framing(View::Default, scene);
     world.spawn((
         Camera3d::default(),
-        Transform::from_translation(eye).looking_at(focus, Vec3::Y),
+        framed.transform,
+        framed.projection,
         // Radius, yaw and pitch are left unset so the controller derives them
         // from the transform above.
-        PanOrbitCamera { focus, ..default() },
-        // Per-camera in Bevy 0.19, not a resource. Lifts the shadowed side of
-        // an asset enough to read its silhouette.
-        AmbientLight {
-            brightness: 400.0,
+        PanOrbitCamera {
+            focus: framed.focus,
             ..default()
         },
+        ambient(),
     ));
-}
-
-/// Where to put the camera, in Bevy's frame: the background's suggestion when
-/// it has one, else a three-quarter view framing every asset's bounds.
-fn framing(scene: &Scene) -> (Vec3, Vec3) {
-    let to_bevy = arena_to_bevy();
-    if let Some(viewer) = &scene.viewer {
-        return (
-            to_bevy * Vec3::from(viewer.eye),
-            to_bevy * Vec3::from(viewer.lookat),
-        );
-    }
-    let Some((min, max)) = bounds(scene) else {
-        return (Vec3::new(2.0, 1.5, 2.0), Vec3::ZERO);
-    };
-    let focus = (min + max) / 2.0;
-    // 1.6x the diagonal keeps the whole layout inside a default 45° FOV with
-    // room to spare, and never collapses onto a single-point scene.
-    let distance = (max - min).length().max(0.5) * 1.6;
-    (
-        focus + Vec3::new(0.7, 0.55, 1.0).normalize() * distance,
-        focus,
-    )
-}
-
-/// The layout's world-space bounds in Bevy's frame, from the local bounding
-/// boxes the resolver reported.
-fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
-    let to_bevy = arena_to_bevy();
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    let mut any = false;
-    for asset in scene
-        .assets
-        .iter()
-        .filter(|asset| !scene.geometry_of(asset).is_empty())
-    {
-        for corner in corners(asset) {
-            let point = to_bevy * asset.transform().transform_point(corner);
-            min = min.min(point);
-            max = max.max(point);
-            any = true;
-        }
-    }
-    any.then_some((min, max))
-}
-
-/// The eight corners of an asset's local bounding box.
-fn corners(asset: &Asset) -> impl Iterator<Item = Vec3> {
-    let (lo, hi) = (Vec3::from(asset.bbox_min), Vec3::from(asset.bbox_max));
-    (0..8).map(move |i| {
-        Vec3::new(
-            if i & 1 == 0 { lo.x } else { hi.x },
-            if i & 2 == 0 { lo.y } else { hi.y },
-            if i & 4 == 0 { lo.z } else { hi.z },
-        )
-    })
 }
 
 fn spawn_hud(world: &mut World, scene: &Scene) {
@@ -275,38 +166,24 @@ fn hud_line(scene: &Scene) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // `Node` is Bevy's UI node in this module's scope; the payload's is the
-    // geometry one.
-    use crate::scene::Node as GeometryNode;
+    use crate::layout::AssetId;
+    use crate::scene::{Asset, Node as GeometryNode};
 
-    /// One asset at `position` with the given local bounds. `drawable` decides
-    /// whether it points at a geometry entry — the node itself is degenerate,
-    /// since none of these tests upload a mesh.
-    fn scene(position: [f32; 3], bbox: ([f32; 3], [f32; 3]), drawable: bool) -> Scene {
+    /// One asset at `position`, pointing at a geometry entry. The node itself
+    /// is degenerate — no test here uploads a mesh.
+    fn scene(position: [f32; 3]) -> Scene {
         Scene {
             env_name: "t".into(),
             assets: vec![Asset {
                 id: "a".into(),
                 role: "object".into(),
                 position_xyz: position,
-                bbox_min: bbox.0,
-                bbox_max: bbox.1,
-                geometry: drawable.then_some(0),
+                geometry: Some(0),
                 ..default()
             }],
             geometries: vec![vec![GeometryNode::default()]],
             ..default()
         }
-    }
-
-    /// A 1 m cube sitting 1 m up in Arena's frame is 1 m up in Bevy's too,
-    /// and the camera looks at its centre rather than the world origin.
-    #[test]
-    fn framing_centres_on_the_layout() {
-        let scene = scene([0.0, 0.0, 1.0], ([-0.5; 3], [0.5; 3]), true);
-        let (eye, focus) = framing(&scene);
-        assert!(focus.abs_diff_eq(Vec3::Y, 1e-5), "focus {focus}");
-        assert!(eye.distance(focus) > 1.0, "camera sits off the subject");
     }
 
     /// The frame conversion, end to end: a pose the solver reports in Arena's
@@ -315,11 +192,7 @@ mod tests {
     fn a_solved_pose_lands_in_the_bevy_frame() {
         let mut app = App::new();
         app.add_plugins(bevy::transform::TransformPlugin)
-            .insert_resource(ResolvedScene(scene(
-                [1.0, 2.0, 3.0],
-                ([0.0; 3], [0.0; 3]),
-                true,
-            )))
+            .insert_resource(ResolvedScene(scene([1.0, 2.0, 3.0])))
             .add_systems(Startup, setup);
         app.update();
 
@@ -347,11 +220,7 @@ mod tests {
         let (sender, updates) = std::sync::mpsc::channel();
         let mut app = App::new();
         app.add_plugins(bevy::transform::TransformPlugin)
-            .insert_resource(ResolvedScene(scene(
-                [1.0, 0.0, 0.0],
-                ([0.0; 3], [0.0; 3]),
-                true,
-            )))
+            .insert_resource(ResolvedScene(scene([1.0, 0.0, 0.0])))
             .insert_resource(SceneUpdates(Mutex::new(updates)))
             .add_systems(Startup, setup)
             .add_systems(Update, apply_updates);
@@ -365,7 +234,7 @@ mod tests {
             .expect("a camera at startup");
 
         sender
-            .send(scene([0.0, 0.0, 5.0], ([0.0; 3], [0.0; 3]), true))
+            .send(scene([0.0, 0.0, 5.0]))
             .expect("the viewer still listening");
         app.update();
 
@@ -390,13 +259,5 @@ mod tests {
             .iter(world)
             .collect();
         assert_eq!(cameras, vec![camera], "the camera was rebuilt");
-    }
-
-    /// An asset with nothing to draw must not drag the framing towards the
-    /// origin — an empty scene falls back to a fixed view instead.
-    #[test]
-    fn undrawable_assets_are_left_out_of_the_bounds() {
-        let scene = scene([10.0; 3], ([0.0; 3], [1.0; 3]), false);
-        assert!(bounds(&scene).is_none());
     }
 }
