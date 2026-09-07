@@ -24,13 +24,15 @@ import signal
 import sys
 from pathlib import Path
 
+import yaml
+
 from arena_composer import viewer_process
 from arena_composer.payload import encode
 from arena_composer.resolve_layout import DEFAULT_SEED, resolve_layout_from_yaml
 from arena_composer.usd_assets import use_local_asset_cache
 
-# The spec is a single file, so it is polled rather than watched through
-# inotify: one stat twice a second costs nothing and adds no dependency.
+# A spec is one or two small files, so they are polled rather than watched
+# through inotify: two stats twice a second cost nothing and add no dependency.
 WATCH_INTERVAL = 0.5
 # An editor writes a file in bursts, and a spec caught mid-write does not parse.
 # Resolve once it has held still this long.
@@ -108,14 +110,15 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
 
 
 async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
-    """Re-resolve `spec` on every write to it and draw what comes out."""
-    stamp = _mtime(spec)
+    """Re-resolve `spec` on every write to it, or to the scene it includes, and
+    draw what comes out."""
+    stamps = _watched(spec)
     while True:
         await asyncio.sleep(WATCH_INTERVAL)
-        if _mtime(spec) == stamp:
+        if _watched(spec) == stamps:
             continue
         await asyncio.sleep(SETTLE)
-        stamp = _mtime(spec)
+        stamps = _watched(spec)
 
         try:
             # Off this thread: a resolve takes seconds, and the loop has to
@@ -132,6 +135,19 @@ async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Proc
             return  # the window closed while we were resolving
         await _send(proc, payload)
         print(f"{spec}: reloaded", file=sys.stderr)
+
+
+def _watched(spec: Path) -> dict[Path, int | None]:
+    """`spec` and the file its top-level `external_yaml` includes, each with its
+    modification time. Re-read every poll, so pointing the include at another
+    scene is itself a change — and so is that scene's own arrival."""
+    paths = [spec]
+    # Missing, half-written or not a mapping: watch the spec alone until it parses again.
+    with contextlib.suppress(Exception):
+        include = yaml.safe_load(spec.read_text()).get("external_yaml")
+        if include:
+            paths.append((spec.parent / include).resolve())
+    return {path: _mtime(path) for path in paths}
 
 
 def _mtime(path: Path) -> int | None:
