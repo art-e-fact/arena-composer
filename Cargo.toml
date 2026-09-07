@@ -18,7 +18,8 @@ name = "arena-viewer"
 path = "src/main.rs"
 
 [dependencies]
-bevy = "0.19.1"
+# USD supports jpg textures.
+bevy = { version = "0.19.1", features = ["jpeg"] }
 # Bevy 0.19's built-in camera controllers are free-fly and pan only; a viewer
 # wants orbit. Same crate and version the sibling projects pin.
 bevy_panorbit_camera = "0.35.0"
