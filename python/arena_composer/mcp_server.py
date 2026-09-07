@@ -230,6 +230,10 @@ async def render_views(
     Takes seconds, and images are expensive to read — ask for the views that
     answer the question, not all four.
 
+    A render that logs an error fails rather than returning the picture, since
+    an asset that did not load leaves its object out of a frame that otherwise
+    looks right. That message is the renderer's, and is not about the spec.
+
     Args:
         spec: Path to the task or scene YAML.
         views: Which views to draw. Defaults to top and front.

@@ -11,6 +11,7 @@ the reasons given there.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -30,7 +31,8 @@ VIEWS = ("default", "top", "front", "side")
 DEFAULT_SIZE = 768
 
 #: Bevy logs its adapter, its diagnostics and every screenshot it writes. Only
-#: the tail is worth quoting back when a render fails.
+#: the tail is worth quoting back when a render fails, and only the first few
+#: errors when it draws the wrong thing.
 _ERROR_LINES = 20
 
 
@@ -72,9 +74,28 @@ def render(
         input=payload,
         capture_output=True,
         check=False,
+        # Bevy colours its log unless this is set, and the reader here is a
+        # pipe, not a terminal.
+        env={**os.environ, "NO_COLOR": "1"},
     )
+    stderr = result.stderr.decode(errors="replace")
 
     if missing := [path.name for path in paths if not path.exists()]:
-        tail = "\n".join(result.stderr.decode(errors="replace").splitlines()[-_ERROR_LINES:])
+        tail = "\n".join(stderr.splitlines()[-_ERROR_LINES:])
         raise RuntimeError(f"render wrote no {', '.join(missing)} (exit {result.returncode})\n{tail}")
+    # Bevy draws the rest of the scene around what it could not load and writes
+    # the picture anyway, so a failure at this point looks like a good render of
+    # a scene missing an object. Returning that image would answer "did my edit
+    # land" with a no that isn't true.
+    if errors := logged_errors(stderr):
+        raise RuntimeError("render logged {} error(s):\n{}".format(len(errors), "\n".join(errors[:_ERROR_LINES])))
     return paths
+
+
+def logged_errors(stderr: str) -> list[str]:
+    """The ERROR lines out of a render's log.
+
+    Bevy's format puts the level second, after the timestamp; matching the field
+    rather than the text keeps a message that merely mentions an error out.
+    """
+    return [line for line in stderr.splitlines() if line.split(maxsplit=2)[1:2] == ["ERROR"]]

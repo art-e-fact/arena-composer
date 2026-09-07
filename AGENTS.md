@@ -55,6 +55,10 @@ No window and no display server: Bevy runs headless with `synchronous_pipeline_c
 without which the first frames come back empty because the shaders are still compiling. That
 is what lets the MCP server show a layout without holding a GPU open between calls.
 
+An asset Bevy cannot load does not stop it drawing — it writes the picture around the gap, so a
+failed load arrives as a good-looking frame with an object missing from it. `render.render` treats
+any `ERROR` line on the child's stderr as a failed render and raises rather than return that image.
+
 The views are `default` (perspective, framed like the window) plus `top`, `front` and `side`.
 The axis views are **orthographic**, because the questions they answer — does this rest on the
 table, do these two overlap — have no stable answer under perspective.

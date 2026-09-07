@@ -7,6 +7,7 @@ the bottom, which needs a packed scene and a working adapter and so is opt-in.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,25 @@ def test_a_stale_image_is_not_passed_off_as_a_fresh_one(tmp_path: Path):
     with pytest.raises(RuntimeError):
         render.render(b"", tmp_path, ["top"])
     assert not (tmp_path / "top.png").exists()
+
+
+def test_an_error_in_the_log_fails_the_render_that_wrote_a_picture(tmp_path: Path, monkeypatch):
+    """Bevy draws the scene around an asset it could not load and writes the
+    image anyway, so the failure arrives as a good-looking frame with an object
+    missing from it. Only the log says which of those it is."""
+    log = (
+        b"2026-09-07T15:53:02.256096Z  INFO bevy_winit::system: Creating new window\n"
+        b"2026-09-07T15:53:02.268252Z ERROR bevy_asset::server: "
+        b"Failed to load asset 'apple_01.jpg': invalid image extension: jpg\n"
+    )
+
+    def drew_it_anyway(argv, **kwargs):
+        (tmp_path / "top.png").write_bytes(b"a scene without its apple")
+        return subprocess.CompletedProcess(argv, 0, b"", log)
+
+    monkeypatch.setattr(render.subprocess, "run", drew_it_anyway)
+    with pytest.raises(RuntimeError, match="apple_01.jpg"):
+        render.render(b"a payload", tmp_path, ["top"])
 
 
 @pytest.mark.skipif(not PAYLOAD, reason="needs ARENA_COMPOSER_PAYLOAD and a GPU")
