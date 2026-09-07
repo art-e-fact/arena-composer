@@ -12,11 +12,17 @@ dependencies = [
     "isaaclab_arena",
     "msgpack>=1.1",
     "numpy",
+    # The MCP server (arena_composer.mcp_server).
+    "mcp>=2",
+    # Round-trip YAML: the stock dumper drops comments and key order, and a
+    # spec an agent edits has to stay a file a human still wants to read.
+    "ruamel.yaml>=0.18",
 ]
 
 [project.scripts]
 arena-resolve-layout = "arena_composer.resolve_layout:main"
 arena-view = "arena_composer.view:main"
+arena-mcp = "arena_composer.mcp_server:main"
 
 [tool.maturin]
 features = ["extension-module"]
