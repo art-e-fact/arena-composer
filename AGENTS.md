@@ -1,7 +1,18 @@
-# The payload
+# arena_composer
 
-The MessagePack payload that `arena_composer.payload` packs is the whole contract between the Python
-side (`python/`) and the Bevy viewer (`src/`). Both ends change together.
+A mixed maturin project: Python under `python/`, Rust under `src/`, one package. **Python owns
+everything that needs OpenUSD** — Arena's registries and placement solver, plus reading the assets'
+geometry and materials. **Rust owns Bevy** and opens no USD at all. The contract between them is the
+MessagePack payload described below; both ends change together. This is meant to become its own
+project, so its documentation lives here rather than at the repo root.
+
+Also read
+[python/arena_composer/usd/AGENTS.md](python/arena_composer/usd/AGENTS.md) — how assets are read into
+the payload, and what currently doesn't render.
+
+Commands below run from the repo root, where `source setup.sh` leaves you.
+
+## The payload
 
 MessagePack rather than JSON, because the geometry is megabytes of float arrays: JSON spends ~760 ms
 formatting them as decimal text against ~2 ms for `bin` blobs. Arrays travel as little-endian
@@ -22,3 +33,85 @@ column-vector ones). Keep it that way — USD concepts do not belong under `src/
 Baking costs two things: a mesh repeated inside one asset is emitted twice (assets sharing a USD are
 still extracted only once), and nothing can move at runtime. Revisit both when the viewer needs to
 animate.
+
+## The two front ends
+
+Both draw the same payload, and neither imports the other.
+
+```bash
+arena-view environments/tasks/banana_in_bowl.yaml   # a window, for a person
+arena-mcp                                           # the MCP server, over stdio
+```
+
+`arena-view` draws in a child process (`arena_composer.viewer_process`): the window's event
+loop wants a main thread and never gives it back. The parent stays an asyncio program beside
+it, and it holds Arena — so when the spec (or the scene its `external_yaml` includes) changes
+it re-resolves and sends the result down the child's stdin, and the viewer swaps the layout
+without dropping the window or moving the camera. Closing that pipe closes the window.
+
+`arena_composer.render` draws a packed scene from named views and writes a PNG each, in a
+child process that exits when it is done (`arena_composer.render_process` → `src/render.rs`).
+No window and no display server: Bevy runs headless with `synchronous_pipeline_compilation`,
+without which the first frames come back empty because the shaders are still compiling. That
+is what lets the MCP server show a layout without holding a GPU open between calls.
+
+The views are `default` (perspective, framed like the window) plus `top`, `front` and `side`.
+The axis views are **orthographic**, because the questions they answer — does this rest on the
+table, do these two overlap — have no stable answer under perspective.
+
+## Iterating on the Rust side
+
+Much faster through a packed payload, which skips Arena's import, the solve and the USD reads:
+
+```bash
+arena-resolve-layout environments/tasks/banana_in_bowl.yaml --payload scene.msgpack
+cd arena_composer && cargo run --bin arena-viewer -- ../scene.msgpack
+```
+
+```bash
+cd arena_composer && cargo run --bin arena-render -- ../scene.msgpack top=top.png front=front.png
+```
+
+`--output` still writes the resolver's JSON dump. That stays the human- and agent-readable
+artifact; the payload is the renderer's, and carries a strict subset of its fields.
+
+## The MCP server
+
+`arena_composer.mcp_server` — tools for authoring specs, started by the client configs at the repo
+root. The server describes itself through its `INSTRUCTIONS` and tool docstrings; that is what a
+client shows the model, so document the tools there and nowhere else.
+
+What matters when changing this code:
+
+- **stdout is the protocol.** Arena and the solver report progress with `print`, and one
+  `[placement] Validated ...` line in the stream stops the client parsing the message it lands
+  in. Every tool does its work inside `_quiet()`. The SDK's own file-descriptor diversion does
+  not cover it — this is tested, not assumed.
+- **No session.** Every tool takes a spec path and leaves its result on disk, so an
+  `arena-view` window open on the same spec redraws itself as the agent works.
+- **Failures are return values**, `{"ok": false, "errors": [...]}`, not exceptions. A spec an
+  agent got wrong is the normal case, and the errors are the repair loop.
+- `arena_composer.spec_edit` writes with `ruamel.yaml` so comments and key order survive, and
+  validates by **reading the text back with PyYAML** — the reader Arena uses. The two
+  disagree: PyYAML is YAML 1.1, where a bare `on` is the boolean true, so the `on` relation
+  kind has to go out quoted. Validating the in-memory documents would not catch that.
+
+## Tests
+
+```bash
+pytest arena_composer/tests
+```
+
+```bash
+cd arena_composer && cargo test
+```
+
+`cargo test` covers the payload decode, mesh/material building and the frame conventions, and needs
+no fixtures. `pytest` covers the spec edits against the real validator, and the render path as far
+as it goes without a GPU. Both suites have tests that need a real packed scene and are opt-in:
+
+```bash
+arena-resolve-layout environments/tasks/droid_banana_on_plate_maple_table.yaml --payload scene.msgpack
+cd arena_composer && ARENA_COMPOSER_PAYLOAD=../scene.msgpack cargo test -- --ignored
+ARENA_COMPOSER_PAYLOAD=scene.msgpack pytest arena_composer/tests
+```

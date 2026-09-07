@@ -1,7 +1,7 @@
 # USD extraction
 
 Reads asset geometry and materials into the payload's frame — Z-up, metres, transforms baked into the
-vertex positions. See [the payload contract](../../../AGENTS.md).
+vertex positions. See [the payload contract](../../../AGENTS.md#the-payload).
 
 `extract.py` draws only the stage's **default prim** subtree, which is what Isaac Lab composes in when
 it spawns an asset; Kit-authored assets park viewport cameras, render settings and outsized collision
