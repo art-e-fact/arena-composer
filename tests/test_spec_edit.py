@@ -231,3 +231,18 @@ def test_a_path_that_isnt_there_is_refused(spec: Path):
     assert not result.ok
     assert "relations.99" in result.errors[0]
     assert (spec.read_text(), scene_of(spec).read_text()) == before
+
+
+def test_a_whole_entry_is_written_in_a_settled_key_order(spec: Path):
+    """Changing a relation's kind replaces the entry, because the old kind's
+    parameters mean nothing to the new one and whether there is a `reference`
+    at all is the kind's to say. The entry arrives over MessagePack, where a
+    mapping carries no order, so the written keys get a fixed one rather than
+    a fresh one on every edit."""
+    entry = {"params": {"side": "positive_y"}, "subject": "banana", "kind": "next_to", "reference": TABLE}
+    assert spec_edit.apply(spec, "set", ["relations", 1], entry).ok
+
+    # PyYAML builds a dict in document order, so this is the written order.
+    written = yaml.safe_load(scene_of(spec).read_text())["relations"][1]
+    assert written == entry
+    assert list(written) == ["kind", "subject", "reference", "params"]

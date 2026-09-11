@@ -10,19 +10,30 @@
 //! [`Vocabulary`] arrives in the payload carrying a [`Field`] per parameter,
 //! inferred from Arena's registries, so a relation somebody registers
 //! themselves gets a form without a change to this file.
+//!
+//! Every control that adds something picks from what the registries offer —
+//! an object from the asset list, a relation from a kind menu — so there is no
+//! "add now, fix the invalid parts after". What a menu writes is an entry
+//! Arena already accepts.
 
 use std::collections::HashMap;
 
+use bevy::ecs::template::EntityTemplate;
+use bevy::feathers::constants::{fonts, size};
+use bevy::feathers::containers::{subpane, subpane_body, subpane_header};
 use bevy::feathers::controls::{
     FeathersButton, FeathersMenu, FeathersMenuButton, FeathersMenuItem, FeathersMenuPopup,
-    FeathersNumberInput, NumberInputValue, UpdateNumberInput,
+    FeathersNumberInput, FeathersScrollbar, FeathersTextInput, FeathersTextInputContainer,
+    NumberInputValue, UpdateNumberInput,
 };
 use bevy::feathers::dark_theme::create_dark_theme;
+use bevy::feathers::font_styles::InheritableFont;
 use bevy::feathers::theme::{ThemeBackgroundColor, ThemedText, UiTheme};
-use bevy::feathers::{tokens, FeathersPlugins};
+use bevy::feathers::{FeathersPlugins, tokens};
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, ScrollArea, ValueChange};
+use bevy::text::{EditableText, FontWeight, TextEditChange};
+use bevy::ui_widgets::{Activate, ControlOrientation, ScrollArea, ValueChange};
 use bevy_panorbit_camera::PanOrbitCamera;
 
 use crate::scene::Scene as Payload;
@@ -30,7 +41,11 @@ use crate::spec::{Edit, Field, Kind, Params, Spec, Step, Value, Vocabulary};
 use crate::wire;
 
 /// How wide the panel is, and so where the viewport ends.
-pub const WIDTH: f32 = 340.0;
+pub const WIDTH: f32 = 380.0;
+
+/// How many assets the browser draws. It is not virtualised, and the search
+/// box is the way to a longer list's tail.
+const ASSET_ROWS: usize = 60;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(FeathersPlugins)
@@ -38,12 +53,14 @@ pub fn plugin(app: &mut App) {
         // bright fuchsia, so the theme is not optional.
         .insert_resource(UiTheme(create_dark_theme()))
         .init_resource::<Form>()
+        .init_resource::<Browser>()
         .add_systems(Startup, spawn_panel)
         .add_systems(
             Update,
             (
                 keep_the_camera_off_the_panel,
                 rebuild.run_if(needs_rebuild),
+                rebuild_browser.run_if(|browser: Res<Browser>| browser.dirty),
                 show_values,
             ),
         );
@@ -84,45 +101,166 @@ impl Form {
     }
 }
 
-/// The panel's scrolling body, whose children are the form.
+/// What the asset browser is filtered to. Its own resource, and its own
+/// subtree, because the search box has to survive the list being rebuilt
+/// under it.
+#[derive(Resource, Default)]
+struct Browser {
+    query: String,
+    dirty: bool,
+}
+
+/// The form's scrolling body, whose children are the groups.
 #[derive(Component)]
 struct FormBody;
 
-fn spawn_panel(mut commands: Commands) {
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(0),
-            right: px(0),
-            bottom: px(0),
-            width: px(WIDTH),
+/// The asset browser's scrolling body.
+#[derive(Component)]
+struct AssetList;
+
+fn spawn_panel(mut commands: Commands, assets: Res<AssetServer>) {
+    let (form_pane, _) = scroll_pane(&mut commands, FormBody);
+    let (list_pane, _) = scroll_pane(&mut commands, AssetList);
+
+    // The header and the search box are the browser's own children, spawned
+    // before the list so the list rebuilding never touches them.
+    let head = commands
+        .spawn(Node {
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(8)),
-            row_gap: px(6),
             ..default()
-        },
-        ThemeBackgroundColor(tokens::WINDOW_BG),
-        ScrollArea,
-        FormBody,
-    ));
+        })
+        .id();
+    commands
+        .entity(head)
+        .queue_spawn_related_scenes::<Children>(bsn_list! {
+            (subpane_header() Children [{text("assets")}, {dim("click one to add an object")}]),
+            (
+                @FeathersTextInputContainer
+                Node { margin: UiRect::all(px(4)) }
+                Children [(@FeathersTextInput on(narrow_the_asset_list))]
+            ),
+        });
+
+    let browser = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            height: percent(38),
+            min_height: px(0),
+            ..default()
+        })
+        .add_child(head)
+        .add_child(list_pane)
+        .id();
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(0),
+                right: px(0),
+                bottom: px(0),
+                width: px(WIDTH),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            ThemeBackgroundColor(tokens::WINDOW_BG),
+            // Bevy's built-in font is a subset of FiraMono without so much as
+            // a `·` in it. One inheritable font on the root is what gives the
+            // whole panel the glyphs its labels use.
+            InheritableFont {
+                font: assets.load(fonts::REGULAR),
+                font_size: size::COMPACT_FONT,
+                weight: FontWeight::NORMAL,
+            },
+        ))
+        .add_child(form_pane)
+        .add_child(browser);
+}
+
+/// A scrolling column with a scrollbar beside it: the pane to put in the
+/// layout, and the body to fill.
+fn scroll_pane(commands: &mut Commands, marker: impl Bundle) -> (Entity, Entity) {
+    let body = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: px(0),
+                flex_direction: FlexDirection::Column,
+                // `ScrollArea` only moves an axis that is set to scroll, and
+                // clipping the other keeps a long id inside the panel.
+                overflow: Overflow {
+                    x: OverflowAxis::Clip,
+                    y: OverflowAxis::Scroll,
+                },
+                padding: UiRect::all(px(6)),
+                row_gap: px(6),
+                ..default()
+            },
+            ScrollArea,
+            // Feathers propagates its font only through entities marked
+            // `ThemedText`; a plain layout node in between stops it, and the
+            // labels fall back to Bevy's built-in font.
+            ThemedText,
+            marker,
+        ))
+        .id();
+
+    let bar = commands
+        .spawn(Node {
+            width: px(9),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .id();
+    commands
+        .entity(bar)
+        .queue_spawn_related_scenes::<Children>(bsn_list! {
+            @FeathersScrollbar {
+                @target: {EntityTemplate::Entity(body)},
+                @orientation: ControlOrientation::Vertical,
+            }
+            Node { width: px(9), height: percent(100) }
+        });
+
+    let pane = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_height: px(0),
+                flex_direction: FlexDirection::Row,
+                ..default()
+            },
+            ThemedText,
+        ))
+        .add_child(body)
+        .add_child(bar)
+        .id();
+    (pane, body)
 }
 
 /// Rebuild only once the panel has stopped being typed into.
 ///
 /// A rebuild despawns every widget, which drops the caret and the half-typed
-/// value with it. Leaving `dirty` set means the rebuild lands the moment focus
-/// leaves — and while the user is typing, a stale form is the right one.
-fn needs_rebuild(form: Res<Form>, focus: Res<InputFocus>) -> bool {
-    form.dirty && focus.get().is_none()
+/// value with it. Leaving `dirty` set means the rebuild lands the moment the
+/// field is left — and while the user is typing, a stale form is the right one.
+///
+/// The test is for text entry specifically, not for focus at all: a menu hands
+/// focus back to the button that opened it, so "something in the panel has
+/// focus" is true after every dropdown and would wedge the form shut.
+fn needs_rebuild(form: Res<Form>, focus: Res<InputFocus>, editing: Query<(), With<EditableText>>) -> bool {
+    form.dirty && !focus.get().is_some_and(|entity| editing.contains(entity))
 }
 
 fn rebuild(
     mut commands: Commands,
     mut form: ResMut<Form>,
+    mut browser: ResMut<Browser>,
     body: Single<Entity, With<FormBody>>,
     scroll: Query<&ScrollPosition, With<FormBody>>,
 ) {
     form.dirty = false;
+    // The asset rows derive an id from what the spec already uses.
+    browser.dirty = true;
     let body = *body;
     // A full rebuild loses the scroll, which for a long spec is most of what
     // the user was looking at.
@@ -150,6 +288,7 @@ fn errors(form: &Form) -> Vec<Box<dyn SceneList>> {
             let text = message.clone();
             Box::new(bsn_list! {
                 Node { padding: UiRect::all(px(6)) }
+                ThemedText
                 ThemeBackgroundColor(tokens::WINDOW_BG)
                 Children [(Text({text}) ThemedText TextColor({Color::srgb(0.94, 0.51, 0.45)}))]
             }) as Box<dyn SceneList>
@@ -167,18 +306,24 @@ fn objects(form: &Form) -> Box<dyn SceneList> {
             let (id, name) = (node.id.clone(), node.registry_name.clone());
             let path = vec![Step::from("objects"), Step::from(index)];
             Box::new(bsn_list! {
-                Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center }
+                Node { flex_direction: FlexDirection::Column, min_width: px(0) }
+                ThemedText
                 Children [
-                    {text(id)},
-                    {dim(name)},
-                    {flex_spacer()},
-                    {remove_button(path)},
+                    (
+                        Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center }
+                        ThemedText
+                        Children [{text(id)}, {flex_spacer()}, {remove_button(path)}]
+                    ),
+                    (Node { padding: UiRect::left(px(8)) } ThemedText Children [{dim(name)}]),
                 ]
             }) as Box<dyn SceneList>
         })
         .collect();
 
-    group("objects", form.owner("objects"), rows, add_object_button(form))
+    // No add button: an object is a registered asset, and the browser below is
+    // where those are. Picking there is what makes "add" a decision rather
+    // than a surprise.
+    group("objects", form.owner("objects"), rows, dim("add from the asset list"))
 }
 
 fn relations(form: &Form) -> Box<dyn SceneList> {
@@ -191,40 +336,54 @@ fn relations(form: &Form) -> Box<dyn SceneList> {
         .map(|(index, relation)| {
             let path = vec![Step::from("relations"), Step::from(index)];
             let kind = form.vocabulary.relation(&relation.kind);
+            let reference = relation.reference.clone().unwrap_or_default();
 
-            let mut parts: Vec<Box<dyn SceneList>> = vec![
-                Box::new(bsn_list! {
-                    Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center }
-                    Children [
-                        {text(relation.kind.clone())},
-                        {dropdown(&ids, &relation.subject, with(&path, "subject"))},
-                        {flex_spacer()},
-                        {remove_button(path.clone())},
-                    ]
-                }),
-            ];
+            // Changing the kind rewrites the whole entry: the old kind's
+            // parameters mean nothing to the new one, and whether there is a
+            // `reference` at all is the kind's to say.
+            let mut parts: Vec<Box<dyn SceneList>> = vec![Box::new(bsn_list! {
+                Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center, min_width: px(0) }
+                ThemedText
+                Children [
+                    {menu(
+                        &relation.kind,
+                        kind_options(form, &relation.subject, &reference, &ids),
+                        set(path.clone()),
+                    )},
+                    {flex_spacer()},
+                    {remove_button(path.clone())},
+                ]
+            })];
+
+            let mut slots: Vec<Box<dyn SceneList>> =
+                vec![menu(&relation.subject, ids_options(&ids), set(with(&path, "subject")))];
             // A unary relation takes no reference, and Arena refuses one that
             // has it — so the slot is not drawn rather than validated.
             if kind.is_some_and(|kind| kind.unary == Some(false)) {
-                let current = relation.reference.clone().unwrap_or_default();
-                parts.push(Box::new(bsn_list! {
-                    Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center }
-                    Children [
-                        {text("on")},
-                        {dropdown(&ids, &current, with(&path, "reference"))},
-                    ]
-                }));
+                slots.push(dim("→"));
+                slots.push(menu(&reference, ids_options(&ids), set(with(&path, "reference"))));
             }
+            parts.push(Box::new(bsn_list! {
+                Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center, min_width: px(0), padding: UiRect::left(px(8)) }
+                ThemedText
+                Children [{slots}]
+            }));
             parts.extend(params(kind, &relation.params, &ids, with(&path, "params")));
 
             Box::new(bsn_list! {
-                Node { flex_direction: FlexDirection::Column, row_gap: px(3), padding: UiRect::all(px(4)) }
+                Node { flex_direction: FlexDirection::Column, row_gap: px(3), min_width: px(0) }
+                ThemedText
                 Children [{parts}]
             }) as Box<dyn SceneList>
         })
         .collect();
 
-    group("relations", form.owner("relations"), rows, add_relation_button(form))
+    let add = menu(
+        "+ relation",
+        kind_options(form, subject_default(form), &form.spec.background.id, &ids),
+        insert(vec![Step::from("relations")]),
+    );
+    group("relations", form.owner("relations"), rows, add)
 }
 
 /// A control per parameter the kind declares, in the order it declares them.
@@ -238,8 +397,9 @@ fn params(kind: Option<&Kind>, values: &Params, ids: &[&str], base: Vec<Step>) -
             let name = field.name.clone();
             let control = control(field, &value, ids, path);
             Box::new(bsn_list! {
-                Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center, padding: UiRect::left(px(10)) }
-                Children [{text(name)}, {flex_spacer()}, {control}]
+                Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center, min_width: px(0), padding: UiRect::left(px(8)) }
+                ThemedText
+                Children [{dim(name)}, {flex_spacer()}, {control}]
             }) as Box<dyn SceneList>
         })
         .collect()
@@ -251,10 +411,13 @@ fn params(kind: Option<&Kind>, values: &Params, ids: &[&str], base: Vec<Step>) -
 /// side draws as text instead of failing the payload to decode.
 fn control(field: &Field, value: &Value, ids: &[&str], path: Vec<Step>) -> Box<dyn SceneList> {
     match field.kind.as_str() {
-        "enum" => dropdown(&field.options.iter().map(String::as_str).collect::<Vec<_>>(), value.as_text().unwrap_or_default(), path),
-        "node_ref" => dropdown(ids, value.as_text().unwrap_or_default(), path),
+        "enum" => {
+            let options = field.options.iter().map(|option| (option.clone(), Value::text(option))).collect();
+            menu(value.as_text().unwrap_or_default(), options, set(path))
+        }
+        "node_ref" => menu(value.as_text().unwrap_or_default(), ids_options(ids), set(path)),
         "number" | "int" => number(value.as_number(), path),
-        _ => Box::new(bsn_list! { {dim(format!("{value:?}"))} }),
+        _ => dim(format!("{value:?}")),
     }
 }
 
@@ -262,7 +425,7 @@ fn number(value: Option<f64>, path: Vec<Step>) -> Box<dyn SceneList> {
     let send_to = path.clone();
     Box::new(bsn_list! {
         @FeathersNumberInput
-        Node { width: px(90) }
+        Node { width: px(90), flex_shrink: 0.0 }
         on({move |change: On<ValueChange<f32>>| {
             // Only on commit: the widget emits as the user types, and a keystroke
             // is not an edit worth a solve.
@@ -284,90 +447,195 @@ struct NumberSeed(Option<f64>);
 /// The widget is the display, the spec is the truth, and this is the one
 /// direction the widget cannot do for itself. It ignores an update while
 /// focused, so this is safe to run every frame.
-fn show_values(
-    mut commands: Commands,
-    seeds: Query<(Entity, &NumberSeed), Added<NumberSeed>>,
-) {
+fn show_values(mut commands: Commands, seeds: Query<(Entity, &NumberSeed), Added<NumberSeed>>) {
     for (entity, seed) in &seeds {
         if let Some(value) = seed.0 {
-            commands.trigger(UpdateNumberInput { entity, value: NumberInputValue::F32(value as f32) });
+            commands.trigger(UpdateNumberInput {
+                entity,
+                value: NumberInputValue::F32(value as f32),
+            });
         }
     }
 }
 
-/// A menu of `options`, showing `current`, writing the chosen one to `path`.
-fn dropdown(options: &[&str], current: &str, path: Vec<Step>) -> Box<dyn SceneList> {
-    let caption = if current.is_empty() { "—".to_owned() } else { current.to_owned() };
+/// A menu showing `caption`, writing the chosen option's value through `edit`.
+///
+/// The caption is a spawn-time prop that does not follow the selection, which
+/// is why it is given the current value and why a rebuild is what shows a new
+/// one.
+fn menu(
+    caption: &str,
+    options: Vec<(String, Value)>,
+    edit: impl Fn(Value) -> Edit + Clone + Send + Sync + 'static,
+) -> Box<dyn SceneList> {
+    let caption = if caption.is_empty() { "—".to_owned() } else { caption.to_owned() };
     let items: Vec<Box<dyn SceneList>> = options
-        .iter()
-        .map(|option| {
-            let (text, choice, path) = (option.to_string(), option.to_string(), path.clone());
+        .into_iter()
+        .map(|(label, value)| {
+            let edit = edit.clone();
             Box::new(bsn_list! {
-                @FeathersMenuItem { @caption: bsn! { Text({text}) ThemedText } }
-                on({move |_: On<Activate>| {
-                    send(Edit::Set { path: path.clone(), value: Value::Text(choice.clone()) });
-                }})
+                @FeathersMenuItem { @caption: bsn! { Text({label}) ThemedText } }
+                on(move |_: On<Activate>| send(edit(value.clone())))
             }) as Box<dyn SceneList>
         })
         .collect();
 
     Box::new(bsn_list! {
         @FeathersMenu
+        Node { flex_shrink: 1.0, min_width: px(0) }
         Children [
-            (@FeathersMenuButton { @caption: bsn! { Text({caption}) ThemedText } }),
+            (@FeathersMenuButton { @caption: bsn! { Text({caption}) ThemedText } }
+             Node { max_width: px(180), overflow: Overflow::clip() }),
             (@FeathersMenuPopup Children [{items}]),
         ]
     })
 }
 
-/// An added entry has to be one Arena already accepts, or the insert comes
-/// straight back as an error. So each of these picks defaults out of the spec
-/// and the catalogue; the row's own controls are how it becomes the object or
-/// relation the user actually wanted.
-fn add_object_button(form: &Form) -> Box<dyn SceneList> {
-    let taken: Vec<String> = form.spec.node_ids().iter().map(|id| id.to_string()).collect();
-    let registry_name = form
+/// Write the chosen value at `path`, and add it there.
+fn set(path: Vec<Step>) -> impl Fn(Value) -> Edit + Clone {
+    move |value| Edit::Set { path: path.clone(), value }
+}
+
+fn insert(path: Vec<Step>) -> impl Fn(Value) -> Edit + Clone {
+    move |value| Edit::Insert { path: path.clone(), value }
+}
+
+fn ids_options(ids: &[&str]) -> Vec<(String, Value)> {
+    ids.iter().map(|id| ((*id).to_owned(), Value::text(*id))).collect()
+}
+
+/// One whole relation entry per registered kind, each already valid: the
+/// kind's required parameters filled in, and a `reference` only where the kind
+/// takes one. Used both to change a relation's kind and to add one.
+fn kind_options(form: &Form, subject: &str, reference: &str, ids: &[&str]) -> Vec<(String, Value)> {
+    form.vocabulary
+        .relations
+        .iter()
+        .map(|kind| {
+            let mut pairs = vec![
+                ("kind", Value::text(&kind.name)),
+                ("subject", Value::text(subject)),
+            ];
+            if kind.unary == Some(false) {
+                pairs.push(("reference", Value::text(reference)));
+            }
+            pairs.push(("params", required_params(kind, ids)));
+            (kind.name.clone(), Value::map(pairs))
+        })
+        .collect()
+}
+
+/// The parameters the kind has no default for. Arena refuses an entry without
+/// them, so an added relation carries a placeholder the form then shows.
+fn required_params(kind: &Kind, ids: &[&str]) -> Value {
+    Value::map(kind.fields.iter().filter(|field| field.required).map(|field| {
+        let value = match field.kind.as_str() {
+            "enum" => field.options.first().map_or(Value::Null, Value::text),
+            "node_ref" => ids.first().map_or(Value::Null, |id| Value::text(*id)),
+            "number" | "int" => Value::Number(0.0),
+            "bool" => Value::Bool(false),
+            _ => Value::text(""),
+        };
+        (field.name.as_str(), value)
+    }))
+}
+
+/// What a new relation is about, before the user says otherwise: the object
+/// added last, since adding one is usually what prompts the relation.
+fn subject_default(form: &Form) -> &str {
+    form.spec
+        .objects
+        .last()
+        .map_or(form.spec.background.id.as_str(), |node| node.id.as_str())
+}
+
+// --- the asset browser ------------------------------------------------------
+
+fn narrow_the_asset_list(
+    change: On<TextEditChange>,
+    fields: Query<&EditableText>,
+    mut browser: ResMut<Browser>,
+) {
+    if let Ok(field) = fields.get(change.event_target()) {
+        let query = field.value().to_string();
+        if query != browser.query {
+            browser.query = query;
+            browser.dirty = true;
+        }
+    }
+}
+
+fn rebuild_browser(
+    mut commands: Commands,
+    mut browser: ResMut<Browser>,
+    form: Res<Form>,
+    list: Single<Entity, With<AssetList>>,
+) {
+    browser.dirty = false;
+    let terms: Vec<String> = browser.query.split_whitespace().map(str::to_lowercase).collect();
+    let found: Vec<&crate::spec::CatalogAsset> = form
         .vocabulary
         .assets
         .iter()
-        .find(|asset| asset.role == "object")
-        .map(|asset| asset.registry_name.clone())
-        .unwrap_or_default();
+        .filter(|asset| asset.role == "object" && matches(asset, &terms))
+        .collect();
 
-    button("+ object", move || {
-        let id = unused("object", &taken);
-        Edit::Insert {
-            path: vec![Step::from("objects")],
-            value: Value::map([
-                ("id", Value::text(id)),
-                ("registry_name", Value::text(registry_name.clone())),
-                ("params", Value::map([])),
-            ]),
-        }
+    let mut rows: Vec<Box<dyn SceneList>> = found
+        .iter()
+        .take(ASSET_ROWS)
+        .map(|asset| add_object_button(&asset.registry_name))
+        .collect();
+    if found.len() > ASSET_ROWS {
+        rows.push(dim(format!("{} of {} — narrow the search", ASSET_ROWS, found.len())));
+    } else if found.is_empty() {
+        rows.push(dim("no asset matches"));
+    }
+
+    commands.entity(*list).despawn_related::<Children>();
+    commands.entity(*list).queue_spawn_related_scenes::<Children>(rows);
+}
+
+/// Whether every whitespace-separated term appears in the name or a tag, the
+/// same test `arena_composer.catalog.search` makes.
+fn matches(asset: &crate::spec::CatalogAsset, terms: &[String]) -> bool {
+    let haystack = format!("{} {}", asset.registry_name, asset.tags.join(" ")).to_lowercase();
+    terms.iter().all(|term| haystack.contains(term))
+}
+
+/// An asset row. The id is worked out when it is clicked rather than when the
+/// row is drawn, so adding two of the same asset gives two ids and not one.
+fn add_object_button(registry_name: &str) -> Box<dyn SceneList> {
+    let registry_name = registry_name.to_owned();
+    let caption = registry_name.clone();
+    Box::new(bsn_list! {
+        @FeathersButton { @caption: bsn! { Text({caption}) ThemedText } }
+        Node { flex_shrink: 0.0 }
+        on({move |_: On<Activate>, form: Res<Form>| {
+            let id = unused(&registry_name, &form.spec.node_ids());
+            send(Edit::Insert {
+                path: vec![Step::from("objects")],
+                value: Value::map([
+                    ("id", Value::text(id)),
+                    ("registry_name", Value::text(&registry_name)),
+                    ("params", Value::map([])),
+                ]),
+            });
+        }})
     })
 }
 
-fn add_relation_button(form: &Form) -> Box<dyn SceneList> {
-    // `on` needs a reference, and the background is the one asset every spec
-    // has that something can sit on.
-    let subject = form.spec.objects.last().map(|node| node.id.clone());
-    let reference = form.spec.background.id.clone();
-
-    button("+ relation", move || Edit::Insert {
-        path: vec![Step::from("relations")],
-        value: Value::map([
-            ("kind", Value::text("on")),
-            ("subject", Value::text(subject.clone().unwrap_or_else(|| reference.clone()))),
-            ("reference", Value::text(reference.clone())),
-            ("params", Value::map([])),
-        ]),
-    })
+/// `stem`, or the lowest numbered variant of it that is not already an id.
+fn unused(stem: &str, taken: &[&str]) -> String {
+    if !taken.contains(&stem) {
+        return stem.to_owned();
+    }
+    (2..)
+        .map(|n| format!("{stem}_{n}"))
+        .find(|id| !taken.contains(&id.as_str()))
+        .expect("an unused id")
 }
 
-/// `stem` with the lowest number that is not already an id.
-fn unused(stem: &str, taken: &[String]) -> String {
-    (1..).map(|n| format!("{stem}_{n}")).find(|id| !taken.contains(id)).expect("an unused id")
-}
+// --- the pieces every group is made of --------------------------------------
 
 fn remove_button(path: Vec<Step>) -> Box<dyn SceneList> {
     button("×", move || Edit::Remove { path: path.clone() })
@@ -377,22 +645,21 @@ fn button(caption: &str, edit: impl Fn() -> Edit + Clone + Send + Sync + 'static
     let caption = caption.to_owned();
     Box::new(bsn_list! {
         @FeathersButton { @caption: bsn! { Text({caption}) ThemedText } }
+        Node { flex_shrink: 0.0 }
         on(move |_: On<Activate>| send(edit()))
     })
 }
 
-/// One top-level section, with the file that owns it and a button to grow it.
+/// One top-level section, with the file that owns it and a way to grow it.
 fn group(name: &str, owner: &str, rows: Vec<Box<dyn SceneList>>, add: Box<dyn SceneList>) -> Box<dyn SceneList> {
     let (title, badge) = (format!("{name}  ({})", rows.len()), owner.to_owned());
     Box::new(bsn_list! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4), padding: UiRect::top(px(8)) }
+        subpane()
+        Node { min_width: px(0), flex_shrink: 0.0 }
+        ThemedText
         Children [
-            (
-                Node { flex_direction: FlexDirection::Row, column_gap: px(6), align_items: AlignItems::Center }
-                Children [{text(title)}, {flex_spacer()}, {dim(badge)}]
-            ),
-            {rows},
-            {add},
+            (subpane_header() Children [{text(title)}, {dim(badge)}]),
+            (subpane_body() Node { min_width: px(0) } Children [{rows}, {add}]),
         ]
     })
 }
@@ -410,7 +677,7 @@ fn dim(value: impl Into<String>) -> Box<dyn SceneList> {
 }
 
 fn flex_spacer() -> Box<dyn SceneList> {
-    Box::new(bsn_list! { Node { flex_grow: 1.0 } })
+    Box::new(bsn_list! { Node { flex_grow: 1.0, min_width: px(0) } })
 }
 
 /// `base` with one more step on the end.
@@ -501,5 +768,51 @@ mod tests {
         assert_eq!(form.spec.env_name, "demo", "a status message replaced the spec");
         assert_eq!(form.errors.len(), 1);
         assert!(!form.dirty, "there is nothing new to draw");
+    }
+
+    /// Adding the same asset twice has to give two objects, not one id twice —
+    /// Arena refuses a duplicate, and a refused add looks like a dead button.
+    #[test]
+    fn an_added_object_does_not_take_an_id_that_is_used() {
+        assert_eq!(unused("apple", &["banana"]), "apple");
+        assert_eq!(unused("apple", &["apple"]), "apple_2");
+        assert_eq!(unused("apple", &["apple", "apple_2"]), "apple_3");
+    }
+
+    /// Every kind in the menu writes an entry Arena can build the relation
+    /// from: a `reference` exactly where the kind takes one, and the
+    /// parameters it has no default for already filled in.
+    #[test]
+    fn a_kind_menu_offers_entries_the_kind_can_be_built_from() {
+        let mut form = Form::default();
+        form.vocabulary.relations = vec![
+            Kind { name: "is_anchor".into(), unary: Some(true), ..default() },
+            Kind {
+                name: "next_to".into(),
+                unary: Some(false),
+                fields: vec![Field {
+                    name: "side".into(),
+                    kind: "enum".into(),
+                    required: true,
+                    options: vec!["positive_y".into()],
+                    ..default()
+                }],
+                ..default()
+            },
+        ];
+
+        let options = kind_options(&form, "banana", "table", &["banana", "table"]);
+        let by_name: HashMap<_, _> = options.into_iter().collect();
+
+        let Value::Map(unary) = &by_name["is_anchor"] else { panic!("not an entry") };
+        assert!(!unary.contains_key("reference"), "a unary relation was given a reference");
+
+        let Value::Map(binary) = &by_name["next_to"] else { panic!("not an entry") };
+        assert_eq!(binary["reference"], Value::text("table"));
+        assert_eq!(
+            binary["params"],
+            Value::map([("side", Value::text("positive_y"))]),
+            "a required parameter was left out"
+        );
     }
 }

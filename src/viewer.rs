@@ -9,11 +9,13 @@
 //! sends an edit up the pipe and redraws from the scene that comes back, so
 //! nothing here writes a spec either.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use bevy::asset::{AssetPlugin, UnapprovedPathMode};
 use bevy::prelude::*;
+use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 use crate::layout::{ArenaRoot, View, ambient, framing, spawn_lighting, spawn_scene};
@@ -33,8 +35,8 @@ struct SceneUpdates(Mutex<Receiver<Scene>>);
 struct Hud;
 
 pub fn run(scene: Scene, updates: Receiver<Scene>) {
-    App::new()
-        .add_plugins((
+    let mut app = App::new();
+    app.add_plugins((
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -58,8 +60,47 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
         .insert_resource(ResolvedScene(scene))
         .insert_resource(SceneUpdates(Mutex::new(updates)))
         .add_systems(Startup, setup)
-        .add_systems(Update, apply_updates)
-        .run();
+        .add_systems(Update, apply_updates);
+
+    // `ARENA_VIEWER_SCREENSHOT=out.png` — draw a while, write the window to
+    // that path, quit. The way to look at the UI without a person at the
+    // keyboard; it is the whole window, so it shows nothing but this app.
+    if let Some(path) = std::env::var_os("ARENA_VIEWER_SCREENSHOT") {
+        app.insert_resource(ScreenshotPath(path.into()))
+            .add_systems(Update, screenshot);
+    }
+
+    app.run();
+}
+
+/// Where [`screenshot`] writes, when the environment asked for one.
+#[derive(Resource)]
+struct ScreenshotPath(PathBuf);
+
+fn screenshot(
+    mut commands: Commands,
+    mut frame: Local<u32>,
+    path: Res<ScreenshotPath>,
+    capturing: Query<(), With<Capturing>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    // Long enough for the fonts to load and the sidebar's scenes to resolve —
+    // neither happens on the frame it is asked for.
+    const SETTLE: u32 = 120;
+    *frame += 1;
+    match *frame {
+        SETTLE => {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(path.0.clone()));
+        }
+        // The capture is written on a task; leaving before it lands writes
+        // nothing.
+        n if n > SETTLE && capturing.is_empty() => {
+            exit.write(AppExit::Success);
+        }
+        _ => {}
+    }
 }
 
 /// Exclusive because building meshes and materials needs `&mut World` to reach

@@ -213,11 +213,15 @@ pub struct Field {
 
 /// What the sidebar asks Python to do.
 ///
-/// One leaf at a time, never a whole object: a parameter the form does not
-/// show is left where it is by a `Set` naming its sibling. Python applies it
-/// through `arena_composer.spec_edit`, which owns which file the key lives in
-/// and validates before either file is written — so a rejected edit comes back
-/// as `errors` on the next scene with the spec untouched.
+/// A `Set` names one leaf wherever it can, so a parameter the form does not
+/// show is left where it is. The exception is a relation's kind: the old
+/// kind's parameters mean nothing to the new one, and whether the entry has a
+/// `reference` at all is the kind's to say, so that one replaces the entry.
+///
+/// Python applies an edit through `arena_composer.spec_edit`, which owns which
+/// file the key lives in and validates before either file is written — so a
+/// rejected edit comes back as `errors` on the next scene with the spec
+/// untouched.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Edit {

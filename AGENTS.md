@@ -64,6 +64,11 @@ It runs on the same pipe, in both directions:
   write to the child's stdout**: Bevy logs to stderr, and one stray `println!` would land
   mid-message and desynchronise the reader.
 
+Everything that adds something picks from the vocabulary first: an object comes from the asset
+browser at the foot of the panel, a relation from a menu of registered kinds, each entry already
+carrying the parameters that kind has no default for. So there is no "add now, fix the invalid
+parts after", and no default that was picked because something had to be.
+
 Rust never writes YAML. `spec_edit` is the only writer, because it knows which of the two files a
 key belongs in, keeps comments through ruamel, and quotes what YAML 1.1 would read as a boolean.
 Rust's job is the other half — a form built so the invalid states are unreachable: ids come from
@@ -100,6 +105,10 @@ cd arena_composer && cargo run --bin arena-viewer -- ../scene.msgpack
 ```bash
 cd arena_composer && cargo run --bin arena-render -- ../scene.msgpack top=top.png front=front.png
 ```
+
+`ARENA_VIEWER_SCREENSHOT=shot.png` on either viewer draws for a moment, writes the window to that
+path and quits — how to see what the sidebar actually looks like without a person at the keyboard.
+It captures the window and nothing else on the desktop.
 
 `--output` still writes the resolver's JSON dump. That stays the human- and agent-readable
 artifact; the payload is the renderer's, and carries a strict subset of its fields.

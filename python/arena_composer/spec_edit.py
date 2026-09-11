@@ -246,6 +246,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     key = str(steps[0])
     document = files.documents[files.owner(key)]
 
+    value = _ordered(value)
+
     try:
         if op == "insert":
             # A single step names a top-level list, which may not exist yet.
@@ -270,6 +272,41 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
         return Result.failed(f"{_label(steps)}: {type(error).__name__}: {error}")
 
     return Result.failed(f"unknown edit {op!r}, expected set, insert or remove")
+
+
+#: The order an entry's keys read best in, ahead of anything unlisted.
+_KEY_ORDER = (
+    "id",
+    "registry_name",
+    "kind",
+    "subject",
+    "reference",
+    "parent_id",
+    "prim_path",
+    "object_type",
+    "members",
+    "random_choice",
+    "composition",
+    "description",
+    "subtasks",
+    "params",
+)
+
+
+def _ordered(value: Any) -> Any:
+    """A mapping in the order a spec reads best.
+
+    An edit arrives over MessagePack, where a mapping has whatever order the
+    sender's map iterated in. These files are read by people, so a written
+    entry gets a fixed key order instead of a fresh one each time.
+    """
+    if not isinstance(value, dict):
+        return value
+    rank = {key: index for index, key in enumerate(_KEY_ORDER)}
+    return {
+        key: _ordered(inner)
+        for key, inner in sorted(value.items(), key=lambda item: (rank.get(item[0], len(rank)), item[0]))
+    }
 
 
 def _walk(document: Any, steps: list[Any]) -> Any:
