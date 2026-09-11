@@ -28,7 +28,7 @@ import msgpack
 import yaml
 
 from arena_composer import spec_edit, viewer_process
-from arena_composer.payload import encode
+from arena_composer.payload import encode, encode_spec
 from arena_composer.resolve_layout import DEFAULT_SEED, resolve_layout_from_yaml
 from arena_composer.usd_assets import use_local_asset_cache
 
@@ -112,7 +112,12 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
 
 
 async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
-    """Hand a packed scene to the viewer. The pipe stays open for the next."""
+    """Hand one packed message to the viewer. The pipe stays open for the next.
+
+    Safe to call from more than one task: the whole framed message goes into the
+    transport in a single `write`, so two senders cannot interleave a length
+    with somebody else's body.
+    """
     assert proc.stdin is not None
     proc.stdin.write(viewer_process.pack_scene(payload))
     await proc.stdin.drain()
@@ -121,32 +126,75 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
 async def _apply_edits(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
     """Apply the edits the editor sends, and draw what they produce.
 
-    The channel only answers in scenes: an edit that lands is answered by the
-    spec redrawn, and one that does not by the errors alone. Writing goes
-    through :mod:`arena_composer.spec_edit`, which owns which of the two files
-    a key lives in and validates before either is touched, so a refused edit
-    leaves the spec exactly as the editor is still drawing it.
+    An accepted edit is answered twice: with the spec as soon as it is on disk,
+    and with the layout it resolves to once the solver has caught up. Only the
+    first is on this path, and it costs milliseconds against the solve's
+    seconds — which is what lets the panel show an edit at once, and what keeps
+    this loop reading while a solve is still running.
+
+    Writing goes through :mod:`arena_composer.spec_edit`, which owns which of
+    the two files a key lives in and validates before either is touched, so a
+    refused edit leaves the spec exactly as the editor is still drawing it —
+    and is answered by that same spec, carrying the reason.
     """
     assert proc.stdout is not None
-    while (edit := await _read_edit(proc.stdout)) is not None:
-        result = await asyncio.to_thread(
-            spec_edit.apply, spec, edit.get("op", ""), list(edit.get("path", [])), edit.get("value")
-        )
+    asked = asyncio.Event()
+    solver = asyncio.create_task(_solve_when_asked(spec, seed, proc, asked))
+    try:
+        while (edit := await _read_edit(proc.stdout)) is not None:
+            result = await asyncio.to_thread(
+                spec_edit.apply, spec, edit.get("op", ""), list(edit.get("path", [])), edit.get("value")
+            )
+            if proc.returncode is not None:
+                return  # the window closed while we were writing
+
+            await _send(proc, encode_spec(spec, result.errors, solving=result.ok))
+            if result.ok:
+                # `_reload_on_change` would catch this too, but only after its
+                # poll and settle; an edit the user just made should redraw now.
+                asked.set()
+                print(f"{spec}: {'; '.join(result.changed)}", file=sys.stderr)
+            else:
+                print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
+    finally:
+        solver.cancel()
+
+
+async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:
+    """Re-resolve `spec` whenever `asked`, and draw what comes out.
+
+    One solve per burst of edits, not one per edit: `asked` is cleared before
+    the solve and set again by anything that arrives during it, so the edits
+    made while the solver was busy are answered together by the next one. They
+    are all in the file by then — the layout is a function of the spec, not of
+    the edits that got it there.
+    """
+    while True:
+        await asked.wait()
+        asked.clear()
+        answer = await asyncio.to_thread(_solved_or_why_not, spec, seed)
         if proc.returncode is not None:
-            return  # the window closed while we were writing
+            return  # the window closed while we were resolving
+        if answer is not None:
+            await _send(proc, answer)
 
-        if not result.ok:
-            # No re-resolve: the spec did not change, and reading every asset's
-            # USD again to say so would cost seconds. The viewer keeps the
-            # scene it has and shows why the edit was refused.
-            await _send(proc, msgpack.packb({"errors": result.errors}, use_bin_type=True))
-            print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
-            continue
 
-        # `_reload_on_change` would catch this too, but only after its poll and
-        # settle; an edit the user just made should redraw now.
-        await _send(proc, await asyncio.to_thread(_resolve, spec, seed))
-        print(f"{spec}: {'; '.join(result.changed)}", file=sys.stderr)
+def _solved_or_why_not(spec: Path, seed: int) -> bytes | None:
+    """The scene `spec` resolves to, or the reason it does not.
+
+    None when neither can be said, which takes `spec` becoming unreadable since
+    the edit that validated it. `_reload_on_change` answers once it reads again;
+    until then the panel is left saying a solve is still coming.
+    """
+    try:
+        return _resolve(spec, seed)
+    except Exception as error:
+        # Anything Arena raises on a spec that validates but will not build.
+        reason = f"{type(error).__name__}: {error}"
+        print(f"{spec}: {reason}", file=sys.stderr)
+        with contextlib.suppress(Exception):
+            return encode_spec(spec, [reason])
+    return None
 
 
 async def _read_edit(stream: asyncio.StreamReader) -> dict | None:

@@ -6,9 +6,14 @@
 //! nothing else: a search string, and the number currently under the pointer.
 //!
 //! Nothing here edits the spec it draws. A control sends an [`Edit`] up the
-//! pipe, Python writes the YAML and re-resolves, and the next payload is what
+//! pipe, Python writes the YAML and answers with it, and that answer is what
 //! the panel draws from. That is why there is nothing to reconcile, and why a
 //! refused edit needs no undo: the spec never changed.
+//!
+//! The layout takes a second answer, seconds later, because solving it is the
+//! slow half — so [`Form::solving`] is true in between, and a spinner over the
+//! 3D view says so. The panel itself is answered from the spec alone and needs
+//! no such notice; only the view it sits beside is still catching up.
 //!
 //! Nothing here knows the name of a relation kind or the parameters it takes
 //! either. [`Vocabulary`] arrives in the payload carrying a
@@ -51,25 +56,28 @@ pub struct Form {
     pub vocabulary: Vocabulary,
     pub owners: HashMap<String, String>,
     pub errors: Vec<String>,
+    /// Whether the layout under the panel is still catching up with this spec.
+    pub solving: bool,
     /// Bumped every time a new spec lands. A half-made edit is kept against the
     /// spec it was made on and dropped when that spec is replaced, so a number
-    /// does not snap back to its old value while Python is still re-solving.
+    /// does not snap back to its old value between letting go of it and the
+    /// spec carrying it coming back.
     pub revision: u64,
 }
 
 impl Form {
     /// Take the parts of `scene` the panel draws.
     ///
-    /// A scene with no assets is a status message — Python answering a refused
-    /// edit — and carries no spec to draw from, only the reason.
+    /// Every message carries all of them, layout or not: an accepted edit is
+    /// answered with the spec as soon as it is written and again with the
+    /// layout it solves to, and a refused one with the spec left untouched. So
+    /// there is no half a message to guard against here.
     pub fn take(&mut self, scene: &Payload) {
-        self.errors = scene.errors.clone();
-        if scene.assets.is_empty() {
-            return;
-        }
         self.spec = scene.spec.clone();
         self.vocabulary = scene.vocabulary.clone();
         self.owners = scene.owners.clone();
+        self.errors = scene.errors.clone();
+        self.solving = scene.solving;
         self.revision += 1;
     }
 
@@ -111,31 +119,5 @@ fn keep_the_camera_off_the_panel(
     let taken = egui.wants_any_pointer_input();
     if camera.enabled == taken {
         camera.enabled = !taken;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A refused edit answers with the reason alone — re-reading every asset's
-    /// USD to say "no" would cost seconds. The panel keeps the spec it has, and
-    /// with it whatever the user was half way through typing.
-    #[test]
-    fn a_status_message_keeps_the_spec_it_is_drawing() {
-        let mut form = Form::default();
-        let mut scene = Payload::default();
-        scene.assets.push(crate::scene::Asset::default());
-        scene.spec.env_name = "demo".into();
-        form.take(&scene);
-        let revision = form.revision;
-
-        form.take(&Payload {
-            errors: vec!["objects.0: still needed by a task".into()],
-            ..default()
-        });
-        assert_eq!(form.spec.env_name, "demo", "a status message replaced the spec");
-        assert_eq!(form.errors.len(), 1);
-        assert_eq!(form.revision, revision, "there is nothing new to draw");
     }
 }

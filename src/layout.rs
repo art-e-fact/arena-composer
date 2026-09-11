@@ -37,7 +37,7 @@ pub fn spawn_scene(world: &mut World, scene: &Scene) -> Entity {
         ))
         .id();
 
-    for asset in &scene.assets {
+    for asset in scene.assets() {
         let nodes = scene.geometry_of(asset);
         if nodes.is_empty() {
             continue;
@@ -201,7 +201,7 @@ pub fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     let mut any = false;
     for asset in scene
-        .assets
+        .assets()
         .iter()
         .filter(|asset| !scene.geometry_of(asset).is_empty())
     {
@@ -254,7 +254,7 @@ mod tests {
     pub fn scene(position: [f32; 3], bbox: ([f32; 3], [f32; 3]), drawable: bool) -> Scene {
         Scene {
             env_name: "t".into(),
-            assets: vec![Asset {
+            assets: Some(vec![Asset {
                 id: "a".into(),
                 role: "object".into(),
                 position_xyz: position,
@@ -262,7 +262,7 @@ mod tests {
                 bbox_max: bbox.1,
                 geometry: drawable.then_some(0),
                 ..default()
-            }],
+            }]),
             geometries: vec![vec![GeometryNode::default()]],
             ..default()
         }

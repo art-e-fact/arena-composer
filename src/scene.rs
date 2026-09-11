@@ -32,7 +32,11 @@ pub fn arena_to_bevy() -> Quat {
 #[serde(default)]
 pub struct Scene {
     pub env_name: String,
-    pub assets: Vec<Asset>,
+    /// The resolved layout, absent when the message carries the spec alone.
+    /// An accepted edit is answered the moment it is written, seconds before
+    /// the solver has caught up with it; what is drawn stays drawn until it
+    /// has. See [`Scene::assets`].
+    pub assets: Option<Vec<Asset>>,
     /// Extracted USD stages, shared by index — assets spawned from the same
     /// USD point at the same entry.
     pub geometries: Vec<Vec<Node>>,
@@ -46,11 +50,19 @@ pub struct Scene {
     pub vocabulary: Vocabulary,
     /// Why the last edit was refused, empty when it landed.
     pub errors: Vec<String>,
+    /// Whether a layout for this spec is still being solved, so the panel can
+    /// say the view it is over has yet to catch up.
+    pub solving: bool,
 }
 
 impl Scene {
     pub fn from_msgpack(bytes: &[u8]) -> anyhow::Result<Self> {
         Ok(rmp_serde::from_slice(bytes)?)
+    }
+
+    /// The layout to draw, empty when the message carried none.
+    pub fn assets(&self) -> &[Asset] {
+        self.assets.as_deref().unwrap_or_default()
     }
 
     /// The pieces to draw for an asset, empty when it contributes none.
@@ -240,7 +252,7 @@ mod tests {
         .unwrap();
 
         let scene = Scene::from_msgpack(&packed).unwrap();
-        let asset = &scene.assets[0];
+        let asset = &scene.assets()[0];
         assert_eq!(asset.transform().translation, Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(asset.transform().scale, Vec3::ONE);
         assert_eq!(asset.transform().rotation, Quat::IDENTITY);

@@ -9,6 +9,12 @@ payload keeps JSON's habit of ignoring unknown keys and defaulting absent ones.
 The layout half is the same dump ``arena_composer.resolve_layout`` produces —
 that stays the human- and agent-readable artifact, and this only picks out the
 fields a renderer needs.
+
+The two halves also travel apart. An edit is answered by :func:`encode_spec`
+first, which carries the editor's half and no layout at all, and by a full
+payload once the solver has caught up; the viewer keeps drawing the layout it
+has in between. Every message carries the whole editor half, so the panel never
+has to piece one together.
 """
 
 from __future__ import annotations
@@ -28,14 +34,8 @@ from arena_composer.usd import Node, extract, open_stage
 _UNDRAWN_ROLES = {"object_reference"}
 
 
-def build_payload(dump: dict[str, Any], errors: list[str] | None = None) -> dict[str, Any]:
-    """Turn a resolved-layout dump into the structure the viewer decodes.
-
-    `errors` are what a rejected edit came back with. They ride the payload
-    because the channel only runs this way: an edit the editor sent is answered
-    by the next scene, which either shows the change or says why there isn't
-    one.
-    """
+def build_payload(dump: dict[str, Any]) -> dict[str, Any]:
+    """Turn a resolved-layout dump into the structure the viewer decodes."""
     geometries: list[list[dict[str, Any]]] = []
     by_usd: dict[str, int] = {}
 
@@ -70,7 +70,9 @@ def build_payload(dump: dict[str, Any], errors: list[str] | None = None) -> dict
         "spec": dump.get("spec") or {},
         "owners": _owners(dump.get("spec_path")),
         "vocabulary": _vocabulary(),
-        "errors": list(errors or []),
+        # A layout that resolved is the answer to whatever was asked of it, so
+        # this clears whatever the last refusal put in front of the form.
+        "errors": [],
     }
 
 
@@ -114,9 +116,36 @@ def _vocabulary() -> dict[str, Any]:
     }
 
 
-def encode(dump: dict[str, Any], errors: list[str] | None = None) -> bytes:
+def encode(dump: dict[str, Any]) -> bytes:
     """Build and serialize the payload."""
-    return msgpack.packb(build_payload(dump, errors), use_bin_type=True)
+    return msgpack.packb(build_payload(dump), use_bin_type=True)
+
+
+def encode_spec(spec_path: Path, errors: list[str] | None = None, solving: bool = False) -> bytes:
+    """Pack the editor's half alone: the spec as written, with no layout.
+
+    What answers an edit the moment it is on disk. :mod:`arena_composer.spec_edit`
+    has already validated and written it in milliseconds, where resolving the
+    layout it implies takes seconds, so the panel is answered from the file and
+    the viewer keeps drawing what it has until the solve catches up. `solving`
+    is what says one is coming.
+
+    The spec is read back rather than carried over from the edit, so this is the
+    same document :func:`build_payload` would report — validated, with every
+    default filled in.
+    """
+    from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
+
+    return msgpack.packb(
+        {
+            "spec": ArenaEnvGraphSpec.from_yaml(spec_path).model_dump(mode="json"),
+            "owners": _owners(str(spec_path)),
+            "vocabulary": _vocabulary(),
+            "errors": list(errors or []),
+            "solving": solving,
+        },
+        use_bin_type=True,
+    )
 
 
 def _encode_node(node: Node) -> dict[str, Any]:

@@ -184,7 +184,7 @@ mod tests {
         .init_asset::<Image>();
 
         let mut drawn = 0;
-        for asset in &scene.assets {
+        for asset in scene.assets() {
             let nodes = scene.geometry_of(asset);
             if nodes.is_empty() {
                 continue;
@@ -216,7 +216,7 @@ mod tests {
         // decoded as `None`, every mesh would fall back to computed normals
         // and lose its UVs, and nothing else here would notice.
         let nodes: Vec<_> = scene
-            .assets
+            .assets()
             .iter()
             .flat_map(|asset| scene.geometry_of(asset))
             .collect();
@@ -232,7 +232,7 @@ mod tests {
         // Python drops texture paths that do not resolve, so anything that
         // arrived here must be loadable.
         let mut textures = 0;
-        for asset in &scene.assets {
+        for asset in scene.assets() {
             for node in scene.geometry_of(asset) {
                 for path in node.textures.values() {
                     assert!(

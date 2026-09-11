@@ -39,7 +39,22 @@ pub fn draw(mut contexts: EguiContexts, form: Res<Form>, mut state: Local<PanelS
         .default_size(WIDTH)
         .min_size(240.0)
         .show(&mut window, |ui| panel(ui, &form, &mut state));
+
+    // Over the 3D view, in the corner of what the panel left of it. The view is
+    // the half that is behind: an accepted edit reaches the form at once and
+    // the layout only once the solver has caught up.
+    if form.solving {
+        let corner = window.available_rect_before_wrap().right_top();
+        let spot = egui::Rect::from_min_size(corner + egui::vec2(-32.0, 12.0), egui::Vec2::splat(20.0));
+        window.put(spot, spinner());
+    }
     Ok(())
+}
+
+/// What says a layout is still being solved. Sized down from the default, which
+/// is a line high and reads as a widget rather than a status.
+fn spinner() -> egui::Spinner {
+    egui::Spinner::new().size(16.0)
 }
 
 fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {

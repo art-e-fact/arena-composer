@@ -132,30 +132,31 @@ fn show_in_form(world: &mut World, scene: &Scene) {
 /// The camera is left where the viewer put it: re-framing on every save is the
 /// thing that makes a reload loop unusable.
 fn apply_updates(world: &mut World) {
-    let mut newest = None;
+    let mut received = Vec::new();
     let ended = loop {
-        let received = world
+        let message = world
             .resource::<SceneUpdates>()
             .0
             .lock()
             .expect("the scene channel")
             .try_recv();
-        match received {
-            // Only the last one is worth drawing; edits outrun a resolve.
-            Ok(scene) => newest = Some(scene),
+        match message {
+            Ok(scene) => received.push(scene),
             Err(TryRecvError::Empty) => break false,
             Err(TryRecvError::Disconnected) => break true,
         }
     };
 
-    if let Some(scene) = newest {
+    // The newest of each kind rather than simply the newest: an accepted edit
+    // is answered twice, with the spec and then with the layout it solves to,
+    // so the last message need not be the last one carrying a layout.
+    if let Some(scene) = received.iter().rev().find(|scene| scene.assets.is_some()) {
         // The new root goes up before the old one comes down: textures are
         // shared by path, so the overlap is what keeps them off the disk. Mesh
         // and material assets are rebuilt either way — `Assets::add` mints a
         // new one per call — and the old ones are freed with their handles.
-        info!("drawing {} ({} assets)", scene.env_name, scene.assets.len());
-        show_in_form(world, &scene);
-        let root = spawn_scene(world, &scene);
+        info!("drawing {} ({} assets)", scene.env_name, scene.assets().len());
+        let root = spawn_scene(world, scene);
         let stale: Vec<Entity> = world
             .query_filtered::<Entity, With<ArenaRoot>>()
             .iter(world)
@@ -169,8 +170,11 @@ fn apply_updates(world: &mut World) {
             .query_filtered::<&mut Text, With<Hud>>()
             .single_mut(world)
         {
-            text.0 = hud_line(&scene);
+            text.0 = hud_line(scene);
         }
+    }
+    if let Some(scene) = received.last() {
+        show_in_form(world, scene);
     }
 
     if ended {
@@ -212,14 +216,14 @@ fn spawn_hud(world: &mut World, scene: &Scene) {
 /// What the status line says about a scene.
 fn hud_line(scene: &Scene) -> String {
     let drawn = scene
-        .assets
+        .assets()
         .iter()
         .filter(|asset| !scene.geometry_of(asset).is_empty())
         .count();
     format!(
         "{}  ·  {drawn}/{} assets drawn  ·  drag orbit · right-drag pan · wheel zoom",
         scene.env_name,
-        scene.assets.len(),
+        scene.assets().len(),
     )
 }
 
@@ -234,13 +238,13 @@ mod tests {
     fn scene(position: [f32; 3]) -> Scene {
         Scene {
             env_name: "t".into(),
-            assets: vec![Asset {
+            assets: Some(vec![Asset {
                 id: "a".into(),
                 role: "object".into(),
                 position_xyz: position,
                 geometry: Some(0),
                 ..default()
-            }],
+            }]),
             geometries: vec![vec![GeometryNode::default()]],
             ..default()
         }
@@ -319,5 +323,47 @@ mod tests {
             .iter(world)
             .collect();
         assert_eq!(cameras, vec![camera], "the camera was rebuilt");
+    }
+
+    /// An accepted edit is answered twice — with the spec as soon as it is
+    /// written, and with the layout it solves to seconds later — so both kinds
+    /// can land in one frame, in either order. Neither may mask the other: a
+    /// spec that arrives last must not empty the viewport, and a layout that
+    /// arrives first must still be drawn.
+    #[test]
+    fn a_spec_and_a_layout_in_one_frame_both_land() {
+        let (sender, updates) = std::sync::mpsc::channel();
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<crate::editor::Form>()
+            .insert_resource(ResolvedScene(scene([1.0, 0.0, 0.0])))
+            .insert_resource(SceneUpdates(Mutex::new(updates)))
+            .add_systems(Startup, setup)
+            .add_systems(Update, apply_updates);
+        app.update();
+
+        // The solve for the previous edit, then the next edit answered at once.
+        sender.send(scene([0.0, 0.0, 5.0])).expect("the viewer still listening");
+        let mut pending = Scene {
+            solving: true,
+            ..default()
+        };
+        pending.spec.env_name = "edited".into();
+        sender.send(pending).expect("the viewer still listening");
+        app.update();
+
+        let world = app.world_mut();
+        let placed: Vec<Vec3> = world
+            .query_filtered::<&GlobalTransform, With<AssetId>>()
+            .iter(world)
+            .map(|transform| transform.translation())
+            .collect();
+        // Arena (0, 0, 5) is Bevy (0, 5, 0): the layout, not the spec after it.
+        assert_eq!(placed.len(), 1, "the layout was torn down: {placed:?}");
+        assert!(placed[0].abs_diff_eq(Vec3::new(0.0, 5.0, 0.0), 1e-5), "{}", placed[0]);
+
+        let form = world.resource::<crate::editor::Form>();
+        assert_eq!(form.spec.env_name, "edited", "the form kept the older spec");
+        assert!(form.solving, "the panel has nothing to say the view is behind");
     }
 }

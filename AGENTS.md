@@ -60,7 +60,7 @@ It runs on the same pipe, in both directions:
   by hand, so a relation somebody registers themselves gets a form nobody wrote. All of it is
   ~40 kB against megabytes of geometry, so it rides every scene rather than being asked for.
 - **Up stdout** — one `{op, path, value}` per edit, framed the way a scene is (`src/wire.rs`).
-  Python applies it through `spec_edit.apply` and answers with the next scene. **Nothing else may
+  Python applies it through `spec_edit.apply` and answers twice, as below. **Nothing else may
   write to the child's stdout**: Bevy logs to stderr, and one stray `println!` would land
   mid-message and desynchronise the reader.
 
@@ -75,16 +75,34 @@ Rust's job is the other half — a form built so the invalid states are unreacha
 dropdowns, and a unary relation is drawn without a `reference` slot at all. What construction
 cannot prevent comes back in the payload's `errors` and is shown above the form.
 
-A refused edit is answered by `errors` alone, with no assets — re-reading every asset's USD to say
-"no" would cost seconds. `editor::Form::take` treats such a payload as a status message and keeps
-the spec it is drawing.
+### Two answers per edit
+
+Writing the YAML takes milliseconds and solving the layout it implies takes seconds, so an edit is
+answered twice. `payload.encode_spec` goes out as soon as `spec_edit` has written the file — the
+editor's half alone, ~40 kB, no resolve, `solving: true` — and the full payload follows when the
+solve lands. The viewer keeps drawing the layout it has in between, and a spinner in each top-right
+corner says the view is behind the form.
+
+Only `assets` may be absent from a message. Every one carries the whole editor half, so
+`editor::Form::take` has no half a message to piece together; and `viewer::apply_updates` drains the
+newest of *each* kind rather than simply the newest, since both can land in one frame.
+
+A refused edit is answered the same way with `solving: false`: the file did not change, so what goes
+back is that same spec carrying the reason. Re-resolving to say "no" would cost the seconds the edit
+was refused in.
+
+`view._solve_when_asked` is a task of its own, so reading edits never waits on a solve, and it clears
+its event *before* resolving — edits made during one are answered by the next, and a burst costs one
+solve rather than one each. Do not reach for `max_placement_attempts` to make the solve itself
+cheaper: Arena solves its candidates in one batch, so asking for fewer costs the same and ranks a
+worse layout first.
 
 The panel is egui (`bevy_egui`), drawn each frame from `editor::Form` in the `EguiPrimaryContextPass`
 schedule — not `Update`, where there is no context to draw into yet. Immediate mode is
 what keeps the panel a pure function of the last payload: there is no widget tree to keep in step
 with the spec, so nothing here diffs, rebuilds or restores scroll. The only state it owns is UI
 state — the asset search, and the number under the pointer, which is held against `Form::revision`
-so a value does not snap back to the old one while Python is re-solving.
+so a value does not snap back between letting go of it and the spec carrying it coming back.
 
 `PanOrbitCamera` claims a drag from the cursor position alone and knows nothing about the panel over
 it, so `keep_the_camera_off_the_panel` toggles `enabled` from `EguiWantsInput`, latched between
