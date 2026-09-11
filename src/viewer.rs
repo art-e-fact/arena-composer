@@ -5,9 +5,9 @@
 //! no solve: a resolve happens in the process that sends the scenes, and this
 //! one only ever draws the newest.
 //!
-//! Editing is [`crate::sidebar`]'s, and is the same arrangement — the form
-//! sends an edit up the pipe and redraws from the scene that comes back, so
-//! nothing here writes a spec either.
+//! Editing is [`crate::editor`]'s, and is the same arrangement — the panel
+//! sends an edit up the pipe and draws the scene that comes back, so nothing
+//! here writes a spec either.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -53,10 +53,9 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
                 }),
             PanOrbitCameraPlugin,
         ))
-        // In `run` and not in `setup`: the sidebar spawns Feathers widgets,
-        // which need an `AssetServer`, and `setup`'s tests build a world
-        // without one.
-        .add_plugins(crate::sidebar::plugin)
+        // In `run` and not in `setup`: the editor needs a render context to
+        // draw into, and `setup`'s tests build a world without one.
+        .add_plugins(crate::editor::plugin)
         .insert_resource(ResolvedScene(scene))
         .insert_resource(SceneUpdates(Mutex::new(updates)))
         .add_systems(Startup, setup)
@@ -84,9 +83,9 @@ fn screenshot(
     capturing: Query<(), With<Capturing>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    // Long enough for the fonts to load and the sidebar's scenes to resolve —
-    // neither happens on the frame it is asked for.
-    const SETTLE: u32 = 120;
+    // Long enough for the geometry to upload and its shaders to compile;
+    // neither happens on the frame the scene arrives.
+    const SETTLE: u32 = 30;
     *frame += 1;
     match *frame {
         SETTLE => {
@@ -117,12 +116,12 @@ fn setup(world: &mut World) {
     show_in_form(world, &scene);
 }
 
-/// Hand a scene to the sidebar, where there is one.
+/// Hand a scene to the editor panel, where there is one.
 ///
 /// Absent in the render path, and in the tests below — both draw a scene
 /// without ever showing a form.
 fn show_in_form(world: &mut World, scene: &Scene) {
-    if let Some(mut form) = world.get_resource_mut::<crate::sidebar::Form>() {
+    if let Some(mut form) = world.get_resource_mut::<crate::editor::Form>() {
         form.take(scene);
     }
 }

@@ -246,3 +246,27 @@ def test_a_whole_entry_is_written_in_a_settled_key_order(spec: Path):
     written = yaml.safe_load(scene_of(spec).read_text())["relations"][1]
     assert written == entry
     assert list(written) == ["kind", "subject", "reference", "params"]
+
+
+def test_renaming_an_object_carries_the_relations_naming_it(spec: Path):
+    """Renaming leaves the relations pointing at a name nothing has, which
+    stops the spec loading — so the rename has to reach them too."""
+    result = spec_edit.apply(spec, "set", ["objects", 2, "id"], "extra")  # distractor
+    assert result.ok, result.errors
+
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert [obj["id"] for obj in scene["objects"]] == ["banana", "bowl", "extra"]
+    assert [r["subject"] for r in scene["relations"] if r["subject"] == "extra"] == ["extra"]
+    assert not [r for r in scene["relations"] if "distractor" in (r["subject"], r.get("reference"))]
+
+
+def test_renaming_an_object_carries_the_task_params_naming_it(spec: Path):
+    """Arena requires every string-valued task param to name a node, so a param
+    reading as the old id is a reference to it — and the task is in the other
+    file, which the rename still has to reach."""
+    result = spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain")  # banana
+    assert result.ok, result.errors
+
+    params = yaml.safe_load(spec.read_text())["task"]["subtasks"][0]["params"]
+    assert params["pick_up_object"] == "plantain"
+    assert params["destination_location"] == "bowl", "an unrelated param was rewritten"

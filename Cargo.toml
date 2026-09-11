@@ -18,8 +18,12 @@ name = "arena-viewer"
 path = "src/main.rs"
 
 [dependencies]
-# USD supports jpg textures. `bevy_feathers` is the editor sidebar's widget set.
-bevy = { version = "0.19.1", features = ["jpeg", "bevy_feathers"] }
+# USD supports jpg textures.
+bevy = { version = "0.19.1", features = ["jpeg"] }
+# The editor panel. Immediate mode, so the form is a function of the last spec
+# rather than a widget tree to keep in step with one. Pinned: the bevy version
+# it integrates with is the version in its number, not in a range.
+bevy_egui = "0.42"
 # Bevy 0.19's built-in camera controllers are free-fly and pan only; a viewer
 # wants orbit. Same crate and version the sibling projects pin.
 bevy_panorbit_camera = "0.35.0"

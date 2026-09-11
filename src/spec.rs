@@ -2,7 +2,7 @@
 //!
 //! [`crate::scene`] carries the layout a solve produced — where things ended
 //! up. This carries what was asked for, which is the half an editor can write
-//! back. The two arrive in the same payload because the sidebar shows one and
+//! back. The two arrive in the same payload because the panel shows one and
 //! the viewport the other.
 //!
 //! Nothing here knows what a relation kind is called or what parameters it
@@ -211,7 +211,7 @@ pub struct Field {
     pub options: Vec<String>,
 }
 
-/// What the sidebar asks Python to do.
+/// What the editor panel asks Python to do.
 ///
 /// A `Set` names one leaf wherever it can, so a parameter the form does not
 /// show is left where it is. The exception is a relation's kind: the old

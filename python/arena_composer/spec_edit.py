@@ -9,7 +9,8 @@ not have is the two things this module adds:
   ``relations`` live in exactly one of the files. An edit goes to whichever file
   owns the key.
 * **What an edit drags with it.** Removing an object also has to remove the
-  relations that name it, or the spec stops loading with a dangling reference.
+  relations that name it, and renaming one has to carry them across, or the spec
+  stops loading with a dangling reference.
 
 Every edit is checked against the merged spec before either file is written, so
 a rejected edit leaves the pair on disk exactly as it was.
@@ -230,7 +231,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     This is the editor's whole write surface. `steps` walks the spec the way it
     reads — ``["relations", 2, "params", "side"]`` — and `op` is one of:
 
-    * ``set`` — replace the leaf `steps` names.
+    * ``set`` — replace the leaf `steps` names. Setting an entry's ``id`` renames
+      it in the relations that name it too.
     * ``insert`` — append `value` to the list `steps` names.
     * ``remove`` — drop the entry `steps` names, and any relation left dangling.
 
@@ -257,8 +259,15 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
 
         parent, last = _walk(document, steps[:-1]), steps[-1]
         if op == "set":
+            previous = parent.get(last) if isinstance(parent, dict) else None
             parent[last] = value
-            return files.write([f"set {_label(steps)} to {value!r}"])
+            changed = [f"set {_label(steps)} to {value!r}"]
+            # An id is a name other entries hold, so renaming it has to carry
+            # them — the same reason removing it has to drop them.
+            if last == "id" and key in _ID_SECTIONS and previous and previous != value:
+                if renamed := _rename_node(files, previous, value):
+                    changed.append(f"renamed {previous!r} in {renamed} place(s)")
+            return files.write(changed)
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
             # Capture the id before the entry goes, so the cascade can find the
@@ -332,6 +341,34 @@ def _drop_relations_naming(files: SpecFiles, node_id: str) -> int:
     for relation in dropped:
         relations.remove(relation)
     return len(dropped)
+
+
+def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
+    """Point everything naming `previous` at `node_id` instead.
+
+    A name left behind is a reference to an asset that no longer exists, which
+    stops the spec loading — the same failure removing an asset without its
+    relations causes. Two places hold one: a relation's ``subject`` and
+    ``reference``, and a task param, since Arena requires every string-valued
+    task param to name a node.
+
+    Task params go with a rename and not with a remove, which leaves them
+    alone deliberately: the node a rename renames still exists.
+    """
+    renamed = 0
+    for relation in files.section("relations"):
+        for slot in ("subject", "reference"):
+            if relation.get(slot) == previous:
+                relation[slot] = node_id
+                renamed += 1
+
+    task = files.documents[files.owner("task")].get("task") or {}
+    for subtask in task.get("subtasks") or []:
+        params = subtask.get("params") or {}
+        for name in [name for name, value in params.items() if value == previous]:
+            params[name] = node_id
+            renamed += 1
+    return renamed
 
 
 def remove_object(path: Path, node_id: str) -> Result:

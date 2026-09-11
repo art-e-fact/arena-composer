@@ -51,7 +51,7 @@ without dropping the window or moving the camera. Closing that pipe closes the w
 
 ## The editor
 
-The window has a sidebar (`src/sidebar.rs`) that draws the authored spec as a form and edits it.
+The window has a panel (`src/editor/`) that draws the authored spec as a form and edits it.
 It runs on the same pipe, in both directions:
 
 - **Down stdin** — every payload carries the merged spec, which file owns each top-level key, and
@@ -76,8 +76,19 @@ dropdowns, and a unary relation is drawn without a `reference` slot at all. What
 cannot prevent comes back in the payload's `errors` and is shown above the form.
 
 A refused edit is answered by `errors` alone, with no assets — re-reading every asset's USD to say
-"no" would cost seconds. `sidebar::Form::take` treats such a payload as a status message and keeps
+"no" would cost seconds. `editor::Form::take` treats such a payload as a status message and keeps
 the spec it is drawing.
+
+The panel is egui (`bevy_egui`), drawn each frame from `editor::Form` in the `EguiPrimaryContextPass`
+schedule — not `Update`, where there is no context to draw into yet. Immediate mode is
+what keeps the panel a pure function of the last payload: there is no widget tree to keep in step
+with the spec, so nothing here diffs, rebuilds or restores scroll. The only state it owns is UI
+state — the asset search, and the number under the pointer, which is held against `Form::revision`
+so a value does not snap back to the old one while Python is re-solving.
+
+`PanOrbitCamera` claims a drag from the cursor position alone and knows nothing about the panel over
+it, so `keep_the_camera_off_the_panel` toggles `enabled` from `EguiWantsInput`, latched between
+drags: a drag that starts in the panel must not orbit, and one that leaves it must not stop.
 
 `arena_composer.render` draws a packed scene from named views and writes a PNG each, in a
 child process that exits when it is done (`arena_composer.render_process` → `src/render.rs`).
@@ -107,7 +118,7 @@ cd arena_composer && cargo run --bin arena-render -- ../scene.msgpack top=top.pn
 ```
 
 `ARENA_VIEWER_SCREENSHOT=shot.png` on either viewer draws for a moment, writes the window to that
-path and quits — how to see what the sidebar actually looks like without a person at the keyboard.
+path and quits — how to see what the panel actually looks like without a person at the keyboard.
 It captures the window and nothing else on the desktop.
 
 `--output` still writes the resolver's JSON dump. That stays the human- and agent-readable

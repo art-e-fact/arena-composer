@@ -9,11 +9,11 @@
 //! Each has a Python front end (the [`python`] module, behind the `python`
 //! feature) and a `[[bin]]` that reads the same payload off disk.
 
+pub mod editor;
 pub mod layout;
 pub mod render;
 pub mod scene;
 pub mod spawn;
-pub mod sidebar;
 pub mod spec;
 pub mod viewer;
 pub mod wire;

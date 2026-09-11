@@ -7,7 +7,7 @@
 //! paths) stays in its JSON form and is deliberately not mirrored here, so
 //! growing it cannot break deserialization.
 //!
-//! What the viewer draws lives here. What the sidebar edits — the authored
+//! What the viewer draws lives here. What the editor panel edits — the authored
 //! spec and the vocabulary behind it — lives in [`crate::spec`]; the two ride
 //! one payload because a resolve produces both at once.
 //!
@@ -38,7 +38,7 @@ pub struct Scene {
     pub geometries: Vec<Vec<Node>>,
     pub lighting: Lighting,
     pub viewer: Option<ViewerCfg>,
-    /// The spec these assets resolved *from*, for the sidebar to edit. See
+    /// The spec these assets resolved *from*, for the editor panel to edit. See
     /// [`crate::spec`].
     pub spec: Spec,
     /// Which of the task and scene files holds each top-level key.
