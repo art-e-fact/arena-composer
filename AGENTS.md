@@ -49,6 +49,31 @@ it, and it holds Arena — so when the spec (or the scene its `external_yaml` in
 it re-resolves and sends the result down the child's stdin, and the viewer swaps the layout
 without dropping the window or moving the camera. Closing that pipe closes the window.
 
+## The editor
+
+The window has a sidebar (`src/sidebar.rs`) that draws the authored spec as a form and edits it.
+It runs on the same pipe, in both directions:
+
+- **Down stdin** — every payload carries the merged spec, which file owns each top-level key, and
+  the `vocabulary`: the assets, and every relation and task kind with a control per parameter.
+  That last part is *inferred* from Arena's registries in `arena_composer.catalog`, never listed
+  by hand, so a relation somebody registers themselves gets a form nobody wrote. All of it is
+  ~40 kB against megabytes of geometry, so it rides every scene rather than being asked for.
+- **Up stdout** — one `{op, path, value}` per edit, framed the way a scene is (`src/wire.rs`).
+  Python applies it through `spec_edit.apply` and answers with the next scene. **Nothing else may
+  write to the child's stdout**: Bevy logs to stderr, and one stray `println!` would land
+  mid-message and desynchronise the reader.
+
+Rust never writes YAML. `spec_edit` is the only writer, because it knows which of the two files a
+key belongs in, keeps comments through ruamel, and quotes what YAML 1.1 would read as a boolean.
+Rust's job is the other half — a form built so the invalid states are unreachable: ids come from
+dropdowns, and a unary relation is drawn without a `reference` slot at all. What construction
+cannot prevent comes back in the payload's `errors` and is shown above the form.
+
+A refused edit is answered by `errors` alone, with no assets — re-reading every asset's USD to say
+"no" would cost seconds. `sidebar::Form::take` treats such a payload as a status message and keeps
+the spec it is drawing.
+
 `arena_composer.render` draws a packed scene from named views and writes a PNG each, in a
 child process that exits when it is done (`arena_composer.render_process` → `src/render.rs`).
 No window and no display server: Bevy runs headless with `synchronous_pipeline_compilation`,

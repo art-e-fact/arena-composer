@@ -2,10 +2,14 @@
 //!
 //! `arena_composer.payload` packs a resolved layout and its geometry as
 //! MessagePack: ordinary maps for the scene, `bin` blobs of little-endian
-//! `f32`/`u32` for the vertex arrays. Only the fields the viewer draws are
-//! decoded — the rest of the resolver's dump (task, relations, placement
-//! diagnostics) stays in its JSON form and is deliberately not mirrored here,
-//! so growing it cannot break deserialization.
+//! `f32`/`u32` for the vertex arrays. Only the fields a front end uses are
+//! decoded — the rest of the resolver's dump (placement diagnostics, the USD
+//! paths) stays in its JSON form and is deliberately not mirrored here, so
+//! growing it cannot break deserialization.
+//!
+//! What the viewer draws lives here. What the sidebar edits — the authored
+//! spec and the vocabulary behind it — lives in [`crate::spec`]; the two ride
+//! one payload because a resolve produces both at once.
 //!
 //! Geometry arrives in **Arena's frame**: Z-up, metres, quaternions as `xyzw`,
 //! with every USD convention already resolved on the Python side. Bevy is Y-up,
@@ -16,6 +20,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
+
+use crate::spec::{Spec, Vocabulary};
 
 /// Lays Arena's Z-up world down onto Bevy's Y-up one.
 pub fn arena_to_bevy() -> Quat {
@@ -32,6 +38,14 @@ pub struct Scene {
     pub geometries: Vec<Vec<Node>>,
     pub lighting: Lighting,
     pub viewer: Option<ViewerCfg>,
+    /// The spec these assets resolved *from*, for the sidebar to edit. See
+    /// [`crate::spec`].
+    pub spec: Spec,
+    /// Which of the task and scene files holds each top-level key.
+    pub owners: HashMap<String, String>,
+    pub vocabulary: Vocabulary,
+    /// Why the last edit was refused, empty when it landed.
+    pub errors: Vec<String>,
 }
 
 impl Scene {

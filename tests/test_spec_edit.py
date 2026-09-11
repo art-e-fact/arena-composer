@@ -180,3 +180,54 @@ def test_a_spec_without_an_include_edits_itself(tmp_path: Path):
     assert result.ok, result.errors
     assert result.wrote == [str(path)]
     assert "apple" in [obj["id"] for obj in yaml.safe_load(path.read_text())["objects"]]
+
+
+LONG_DESCRIPTION = "pick up the banana and place it in the bowl, then pick up the apple and put it on the plate"
+
+
+def test_a_long_description_is_not_refolded(spec: Path):
+    """ruamel wraps at 80 columns unless told otherwise, and would refold every
+    description longer than that — with a trailing space at the break — the
+    first time an edit passed over the file."""
+    spec.write_text(TASK.replace("pick up the banana and place it in the bowl", LONG_DESCRIPTION))
+    before = spec.read_text()
+
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert result.ok, result.errors
+    assert result.wrote == [str(scene_of(spec))]
+    assert spec.read_text() == before, "a scene edit refolded the task spec"
+
+
+def test_an_edit_lands_in_the_file_that_owns_its_section(spec: Path):
+    """`apply` addresses the merged spec, so the path says nothing about which
+    file holds it — `env_name` is the task's, `relations` the scene's."""
+    assert spec_edit.apply(spec, "set", ["env_name"], "renamed").wrote == [str(spec)]
+
+    result = spec_edit.apply(spec, "set", ["relations", 1, "params", "clearance_m"], 0.03)
+    assert result.wrote == [str(scene_of(spec))]
+
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert scene["relations"][1]["params"] == {"clearance_m": 0.03}
+    assert yaml.safe_load(spec.read_text())["env_name"] == "renamed"
+
+
+def test_removing_an_entry_takes_its_relations_with_it(spec: Path):
+    """A relation naming an asset that has gone stops the spec loading, so the
+    cascade is what keeps a remove valid."""
+    result = spec_edit.apply(spec, "remove", ["objects", 2])  # distractor
+    assert result.ok, result.errors
+
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert [obj["id"] for obj in scene["objects"]] == ["banana", "bowl"]
+    assert all("distractor" not in (r["subject"], r.get("reference")) for r in scene["relations"])
+
+
+def test_a_path_that_isnt_there_is_refused(spec: Path):
+    """The editor can address a stale path — it draws the spec it was last
+    sent. That has to come back as an error, not as an exception."""
+    before = spec.read_text(), scene_of(spec).read_text()
+
+    result = spec_edit.apply(spec, "set", ["relations", 99, "params", "x"], 1.0)
+    assert not result.ok
+    assert "relations.99" in result.errors[0]
+    assert (spec.read_text(), scene_of(spec).read_text()) == before

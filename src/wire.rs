@@ -1,16 +1,22 @@
-//! Scenes arriving on a stream, one length-prefixed payload at a time.
+//! Messages crossing the pipe, one length-prefixed payload at a time.
 //!
 //! A pipe carries no message boundaries: two payloads written back to back are
-//! one run of bytes to the reader. So each scene is prefixed with its length in
-//! four big-endian bytes, and the reader takes exactly that many. The writing
-//! end is `arena_composer.viewer_process.pack_scene`.
+//! one run of bytes to the reader. So each message is prefixed with its length
+//! in four big-endian bytes, and the reader takes exactly that many.
+//!
+//! Both directions use that framing. Scenes arrive on stdin from
+//! `arena_composer.viewer_process.pack_scene`; edits leave on stdout for
+//! `arena_composer.view` to apply. stdout is free for this because Bevy logs
+//! to stderr — keep it that way, since one stray `println!` in the viewer
+//! would land mid-message and desynchronise the reader.
 
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Write};
 use std::sync::mpsc::Sender;
 
 use bevy::log::error;
 
 use crate::scene::Scene;
+use crate::spec::Edit;
 
 /// Read one scene, or `None` once the stream has ended.
 pub fn read_scene(stream: &mut impl Read) -> anyhow::Result<Option<Scene>> {
@@ -46,6 +52,19 @@ pub fn forward_scenes(mut stream: impl Read, scenes: Sender<Scene>) {
     }
 }
 
+/// Send one edit, framed the way a scene is.
+///
+/// Flushed rather than left to the buffer: a pipe is block-buffered and an
+/// edit carries no newline, so an unflushed one waits for the next — which is
+/// the user's next keystroke, or never.
+pub fn write_edit(sink: &mut impl Write, edit: &Edit) -> anyhow::Result<()> {
+    let payload = rmp_serde::to_vec_named(edit)?;
+    sink.write_all(&(payload.len() as u32).to_be_bytes())?;
+    sink.write_all(&payload)?;
+    sink.flush()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,6 +84,35 @@ mod tests {
         assert_eq!(read_scene(&mut stream).unwrap().unwrap().env_name, "first");
         assert_eq!(read_scene(&mut stream).unwrap().unwrap().env_name, "second");
         assert!(read_scene(&mut stream).unwrap().is_none());
+    }
+
+    /// An edit goes out framed the same way a scene comes in, so the reader on
+    /// the other end can be the mirror of `read_scene`.
+    #[test]
+    fn an_edit_is_framed_by_its_length() {
+        use crate::spec::{Step, Value};
+
+        let mut sink = Vec::new();
+        write_edit(
+            &mut sink,
+            &Edit::Set {
+                path: vec![Step::from("relations"), Step::from(2usize), Step::from("params")],
+                value: Value::Number(0.08),
+            },
+        )
+        .unwrap();
+
+        let length = u32::from_be_bytes(sink[..4].try_into().unwrap()) as usize;
+        assert_eq!(length, sink.len() - 4, "the prefix has to cover exactly the payload");
+
+        // The shape `arena_composer.spec_edit.apply` is called with. A path
+        // step is a bare key or index, so it addresses the spec the way it
+        // reads rather than needing a parser on the other side.
+        let decoded: serde_json::Value = rmp_serde::from_slice(&sink[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({"op": "set", "path": ["relations", 2, "params"], "value": 0.08}),
+        );
     }
 
     /// The end of the stream reaches the viewer as a closed channel.

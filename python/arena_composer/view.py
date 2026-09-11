@@ -24,9 +24,10 @@ import signal
 import sys
 from pathlib import Path
 
+import msgpack
 import yaml
 
-from arena_composer import viewer_process
+from arena_composer import spec_edit, viewer_process
 from arena_composer.payload import encode
 from arena_composer.resolve_layout import DEFAULT_SEED, resolve_layout_from_yaml
 from arena_composer.usd_assets import use_local_asset_cache
@@ -75,6 +76,9 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
         "-m",
         viewer_process.__name__,
         stdin=asyncio.subprocess.PIPE,
+        # The editor's edits come back this way. Bevy logs to stderr, so
+        # stdout carries nothing else — see `src/wire.rs`.
+        stdout=asyncio.subprocess.PIPE,
     )
 
     def stop() -> None:
@@ -92,13 +96,18 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
         loop.add_signal_handler(sig, stop)
 
     await _send(proc, payload)
-    reloads = asyncio.create_task(_reload_on_change(spec, seed, proc))
+    running = [
+        asyncio.create_task(_reload_on_change(spec, seed, proc)),
+        asyncio.create_task(_apply_edits(spec, seed, proc)),
+    ]
     try:
         return await proc.wait()
     finally:
-        reloads.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await reloads
+        for task in running:
+            task.cancel()
+        for task in running:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         stop()
 
 
@@ -107,6 +116,46 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
     assert proc.stdin is not None
     proc.stdin.write(viewer_process.pack_scene(payload))
     await proc.stdin.drain()
+
+
+async def _apply_edits(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
+    """Apply the edits the editor sends, and draw what they produce.
+
+    The channel only answers in scenes: an edit that lands is answered by the
+    spec redrawn, and one that does not by the errors alone. Writing goes
+    through :mod:`arena_composer.spec_edit`, which owns which of the two files
+    a key lives in and validates before either is touched, so a refused edit
+    leaves the spec exactly as the editor is still drawing it.
+    """
+    assert proc.stdout is not None
+    while (edit := await _read_edit(proc.stdout)) is not None:
+        result = await asyncio.to_thread(
+            spec_edit.apply, spec, edit.get("op", ""), list(edit.get("path", [])), edit.get("value")
+        )
+        if proc.returncode is not None:
+            return  # the window closed while we were writing
+
+        if not result.ok:
+            # No re-resolve: the spec did not change, and reading every asset's
+            # USD again to say so would cost seconds. The viewer keeps the
+            # scene it has and shows why the edit was refused.
+            await _send(proc, msgpack.packb({"errors": result.errors}, use_bin_type=True))
+            print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
+            continue
+
+        # `_reload_on_change` would catch this too, but only after its poll and
+        # settle; an edit the user just made should redraw now.
+        await _send(proc, await asyncio.to_thread(_resolve, spec, seed))
+        print(f"{spec}: {'; '.join(result.changed)}", file=sys.stderr)
+
+
+async def _read_edit(stream: asyncio.StreamReader) -> dict | None:
+    """One edit off the viewer's stdout, or None once it has ended."""
+    try:
+        header = await stream.readexactly(viewer_process.HEADER)
+        return msgpack.unpackb(await stream.readexactly(int.from_bytes(header, "big")))
+    except asyncio.IncompleteReadError:
+        return None
 
 
 async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:

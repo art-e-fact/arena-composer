@@ -1,9 +1,13 @@
 //! The viewer: a windowed Bevy app that draws the layout it is sent.
 //!
-//! Bare bones on purpose — it uploads the geometry the payload carries under
-//! the pose the solver picked, and gives you an orbit camera to look at it.
-//! There is no editing and no sim. A resolve happens in the process that sends
-//! the scenes; this one only ever draws the newest.
+//! It uploads the geometry the payload carries under the pose the solver
+//! picked, and gives you an orbit camera to look at it. There is no sim, and
+//! no solve: a resolve happens in the process that sends the scenes, and this
+//! one only ever draws the newest.
+//!
+//! Editing is [`crate::sidebar`]'s, and is the same arrangement — the form
+//! sends an edit up the pipe and redraws from the scene that comes back, so
+//! nothing here writes a spec either.
 
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -47,6 +51,10 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
                 }),
             PanOrbitCameraPlugin,
         ))
+        // In `run` and not in `setup`: the sidebar spawns Feathers widgets,
+        // which need an `AssetServer`, and `setup`'s tests build a world
+        // without one.
+        .add_plugins(crate::sidebar::plugin)
         .insert_resource(ResolvedScene(scene))
         .insert_resource(SceneUpdates(Mutex::new(updates)))
         .add_systems(Startup, setup)
@@ -65,6 +73,17 @@ fn setup(world: &mut World) {
     spawn_lighting(world, &scene);
     spawn_camera(world, &scene);
     spawn_hud(world, &scene);
+    show_in_form(world, &scene);
+}
+
+/// Hand a scene to the sidebar, where there is one.
+///
+/// Absent in the render path, and in the tests below — both draw a scene
+/// without ever showing a form.
+fn show_in_form(world: &mut World, scene: &Scene) {
+    if let Some(mut form) = world.get_resource_mut::<crate::sidebar::Form>() {
+        form.take(scene);
+    }
 }
 
 /// Draw the newest scene that has arrived, and close the window once no more
@@ -95,6 +114,7 @@ fn apply_updates(world: &mut World) {
         // and material assets are rebuilt either way — `Assets::add` mints a
         // new one per call — and the old ones are freed with their handles.
         info!("drawing {} ({} assets)", scene.env_name, scene.assets.len());
+        show_in_form(world, &scene);
         let root = spawn_scene(world, &scene);
         let stale: Vec<Entity> = world
             .query_filtered::<Entity, With<ArenaRoot>>()

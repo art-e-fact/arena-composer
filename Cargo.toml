@@ -18,8 +18,8 @@ name = "arena-viewer"
 path = "src/main.rs"
 
 [dependencies]
-# USD supports jpg textures.
-bevy = { version = "0.19.1", features = ["jpeg"] }
+# USD supports jpg textures. `bevy_feathers` is the editor sidebar's widget set.
+bevy = { version = "0.19.1", features = ["jpeg", "bevy_feathers"] }
 # Bevy 0.19's built-in camera controllers are free-fly and pan only; a viewer
 # wants orbit. Same crate and version the sibling projects pin.
 bevy_panorbit_camera = "0.35.0"
@@ -32,6 +32,11 @@ serde_bytes = "0.11"
 bytemuck = "1"
 anyhow = "1"
 pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+
+[dev-dependencies]
+# Writing a payload fixture as a literal. The tests pack it to MessagePack the
+# way Python does; nothing outside a test reads or writes JSON.
+serde_json = "1"
 
 [features]
 # Compiles the PyO3 wrapper (src/python.rs). Safe for a normal `cargo build`,

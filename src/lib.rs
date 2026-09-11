@@ -13,6 +13,8 @@ pub mod layout;
 pub mod render;
 pub mod scene;
 pub mod spawn;
+pub mod sidebar;
+pub mod spec;
 pub mod viewer;
 pub mod wire;
 

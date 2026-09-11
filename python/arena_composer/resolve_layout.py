@@ -69,6 +69,10 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[st
         "env_name": spec.env_name,
         "placement": _placement_summary(layout, seed),
         "assets": [_asset_entry(node_id, assets[node_id], meta, layout) for node_id, meta in _node_meta(spec).items()],
+        # The spec as authored, beside the layout it resolved to. An editor
+        # needs both: the layout says where the solver put things, this says
+        # what it was asked for, and only this one can be written back.
+        "spec": spec.model_dump(mode="json"),
         "relations": [relation.model_dump(mode="json") for relation in spec.relations],
         "task": spec.task.model_dump(mode="json"),
         "lighting": _lighting(spec, assets),
