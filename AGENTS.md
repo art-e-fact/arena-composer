@@ -75,6 +75,34 @@ Rust's job is the other half — a form built so the invalid states are unreacha
 dropdowns, and a unary relation is drawn without a `reference` slot at all. What construction
 cannot prevent comes back in the payload's `errors` and is shown above the form.
 
+### Keeping the camera off the panel
+
+`PanOrbitCamera` claims a drag from the cursor being inside the camera's viewport and knows
+nothing about the panel drawn over it, so `keep_the_camera_off_the_panel` clears its `enabled`
+while the pointer is busy elsewhere. It runs in `PostUpdate` between
+`EguiPostUpdateSet::ProcessOutput` and `PanOrbitCameraSystemSet`: the panel is drawn and
+`EguiWantsInput` written in that schedule, so anywhere earlier reads the previous frame's
+pointer. The decision is latched for as long as a button is held, which is what lets a drag
+cross the edge without changing hands.
+
+**`EguiWantsInput` does not see the panel.** Every field of it is false over the panel, so a gate
+built on it alone passes every drag, click and scroll straight through to the camera.
+`bevy_egui` builds a root `Ui` and discards it — the Bevy schedule runs in its place — so a panel
+has to be docked into a `Ui` of our own on the background layer, the way `bevy_egui`'s own
+`side_panel` example does it. `Context::is_pointer_over_egui` answers for that layer out of the
+root ui's leftover space, and nothing ever shrinks it, so it reads false everywhere. What egui
+does still hit-test is anything on a layer above the background: a combo popup, a menu, a widget
+mid-drag. So the gate is the union of two halves — `PointerOverPanel`, measured in `form::draw`
+from the rect `Panel::show` returns, and `EguiWantsInput` for everything above it. Check a change
+here against a real window: no unit test builds the full schedule, and the failure is silent.
+
+Do not turn on `bevy_panorbit_camera`'s `bevy_egui` feature to replace it. That feature is built
+against `bevy_egui` 0.40 and the panel draws with 0.42, so enabling it compiles a second egui and
+gates the camera on an `EguiContext` nothing ever draws into — it costs a duplicate dependency
+tree and does nothing. It also offers only the two behaviours we do not want: ignore hover, which
+lets a press on the panel orbit, or `EguiFocusIncludesHover`, which stops a drag the moment it
+crosses onto the panel.
+
 ### Two answers per edit
 
 Writing the YAML takes milliseconds and solving the layout it implies takes seconds, so an edit is

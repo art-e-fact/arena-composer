@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use super::{Form, send};
+use super::{Form, PointerOverPanel, send};
 use crate::spec::{Edit, Field, Kind, Params, Step, Value};
 
 /// How wide the panel opens. Draggable from there.
@@ -24,7 +24,12 @@ pub struct PanelState {
     revision: u64,
 }
 
-pub fn draw(mut contexts: EguiContexts, form: Res<Form>, mut state: Local<PanelState>) -> Result {
+pub fn draw(
+    mut contexts: EguiContexts,
+    form: Res<Form>,
+    mut state: Local<PanelState>,
+    mut over_panel: ResMut<PointerOverPanel>,
+) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
     // A panel needs a `Ui` to dock into, and the context's own root one is not
     // handed out — so this is the whole window, as a `Ui`.
@@ -35,10 +40,15 @@ pub fn draw(mut contexts: EguiContexts, form: Res<Form>, mut state: Local<PanelS
             .layer_id(egui::LayerId::background())
             .max_rect(ctx.viewport_rect()),
     );
-    egui::Panel::right("spec")
+    let shown = egui::Panel::right("spec")
         .default_size(WIDTH)
         .min_size(240.0)
         .show(&mut window, |ui| panel(ui, &form, &mut state));
+    // Measured here because this is the only place the panel's rect exists;
+    // see [`PointerOverPanel`] for why egui cannot be asked instead.
+    over_panel.0 = ctx
+        .pointer_interact_pos()
+        .is_some_and(|pointer| shown.response.rect.contains(pointer));
 
     // Over the 3D view, in the corner of what the panel left of it. The view is
     // the half that is behind: an accepted edit reaches the form at once and

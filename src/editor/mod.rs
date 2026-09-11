@@ -33,8 +33,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
-use bevy_panorbit_camera::PanOrbitCamera;
+use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass};
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
 use crate::scene::Scene as Payload;
 use crate::spec::{Edit, Spec, Vocabulary};
@@ -43,11 +43,33 @@ use crate::wire;
 pub fn plugin(app: &mut App) {
     app.add_plugins(EguiPlugin::default())
         .init_resource::<Form>()
+        .init_resource::<PointerOverPanel>()
         // The panel belongs in egui's own pass, not in `Update`: that is where
         // a context exists to draw into.
         .add_systems(EguiPrimaryContextPass, form::draw)
-        .add_systems(Update, keep_the_camera_off_the_panel);
+        // Between the two, so the camera acts on the pass that just ran:
+        // `ProcessOutput` is where egui publishes what this frame's panel made
+        // of the pointer, and the camera set is what reads `enabled` after. In
+        // `Update` both of those are still a frame away.
+        .add_systems(
+            PostUpdate,
+            keep_the_camera_off_the_panel
+                .after(EguiPostUpdateSet::ProcessOutput)
+                .before(PanOrbitCameraSystemSet),
+        );
 }
+
+/// Whether the pointer was over the panel when it was last drawn.
+///
+/// egui will not answer this for us. `bevy_egui` builds a root `Ui` and throws
+/// it away — the Bevy schedule runs in its place — so a panel has to be docked
+/// into a `Ui` of our own on the background layer, as `form::draw` does. For
+/// that layer `Context::is_pointer_over_egui` answers out of the *root* ui's
+/// leftover space, which nothing ever shrinks, so it reads false over the panel
+/// and every `EguiWantsInput` field with it. Anything on a layer above the
+/// background — a combo popup, a menu — egui still hit-tests correctly.
+#[derive(Resource, Default)]
+struct PointerOverPanel(bool);
 
 /// The spec the panel draws.
 #[derive(Resource, Default)]
@@ -104,20 +126,64 @@ fn send(edit: Edit) {
 ///
 /// `PanOrbitCamera` claims a drag on the frame the button goes down, checking
 /// only that the cursor is inside the camera's viewport — it knows nothing
-/// about the panel drawn over it. Latching the decision between drags is what
-/// keeps a drag that starts in the panel from orbiting, and one that leaves the
-/// panel from stopping.
+/// about the panel drawn over it, so the panel has to take the camera away.
+///
+/// Not `bevy_panorbit_camera`'s own `bevy_egui` feature, which exists to do
+/// exactly this: it is built against a different `bevy_egui` than the one we
+/// draw with, so turning it on compiles a second egui and gates the camera on a
+/// context nothing ever draws into. See the note in `arena_composer/AGENTS.md`.
 fn keep_the_camera_off_the_panel(
     mouse: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,
+    over_panel: Res<PointerOverPanel>,
     camera: Option<Single<&mut PanOrbitCamera>>,
 ) {
     let Some(mut camera) = camera else { return };
-    if mouse.get_pressed().next().is_some() && mouse.get_just_pressed().next().is_none() {
-        return; // mid-drag; whoever owns it keeps it
-    }
-    let taken = egui.wants_any_pointer_input();
-    if camera.enabled == taken {
-        camera.enabled = !taken;
+    let held = mouse.get_pressed().next().is_some() && mouse.get_just_pressed().next().is_none();
+    // The two halves of "egui is busy with the pointer": the panel, which only
+    // [`PointerOverPanel`] knows about, and everything drawn above it, which
+    // only egui does.
+    let busy = over_panel.0 || egui.wants_any_pointer_input();
+    let Some(takes) = camera_takes_input(held, busy) else {
+        return;
+    };
+    if camera.enabled != takes {
+        camera.enabled = takes;
     }
 }
+
+/// Whether the camera takes pointer input from here on, or `None` to leave the
+/// last answer standing.
+///
+/// A drag belongs to whatever the button went down over, for as long as it is
+/// held. Without that latch a drag begun on the panel would orbit the moment it
+/// left the panel, and one begun on the view would stop the moment it crossed
+/// onto it.
+fn camera_takes_input(mid_drag: bool, pointer_taken: bool) -> Option<bool> {
+    (!mid_drag).then_some(!pointer_taken)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::camera_takes_input;
+
+    /// Crossing the edge mid-drag settles nothing: an orbit that wanders over
+    /// the panel keeps orbiting, and a slider drag that wanders off it keeps
+    /// editing.
+    #[test]
+    fn a_drag_belongs_to_whatever_it_started_on() {
+        let mid_drag = true;
+        assert_eq!(camera_takes_input(mid_drag, true), None);
+        assert_eq!(camera_takes_input(mid_drag, false), None);
+    }
+
+    /// Between drags the pointer decides, so the press that begins the next one
+    /// goes to whatever it is over.
+    #[test]
+    fn between_drags_the_pointer_decides() {
+        let mid_drag = false;
+        assert_eq!(camera_takes_input(mid_drag, true), Some(false), "over the panel");
+        assert_eq!(camera_takes_input(mid_drag, false), Some(true), "over the view");
+    }
+}
+
