@@ -207,23 +207,39 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
                             // one, and whether there is a `reference` at all is
                             // the kind's to say.
                             let options = kind_options(form, &relation.subject, &reference, &ids);
-                            menu(ui, "kind", &relation.kind, options, set(&path));
+                            let width = ui.available_width();
+                            menu(ui, "kind", &relation.kind, options, set(&path), width);
                         });
                     });
                     // The kind names the whole entry, so it is a heading and
                     // what it governs is ruled off from it.
                     ui.separator();
-                    row(ui, "subject", |ui| {
-                        menu(ui, "subject", &relation.subject, id_options(&ids), set(&with(&path, "subject")));
-                    });
+                    // The pair shares a line rather than taking one each,
+                    // because the two of them read as the relation's direction.
                     // A unary relation takes no reference, and Arena refuses one
                     // that has it — so the slot is not drawn rather than
                     // validated.
-                    if kind.is_some_and(|kind| kind.unary == Some(false)) {
-                        row(ui, "reference", |ui| {
-                            menu(ui, "reference", &reference, id_options(&ids), set(&with(&path, "reference")));
-                        });
-                    }
+                    let binary = kind.is_some_and(|kind| kind.unary == Some(false));
+                    ui.horizontal(|ui| {
+                        // Half the line each, so the arrow between them falls in
+                        // the same place down the panel.
+                        let width = match binary {
+                            true => ui.available_width() / 2.0 - ui.spacing().item_spacing.x,
+                            false => ui.available_width(),
+                        };
+                        let options = id_options(&ids);
+                        menu(ui, "subject", &relation.subject, options, set(&with(&path, "subject")), width)
+                            .on_hover_text("subject — the object the relation is about");
+                        if binary {
+                            // `»` and not `→`: egui ships a font without an
+                            // arrow in it, and a missing glyph draws as a box.
+                            ui.weak("»");
+                            let width = ui.available_width();
+                            let options = id_options(&ids);
+                            menu(ui, "reference", &reference, options, set(&with(&path, "reference")), width)
+                                .on_hover_text("reference — the object it is placed against");
+                        }
+                    });
                     params(ui, kind, &relation.params, &ids, &with(&path, "params"), state);
                 })
                 .response
@@ -236,7 +252,8 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
         }
 
         let options = kind_options(form, subject_default(form), &form.spec.background.id, &ids);
-        menu(ui, "add", "+ relation", options, insert(&[Step::from("relations")]));
+        let width = ui.available_width();
+        menu(ui, "add", "+ relation", options, insert(&[Step::from("relations")]), width);
     });
     // Outside the group, so a collapsed section keeps its pins drawn.
     let count = form.spec.relations.len();
@@ -280,20 +297,20 @@ fn params(
 /// the rest of the width. A name longer than its share is cut rather than
 /// allowed to push the control out of line.
 ///
-/// The space is taken first and painted into after, because a label fills only
-/// the axis its layout justifies. `add_sized` justifies across the row it is
-/// in, which for a horizontal row is the vertical one, and leaves the name
-/// centred in its space with `halign` doing nothing.
+/// The space is taken first and filled by a child laid out right to left. That
+/// is what puts the name against its control: a label fills only the axis its
+/// layout justifies, so neither `halign` nor `place` moves it off the centre of
+/// the space it was given.
 fn row(ui: &mut egui::Ui, name: &str, control: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         let size = egui::vec2(ui.available_width() * NAMES, ui.spacing().interact_size.y);
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        ui.place(
-            rect,
-            egui::Label::new(egui::RichText::new(name).weak())
-                .halign(egui::Align::RIGHT)
-                .truncate(),
-        );
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        )
+        .add(egui::Label::new(egui::RichText::new(name).weak()).truncate());
         control(ui);
     });
 }
@@ -311,13 +328,24 @@ fn control(
     state: &mut PanelState,
 ) {
     let current = value.as_text().unwrap_or_default();
+    let width = ui.available_width();
     match field.kind.as_str() {
         "enum" => {
             let options = field.options.iter().map(|o| (o.clone(), Value::text(o))).collect();
-            menu(ui, &field.name, current, options, set(path));
+            menu(ui, &field.name, current, options, set(path), width);
         }
-        "node_ref" => menu(ui, &field.name, current, id_options(ids), set(path)),
+        "node_ref" => {
+            menu(ui, &field.name, current, id_options(ids), set(path), width);
+        }
         "number" | "int" => number(ui, ui.make_persistent_id(&field.name), value.as_number(), path, state),
+        "bool" => {
+            // Sent on the click. There is no half-made state to hold on to the
+            // way a dragged number has one.
+            let mut on = matches!(value, Value::Bool(true));
+            if ui.checkbox(&mut on, "").changed() {
+                send(Edit::Set { path: path.to_vec(), value: Value::Bool(on) });
+            }
+        }
         _ => {
             ui.weak(format!("{value:?}"));
         }
@@ -419,9 +447,10 @@ fn menu(
     current: &str,
     options: Vec<(String, Value)>,
     edit: impl Fn(Value) -> Edit,
-) {
+    width: f32,
+) -> egui::Response {
     egui::ComboBox::from_id_salt(salt)
-        .width(ui.available_width())
+        .width(width)
         .selected_text(if current.is_empty() { "—" } else { current })
         .show_ui(ui, |ui| {
             for (label, value) in options {
@@ -429,7 +458,8 @@ fn menu(
                     send(edit(value));
                 }
             }
-        });
+        })
+        .response
 }
 
 fn set(path: &[Step]) -> impl Fn(Value) -> Edit {
