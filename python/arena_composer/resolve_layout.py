@@ -208,7 +208,7 @@ def _lighting(spec: ArenaEnvGraphSpec, assets: dict[str, Any]) -> dict[str, Any]
     Arena injects a dome light at build time unless a light asset or a light baked into the
     background USD is found, so a viewer has to do the same to match what the sim renders.
     """
-    from isaaclab_arena.utils.usd_helpers import has_light, open_stage
+    from isaaclab_arena.utils.usd.helpers import has_light, open_stage
 
     light_assets = [node_id for node_id, asset in assets.items() if "light" in (asset.tags or [])]
     background_usd = assets[spec.background.id].usd_path
