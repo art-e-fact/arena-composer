@@ -8,7 +8,7 @@ use bevy_egui::{EguiContexts, egui};
 use super::relations::{self, RelationGizmos};
 use super::{Form, PointerOverPanel, send};
 use crate::layout::Placed;
-use crate::spec::{Edit, Field, Kind, Params, Step, Value};
+use crate::spec::{Edit, Field, Kind, Params, Relation, Step, Value};
 
 /// How wide the panel opens. Draggable from there.
 const WIDTH: f32 = 360.0;
@@ -17,9 +17,11 @@ const WIDTH: f32 = 360.0;
 pub struct PanelState {
     /// What the asset browser is filtered to.
     pub search: String,
-    /// The number being dragged or typed into, and the value it shows. One,
-    /// because only one control can be under the pointer at a time.
-    editing: Option<(egui::Id, f64)>,
+    /// The number being dragged or typed into: the control, the value it
+    /// shows, and where in the spec that value belongs. One, because only one
+    /// control can be under the pointer at a time. The path is carried so the
+    /// view can draw the value before the spec comes back carrying it.
+    editing: Option<(egui::Id, f64, Vec<Step>)>,
     /// The id being renamed, and the text typed so far. One, for the same
     /// reason: only one box can hold the caret.
     renaming: Option<(egui::Id, String)>,
@@ -82,6 +84,10 @@ pub fn draw(
     // issued in egui's pass is collected with every other at the frame's end.
     for &index in &shown.inner {
         if let Some(relation) = form.spec.relations.get(index) {
+            // Whatever is being dragged right now stands in for what the spec
+            // says, so the view follows the number rather than the answer to it.
+            let dragged = pending(relation, index, &state);
+            let relation = dragged.as_ref().unwrap_or(relation);
             relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut gizmos);
         }
     }
@@ -217,6 +223,17 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
     } else {
         shown.extend(state.pinned.iter().copied().filter(|&index| index < count));
     }
+    // A number being dragged keeps its relation drawn however far the pointer
+    // has wandered: egui holds a drag after the pointer leaves the control, and
+    // the entry's hover does not.
+    shown.extend(
+        state
+            .editing
+            .as_ref()
+            .and_then(|(_, _, path)| relation_param(path))
+            .map(|(index, _)| index)
+            .filter(|&index| index < count),
+    );
     shown
 }
 
@@ -301,19 +318,54 @@ fn name(ui: &mut egui::Ui, id: egui::Id, current: &str, path: Vec<Step>, state: 
 }
 
 /// A number, sent once it is let go of rather than as it moves — a solve per
-/// dragged pixel is not something Python can keep up with.
+/// dragged pixel is not something Python can keep up with. The view does follow
+/// it as it moves, without waiting for that; see [`pending`].
 fn number(ui: &mut egui::Ui, id: egui::Id, value: Option<f64>, path: &[Step], state: &mut PanelState) {
     let in_spec = value.unwrap_or_default();
-    let mut shown = match state.editing {
-        Some((editing, value)) if editing == id => value,
+    let mut shown = match &state.editing {
+        Some((editing, value, _)) if *editing == id => *value,
         _ => in_spec,
     };
     let response = ui.add(egui::DragValue::new(&mut shown).speed(0.005).max_decimals(4));
     if response.dragged() || response.has_focus() {
-        state.editing = Some((id, shown));
+        state.editing = Some((id, shown, path.to_vec()));
     }
     if (response.drag_stopped() || response.lost_focus()) && shown != in_spec {
         send(Edit::Set { path: path.to_vec(), value: Value::Number(shown) });
+    }
+}
+
+/// `relation` as the number being dragged would leave it, when that number is
+/// one of its parameters.
+///
+/// What draws a drag before the spec carries it. Nothing more is sent for it:
+/// this is the value the control is already painting, and the spec that answers
+/// the end of the drag holds the same one, so the handover draws no step. A
+/// refused edit brings the old value back, as it does to the control.
+///
+/// A path naming anything else is left alone, so a number control added
+/// somewhere other than a relation previews nothing rather than the wrong
+/// relation.
+fn pending(relation: &Relation, index: usize, state: &PanelState) -> Option<Relation> {
+    let (_, value, path) = state.editing.as_ref()?;
+    let (at, name) = relation_param(path)?;
+    if at != index {
+        return None;
+    }
+    let mut dragged = relation.clone();
+    dragged.params.insert(name.to_owned(), Value::Number(*value));
+    Some(dragged)
+}
+
+/// The relation and the parameter a path addresses, where it addresses one.
+fn relation_param(path: &[Step]) -> Option<(usize, &str)> {
+    match path {
+        [Step::Key(relations), Step::Index(index), Step::Key(params), Step::Key(name)]
+            if relations == "relations" && params == "params" =>
+        {
+            Some((*index, name))
+        }
+        _ => None,
     }
 }
 
@@ -455,5 +507,37 @@ mod tests {
             Value::map([("side", Value::text("positive_y"))]),
             "a required parameter was left out"
         );
+    }
+
+    /// A number under the pointer reaches the view where it has been dragged
+    /// to, not where the spec still has it, and reaches nothing else.
+    #[test]
+    fn a_dragged_number_is_drawn_before_the_spec_carries_it() {
+        let relation = Relation {
+            kind: "on".into(),
+            subject: "bowl".into(),
+            params: Params::from([("clearance_m".to_owned(), Value::Number(0.0))]),
+            ..Default::default()
+        };
+        let dragging = |path: Vec<Step>| PanelState {
+            editing: Some((egui::Id::new("clearance_m"), 0.08, path)),
+            ..PanelState::default()
+        };
+        let clearance_of = |index: usize| {
+            vec![
+                Step::from("relations"),
+                Step::from(index),
+                Step::from("params"),
+                Step::from("clearance_m"),
+            ]
+        };
+
+        let dragged = pending(&relation, 3, &dragging(clearance_of(3))).expect("the drag is this relation's");
+        assert_eq!(dragged.params["clearance_m"], Value::Number(0.08));
+        assert_eq!(relation.params["clearance_m"], Value::Number(0.0), "the spec was written to");
+
+        assert!(pending(&relation, 2, &dragging(clearance_of(3))).is_none(), "another relation's drag");
+        let elsewhere = vec![Step::from("objects"), Step::from(3usize), Step::from("id")];
+        assert!(pending(&relation, 3, &dragging(elsewhere)).is_none(), "not a relation parameter");
     }
 }

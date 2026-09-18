@@ -149,6 +149,12 @@ params are read with the vocabulary's defaults behind them, the way the panel sh
 gizmos are issued in egui's pass from the panel's own hover, on a gizmo group with
 `depth_bias = -1`, so a ring under a table or a rectangle on its top is not hidden by the surface.
 
+A number being dragged draws before it is sent. `PanelState::editing` already holds the value
+under the pointer, to paint the control with; it carries that value's spec path too, and
+`form::pending` lays it over the relation the gizmos are built from. So a parameter's shape
+follows the drag, while the object it is about stays where the last solve left it. The edit still
+goes out once, when the drag ends.
+
 `ARENA_VIEWER_SHOW_RELATIONS=all` (or `=2,5`, positions in the relations list) starts the viewer
 with those drawn — with `ARENA_VIEWER_SCREENSHOT`, the way to look at them without a pointer.
 
