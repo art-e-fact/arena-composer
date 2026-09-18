@@ -136,6 +136,22 @@ so a value does not snap back between letting go of it and the spec carrying it 
 it, so `keep_the_camera_off_the_panel` toggles `enabled` from `EguiWantsInput`, latched between
 drags: a drag that starts in the panel must not orbit, and one that leaves it must not stop.
 
+### Relation gizmos
+
+Hovering a relation in the panel draws what it asks for over the layout, and the eye toggle on
+each keeps it drawn (`src/editor/relations.rs`). The shapes are the ones Arena's loss strategies
+score (`isaaclab_arena/relations/relation_loss_strategies.py`) — the `on` footprint inset by its
+margin, `next_to`'s target face, `not_next_to`'s keep-out band, the limits around an object's
+*origin* — rebuilt in Arena's frame from `layout::Placed`, the assets last drawn, and
+`layout::world_aabb`, the reported local box under the solved pose. Two rules there: the reported
+box already carries `Object.scale`, so the pose's scale is not applied to it again; and a spec's
+params are read with the vocabulary's defaults behind them, the way the panel shows them. The
+gizmos are issued in egui's pass from the panel's own hover, on a gizmo group with
+`depth_bias = -1`, so a ring under a table or a rectangle on its top is not hidden by the surface.
+
+`ARENA_VIEWER_SHOW_RELATIONS=all` (or `=2,5`, positions in the relations list) starts the viewer
+with those drawn — with `ARENA_VIEWER_SCREENSHOT`, the way to look at them without a pointer.
+
 `arena_composer.render` draws a packed scene from named views and writes a PNG each, in a
 child process that exits when it is done (`arena_composer.render_process` → `src/render.rs`).
 No window and no display server: Bevy runs headless with `synchronous_pipeline_compilation`,

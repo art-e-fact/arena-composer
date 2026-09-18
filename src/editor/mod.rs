@@ -25,9 +25,13 @@
 //! object from the asset list, a relation from a kind menu — so there is no
 //! "add now, fix the invalid parts after". What a menu writes is an entry Arena
 //! already accepts.
+//!
+//! Hovering a relation draws what it asks for over the layout, and a toggle on
+//! each keeps it drawn; see [`relations`].
 
 mod browser;
 mod form;
+mod relations;
 
 use std::collections::HashMap;
 
@@ -36,6 +40,7 @@ use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
+use crate::layout::Placed;
 use crate::scene::Scene as Payload;
 use crate::spec::{Edit, Spec, Vocabulary};
 use crate::wire;
@@ -44,6 +49,8 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(EguiPlugin::default())
         .init_resource::<Form>()
         .init_resource::<PointerOverPanel>()
+        .init_resource::<Placed>()
+        .init_gizmo_group::<relations::RelationGizmos>()
         // The panel belongs in egui's own pass, not in `Update`: that is where
         // a context exists to draw into.
         .add_systems(EguiPrimaryContextPass, form::draw)
@@ -57,6 +64,7 @@ pub fn plugin(app: &mut App) {
                 .after(EguiPostUpdateSet::ProcessOutput)
                 .before(PanOrbitCameraSystemSet),
         );
+    relations::configure(&mut app.world_mut().resource_mut::<GizmoConfigStore>());
 }
 
 /// Whether the pointer was over the panel when it was last drawn.

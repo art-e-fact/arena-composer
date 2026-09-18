@@ -1,16 +1,19 @@
 //! Drawing the spec, and turning a control's click into an [`Edit`].
 
+use std::collections::BTreeSet;
+
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
+use super::relations::{self, RelationGizmos};
 use super::{Form, PointerOverPanel, send};
+use crate::layout::Placed;
 use crate::spec::{Edit, Field, Kind, Params, Step, Value};
 
 /// How wide the panel opens. Draggable from there.
 const WIDTH: f32 = 360.0;
 
 /// Everything the panel remembers that is not in the spec.
-#[derive(Default)]
 pub struct PanelState {
     /// What the asset browser is filtered to.
     pub search: String,
@@ -22,11 +25,35 @@ pub struct PanelState {
     renaming: Option<(egui::Id, String)>,
     /// The spec `editing` was made against.
     revision: u64,
+    /// Relations kept drawn in the view after the pointer has left them, by
+    /// position in the list. Removing one above a pin shifts the pin.
+    pinned: BTreeSet<usize>,
+    /// Draw every relation, pointer or not.
+    show_all: bool,
+}
+
+/// `ARENA_VIEWER_SHOW_RELATIONS=all`, or `=2,5` for those positions in the
+/// list, starts with those relations drawn: the way to see them in a
+/// screenshot, where there is nothing to hover.
+impl Default for PanelState {
+    fn default() -> Self {
+        let shown = std::env::var("ARENA_VIEWER_SHOW_RELATIONS").unwrap_or_default();
+        Self {
+            search: String::new(),
+            editing: None,
+            renaming: None,
+            revision: 0,
+            pinned: shown.split(',').filter_map(|index| index.trim().parse().ok()).collect(),
+            show_all: matches!(shown.trim(), "1" | "all"),
+        }
+    }
 }
 
 pub fn draw(
     mut contexts: EguiContexts,
     form: Res<Form>,
+    placed: Res<Placed>,
+    mut gizmos: Gizmos<RelationGizmos>,
     mut state: Local<PanelState>,
     mut over_panel: ResMut<PointerOverPanel>,
 ) -> Result {
@@ -50,6 +77,15 @@ pub fn draw(
         .pointer_interact_pos()
         .is_some_and(|pointer| shown.response.rect.contains(pointer));
 
+    // The relations the panel wants seen, drawn over the layout. From here
+    // rather than a system of its own: the hover is this frame's, and a gizmo
+    // issued in egui's pass is collected with every other at the frame's end.
+    for &index in &shown.inner {
+        if let Some(relation) = form.spec.relations.get(index) {
+            relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut gizmos);
+        }
+    }
+
     // Over the 3D view, in the corner of what the panel left of it. The view is
     // the half that is behind: an accepted edit reaches the form at once and
     // the layout only once the solver has caught up.
@@ -67,7 +103,8 @@ fn spinner() -> egui::Spinner {
     egui::Spinner::new().size(16.0)
 }
 
-fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
+/// Draw the panel, and say which relations it wants drawn in the view.
+fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet<usize> {
     // A half-made edit belongs to the spec it was made against.
     if state.revision != form.revision {
         state.revision = form.revision;
@@ -87,10 +124,13 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
         .default_size(200.0)
         .show(ui, |ui| super::browser::show(ui, form, &mut state.search));
 
-    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        objects(ui, form, state);
-        relations(ui, form, state);
-    });
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            objects(ui, form, state);
+            relations(ui, form, state)
+        })
+        .inner
 }
 
 fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
@@ -112,15 +152,18 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     });
 }
 
-fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
+/// The relations, each with a toggle to keep it drawn. Returns the ones to
+/// draw this frame: hovered, pinned, or every one when asked for them all.
+fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet<usize> {
     let ids = form.spec.node_ids();
+    let mut shown = BTreeSet::new();
     group(ui, "relations", form.spec.relations.len(), form.owner("relations"), |ui| {
         for (index, relation) in form.spec.relations.iter().enumerate() {
             let path = vec![Step::from("relations"), Step::from(index)];
             let kind = form.vocabulary.relation(&relation.kind);
             let reference = relation.reference.clone().unwrap_or_default();
 
-            ui.push_id(index, |ui| {
+            let entry = ui.push_id(index, |ui| {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         if remove(ui) {
@@ -132,6 +175,14 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
                         // to say.
                         let options = kind_options(form, &relation.subject, &reference, &ids);
                         menu(ui, "kind", &relation.kind, options, set(&path));
+                        let mut pinned = state.pinned.contains(&index);
+                        if ui.toggle_value(&mut pinned, "👁").on_hover_text("keep drawn").changed() {
+                            if pinned {
+                                state.pinned.insert(index);
+                            } else {
+                                state.pinned.remove(&index);
+                            }
+                        }
                     });
                     ui.horizontal(|ui| {
                         menu(ui, "subject", &relation.subject, id_options(&ids), set(&with(&path, "subject")));
@@ -146,13 +197,27 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
                         }
                     });
                     params(ui, kind, &relation.params, &ids, &with(&path, "params"), state);
-                });
+                })
+                .response
             });
+            // The whole entry, controls included: a number being dragged is
+            // still the relation being looked at.
+            if entry.inner.contains_pointer() {
+                shown.insert(index);
+            }
         }
 
         let options = kind_options(form, subject_default(form), &form.spec.background.id, &ids);
         menu(ui, "add", "+ relation", options, insert(&[Step::from("relations")]));
     });
+    // Outside the group, so a collapsed section keeps its pins drawn.
+    let count = form.spec.relations.len();
+    if state.show_all {
+        shown.extend(0..count);
+    } else {
+        shown.extend(state.pinned.iter().copied().filter(|&index| index < count));
+    }
+    shown
 }
 
 /// A control per parameter the kind declares, in the order it declares them.

@@ -19,6 +19,12 @@ pub struct ArenaRoot;
 #[derive(Component)]
 pub struct AssetId(pub String);
 
+/// The layout on screen: every asset of the scene last spawned, drawable or
+/// not. An object reference draws nothing of its own but is what an `on`
+/// stands on, so anything that reasons about the layout wants it here too.
+#[derive(Resource, Default)]
+pub struct Placed(pub Vec<Asset>);
+
 /// Leaves a fitted view this much room around the layout.
 const MARGIN: f32 = 1.1;
 
@@ -29,6 +35,7 @@ const MIN_EXTENT: f32 = 0.5;
 
 /// Spawn a layout under a fresh [`ArenaRoot`] and return it.
 pub fn spawn_scene(world: &mut World, scene: &Scene) -> Entity {
+    world.insert_resource(Placed(scene.assets().to_vec()));
     let root = world
         .spawn((
             ArenaRoot,
@@ -193,8 +200,8 @@ fn perspective(scene: &Scene, focus: Vec3, size: Vec3) -> Framing {
     }
 }
 
-/// The layout's world-space bounds in Bevy's frame, from the local bounding
-/// boxes the resolver reported. `None` when nothing is drawn.
+/// The layout's world-space bounds in Bevy's frame, over the assets that are
+/// drawn. `None` when nothing is.
 pub fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
     let to_bevy = arena_to_bevy();
     let mut min = Vec3::splat(f32::INFINITY);
@@ -205,19 +212,41 @@ pub fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
         .iter()
         .filter(|asset| !scene.geometry_of(asset).is_empty())
     {
-        for corner in corners(asset) {
-            let point = to_bevy * asset.transform().transform_point(corner);
+        let (lo, hi) = world_aabb(asset);
+        // The frame change only permutes and flips axes, so a box stays a box
+        // and its two corners are enough — sorted back into min and max.
+        for point in [to_bevy * lo, to_bevy * hi] {
             min = min.min(point);
             max = max.max(point);
-            any = true;
         }
+        any = true;
     }
     any.then_some((min, max))
 }
 
-/// The eight corners of an asset's local bounding box.
-fn corners(asset: &Asset) -> impl Iterator<Item = Vec3> {
-    let (lo, hi) = (Vec3::from(asset.bbox_min), Vec3::from(asset.bbox_max));
+/// An asset's world-space bounds in Arena's frame: the reported local box
+/// under the solved pose, refitted to the axes — the box the placement solver
+/// constrained.
+///
+/// The pose's `scale` is left out on purpose. Arena bakes `Object.scale` into
+/// the box it reports, so applying it here would size the box twice.
+pub fn world_aabb(asset: &Asset) -> (Vec3, Vec3) {
+    let pose = Transform {
+        scale: Vec3::ONE,
+        ..asset.transform()
+    };
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for corner in corners((Vec3::from(asset.bbox_min), Vec3::from(asset.bbox_max))) {
+        let point = pose.transform_point(corner);
+        min = min.min(point);
+        max = max.max(point);
+    }
+    (min, max)
+}
+
+/// The eight corners of a box.
+pub fn corners((lo, hi): (Vec3, Vec3)) -> impl Iterator<Item = Vec3> {
     (0..8).map(move |i| {
         Vec3::new(
             if i & 1 == 0 { lo.x } else { hi.x },
@@ -230,7 +259,8 @@ fn corners(asset: &Asset) -> impl Iterator<Item = Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::Node as GeometryNode;
+    use crate::scene::{Node as GeometryNode, Rotation, Scale};
+    use std::f32::consts::FRAC_1_SQRT_2;
 
     /// The extents an orthographic framing was fitted to. `ScalingMode` carries
     /// no `PartialEq`, hence the unpacking.
@@ -285,6 +315,20 @@ mod tests {
     #[test]
     fn undrawable_assets_are_left_out_of_the_bounds() {
         assert!(bounds(&scene([10.0; 3], ([0.0; 3], [1.0; 3]), false)).is_none());
+    }
+
+    /// The box the solver constrained: the local bounds turned by the pose and
+    /// refitted, and not scaled again — Arena reports them scaled already.
+    #[test]
+    fn world_bounds_follow_the_pose_but_not_the_scale() {
+        let mut scene = scene([1.0, 0.0, 0.0], ([0.0; 3], [2.0, 1.0, 1.0]), true);
+        let asset = &mut scene.assets.as_mut().unwrap()[0];
+        // A quarter turn about Z takes the box's +X extent onto +Y.
+        asset.rotation_xyzw = Rotation([0.0, 0.0, FRAC_1_SQRT_2, FRAC_1_SQRT_2]);
+        asset.scale = Scale([2.0; 3]);
+        let (min, max) = world_aabb(asset);
+        assert!(min.abs_diff_eq(Vec3::ZERO, 1e-5), "{min}");
+        assert!(max.abs_diff_eq(Vec3::new(1.0, 2.0, 1.0), 1e-5), "{max}");
     }
 
     /// Every axis view looks at the layout from outside it, along its own axis,
