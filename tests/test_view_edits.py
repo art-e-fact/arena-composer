@@ -93,6 +93,38 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
     asyncio.run(run())
 
 
+def test_a_layout_is_followed_by_the_spec_as_the_file_now_reads(monkeypatch, tmp_path: Path):
+    """A layout carries the spec its own solve began from, and an edit made
+    during those seconds leaves that copy behind. So the panel is answered
+    again, from the file, behind the layout."""
+    monkeypatch.setattr(
+        view,
+        "encode_spec",
+        lambda spec, errors, solving=False: msgpack.packb(
+            {"spec": {"env_name": spec.read_text()}, "errors": list(errors), "solving": solving}, use_bin_type=True
+        ),
+    )
+    spec = tmp_path / "task.yaml"
+    spec.write_text("current")
+    layout = msgpack.packb({"assets": [], "spec": {"env_name": "as the solve began"}}, use_bin_type=True)
+
+    async def run() -> None:
+        viewer = _Viewer()
+        await view._draw(viewer, spec, layout, solving=True)
+        assert [a.get("assets") is not None for a in viewer.answers] == [True, False], "expected a layout, then a spec"
+        assert viewer.answers[0]["spec"]["env_name"] == "as the solve began", "the layout was rewritten"
+        assert viewer.answers[1]["spec"]["env_name"] == "current", "the file was not read again"
+        # Another solve is queued, so the panel goes on saying the view is behind.
+        assert viewer.answers[1]["solving"] is True
+
+        # A solve that produced nothing still answers, with the reason.
+        viewer.answers.clear()
+        await view._draw(viewer, spec, None, ["Exception: no layout"])
+        assert [a["errors"] for a in viewer.answers] == [["Exception: no layout"]]
+
+    asyncio.run(run())
+
+
 def test_a_refused_edit_is_answered_without_a_solve(monkeypatch, tmp_path: Path):
     """The spec did not change, so there is nothing to re-resolve — the answer
     is that same spec carrying the reason, and no solve is coming."""

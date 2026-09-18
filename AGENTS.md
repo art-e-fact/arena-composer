@@ -115,6 +115,13 @@ Only `assets` may be absent from a message. Every one carries the whole editor h
 `editor::Form::take` has no half a message to piece together; and `viewer::apply_updates` drains the
 newest of *each* kind rather than simply the newest, since both can land in one frame.
 
+A layout's copy of the editor half is as old as the solve that produced it, though, so the panel is
+answered only by the messages that carry no layout. `view._draw` sends one behind every layout, read
+from the file with nothing awaited between the read and the write, and that is also what ends the
+spinner. A layout answers the panel in one place, `viewer::setup`, opening it on the first message.
+That is why the full payload still carries a spec at all: a packed payload run through
+`arena-viewer`, with no Python behind it, has no other message to fill the panel from.
+
 A refused edit is answered the same way with `solving: false`: the file did not change, so what goes
 back is that same spec carrying the reason. Re-resolving to say "no" would cost the seconds the edit
 was refused in.

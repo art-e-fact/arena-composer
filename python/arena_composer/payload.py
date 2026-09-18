@@ -15,6 +15,12 @@ first, which carries the editor's half and no layout at all, and by a full
 payload once the solver has caught up; the viewer keeps drawing the layout it
 has in between. Every message carries the whole editor half, so the panel never
 has to piece one together.
+
+A layout is followed by a second :func:`encode_spec` for the same reason it is
+preceded by one: the spec a layout carries was read when its solve began, and
+the editor can be several edits past that by the time the solve lands. So the
+panel is answered by the messages carrying no layout, and a full payload's own
+spec is read only to open one (``viewer::setup``).
 """
 
 from __future__ import annotations

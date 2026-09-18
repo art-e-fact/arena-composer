@@ -42,8 +42,12 @@ pub struct Scene {
     pub geometries: Vec<Vec<Node>>,
     pub lighting: Lighting,
     pub viewer: Option<ViewerCfg>,
-    /// The spec these assets resolved *from*, for the editor panel to edit. See
-    /// [`crate::spec`].
+    /// The spec this message is about, for the editor panel to edit. See
+    /// [`crate::spec`]. The panel is opened on the first message's copy and
+    /// answered by the messages carrying no layout after that: a layout's copy
+    /// was read when its solve began, and an edit made during those seconds
+    /// leaves it behind. Which is why it is still here — a packed payload run
+    /// through `arena-viewer` on its own has no other way to fill the panel.
     pub spec: Spec,
     /// Which of the task and scene files holds each top-level key.
     pub owners: HashMap<String, String>,

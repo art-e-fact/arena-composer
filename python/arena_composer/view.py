@@ -172,29 +172,49 @@ async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Proc
     while True:
         await asked.wait()
         asked.clear()
-        answer = await asyncio.to_thread(_solved_or_why_not, spec, seed)
+        layout, errors = await asyncio.to_thread(_solved, spec, seed)
         if proc.returncode is not None:
             return  # the window closed while we were resolving
-        if answer is not None:
-            await _send(proc, answer)
+        # `asked` set again means the edits that arrived during this solve have
+        # one of their own coming, so the panel goes on saying the view is
+        # behind rather than blinking off and on.
+        await _draw(proc, spec, layout, errors, solving=asked.is_set())
 
 
-def _solved_or_why_not(spec: Path, seed: int) -> bytes | None:
-    """The scene `spec` resolves to, or the reason it does not.
-
-    None when neither can be said, which takes `spec` becoming unreadable since
-    the edit that validated it. `_reload_on_change` answers once it reads again;
-    until then the panel is left saying a solve is still coming.
-    """
+def _solved(spec: Path, seed: int) -> tuple[bytes | None, list[str]]:
+    """The scene `spec` resolves to, and what stopped it where it does not."""
     try:
-        return _resolve(spec, seed)
+        return _resolve(spec, seed), []
     except Exception as error:
         # Anything Arena raises on a spec that validates but will not build.
         reason = f"{type(error).__name__}: {error}"
         print(f"{spec}: {reason}", file=sys.stderr)
-        with contextlib.suppress(Exception):
-            return encode_spec(spec, [reason])
-    return None
+        return None, [reason]
+
+
+async def _draw(
+    proc: asyncio.subprocess.Process,
+    spec: Path,
+    layout: bytes | None,
+    errors: list[str] | None = None,
+    solving: bool = False,
+) -> None:
+    """Send a layout, and behind it the spec as the file reads at this moment.
+
+    Two messages, because the spec a layout carries is the one its own solve
+    began from, and an edit made during those seconds leaves that copy behind.
+    The panel takes the second and ignores the first; `viewer::apply_updates` is
+    where it does. Nothing is awaited between reading the file here and writing
+    it into the pipe, so what goes out is the file as it stands.
+
+    The spec is left out where it no longer reads, which takes `spec` becoming
+    unreadable since the edit that validated it. `_reload_on_change` answers
+    once it parses again; until then the panel is left as it is.
+    """
+    if layout is not None:
+        await _send(proc, layout)
+    with contextlib.suppress(Exception):
+        await _send(proc, encode_spec(spec, errors or [], solving=solving))
 
 
 async def _read_edit(stream: asyncio.StreamReader) -> dict | None:
@@ -230,7 +250,7 @@ async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Proc
 
         if proc.returncode is not None:
             return  # the window closed while we were resolving
-        await _send(proc, payload)
+        await _draw(proc, spec, payload)
         print(f"{spec}: reloaded", file=sys.stderr)
 
 

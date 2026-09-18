@@ -173,7 +173,14 @@ fn apply_updates(world: &mut World) {
             text.0 = hud_line(scene);
         }
     }
-    if let Some(scene) = received.last() {
+    // Only a message without a layout answers the panel: it carries the file
+    // as it read when it was sent, where a layout carries the spec its own
+    // solve began from. An edit made during those seconds leaves that copy
+    // behind, and taking it would walk the form back to an older value until
+    // the next solve landed. `view._draw` sends a freshly read spec behind
+    // every layout, and that is what lands here. The panel is opened on a
+    // layout's own spec once, in `setup`.
+    if let Some(scene) = received.iter().rev().find(|scene| scene.assets.is_none()) {
         show_in_form(world, scene);
     }
 
@@ -365,5 +372,47 @@ mod tests {
         let form = world.resource::<crate::editor::Form>();
         assert_eq!(form.spec.env_name, "edited", "the form kept the older spec");
         assert!(form.solving, "the panel has nothing to say the view is behind");
+    }
+
+    /// A layout carries the spec its solve began from, so an edit made while it
+    /// was solving leaves that copy behind. The panel keeps the newer spec it
+    /// was answered with, and the late layout is still drawn.
+    #[test]
+    fn a_late_solve_does_not_take_the_panel_back() {
+        let (sender, updates) = std::sync::mpsc::channel();
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<crate::editor::Form>()
+            .insert_resource(ResolvedScene(scene([1.0, 0.0, 0.0])))
+            .insert_resource(SceneUpdates(Mutex::new(updates)))
+            .add_systems(Startup, setup)
+            .add_systems(Update, apply_updates);
+        app.update();
+
+        // The second edit, answered from the file, and then the solve for the
+        // first, carrying the spec as it read before that edit was made.
+        let mut edited = Scene {
+            solving: true,
+            ..default()
+        };
+        edited.spec.env_name = "second".into();
+        sender.send(edited).expect("the viewer still listening");
+        let mut solved = scene([0.0, 0.0, 5.0]);
+        solved.spec.env_name = "first".into();
+        sender.send(solved).expect("the viewer still listening");
+        app.update();
+
+        let world = app.world_mut();
+        let placed = world
+            .query_filtered::<&GlobalTransform, With<AssetId>>()
+            .iter(world)
+            .count();
+        assert_eq!(placed, 1, "the layout that arrived last was not drawn");
+
+        let form = world.resource::<crate::editor::Form>();
+        assert_eq!(form.spec.env_name, "second", "an older spec took the panel back");
+        // The spec `view._draw` sends behind the layout is what ends the solve,
+        // so the spinner stays on until that lands.
+        assert!(form.solving, "the layout answered the panel");
     }
 }
