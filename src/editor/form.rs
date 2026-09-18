@@ -13,6 +13,11 @@ use crate::spec::{Edit, Field, Kind, Params, Relation, Step, Value};
 /// How wide the panel opens. Draggable from there.
 const WIDTH: f32 = 360.0;
 
+/// The share of a row a name takes, leaving the rest to the control. Every row
+/// splits at the same place, so the controls line up down the panel however
+/// long the names beside them are.
+const NAMES: f32 = 0.4;
+
 /// Everything the panel remembers that is not in the spec.
 pub struct PanelState {
     /// What the asset browser is filtered to.
@@ -96,9 +101,17 @@ pub fn draw(
     // the half that is behind: an accepted edit reaches the form at once and
     // the layout only once the solver has caught up.
     if form.solving {
-        let corner = window.available_rect_before_wrap().right_top();
-        let spot = egui::Rect::from_min_size(corner + egui::vec2(-32.0, 12.0), egui::Vec2::splat(20.0));
-        window.put(spot, spinner());
+        let view = window.available_rect_before_wrap();
+        let spot = egui::Rect::from_min_size(view.right_top() + egui::vec2(-232.0, 12.0), egui::vec2(220.0, 20.0));
+        // Right to left, so the spinner keeps the corner and the words run
+        // inward from it however long they are.
+        let mut status = window.new_child(
+            egui::UiBuilder::new()
+                .max_rect(spot)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        status.add(spinner());
+        status.weak("Resolving layout…");
     }
     Ok(())
 }
@@ -171,37 +184,46 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
 
             let entry = ui.push_id(index, |ui| {
                 ui.group(|ui| {
+                    // The box takes the panel's width rather than its contents',
+                    // so one entry's rows line up with the next one's.
+                    ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {
                         if remove(ui) {
                             send(Edit::Remove { path: path.clone() });
                         }
-                        // Changing the kind rewrites the whole entry: the old
-                        // kind's parameters mean nothing to the new one, and
-                        // whether there is a `reference` at all is the kind's
-                        // to say.
-                        let options = kind_options(form, &relation.subject, &reference, &ids);
-                        menu(ui, "kind", &relation.kind, options, set(&path));
-                        let mut pinned = state.pinned.contains(&index);
-                        if ui.toggle_value(&mut pinned, "👁").on_hover_text("keep drawn").changed() {
-                            if pinned {
-                                state.pinned.insert(index);
-                            } else {
-                                state.pinned.remove(&index);
+                        // Right to left: the toggle takes the far edge and the
+                        // kind spreads over whatever is left between them.
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut pinned = state.pinned.contains(&index);
+                            if ui.toggle_value(&mut pinned, "👁").on_hover_text("keep drawn").changed() {
+                                if pinned {
+                                    state.pinned.insert(index);
+                                } else {
+                                    state.pinned.remove(&index);
+                                }
                             }
-                        }
+                            // Changing the kind rewrites the whole entry: the
+                            // old kind's parameters mean nothing to the new
+                            // one, and whether there is a `reference` at all is
+                            // the kind's to say.
+                            let options = kind_options(form, &relation.subject, &reference, &ids);
+                            menu(ui, "kind", &relation.kind, options, set(&path));
+                        });
                     });
-                    ui.horizontal(|ui| {
+                    // The kind names the whole entry, so it is a heading and
+                    // what it governs is ruled off from it.
+                    ui.separator();
+                    row(ui, "subject", |ui| {
                         menu(ui, "subject", &relation.subject, id_options(&ids), set(&with(&path, "subject")));
-                        // A unary relation takes no reference, and Arena
-                        // refuses one that has it — so the slot is not drawn
-                        // rather than validated.
-                        if kind.is_some_and(|kind| kind.unary == Some(false)) {
-                            // `»` and not `→`: egui ships a font without an
-                            // arrow in it, and a missing glyph draws as a box.
-                            ui.weak("»");
-                            menu(ui, "reference", &reference, id_options(&ids), set(&with(&path, "reference")));
-                        }
                     });
+                    // A unary relation takes no reference, and Arena refuses one
+                    // that has it — so the slot is not drawn rather than
+                    // validated.
+                    if kind.is_some_and(|kind| kind.unary == Some(false)) {
+                        row(ui, "reference", |ui| {
+                            menu(ui, "reference", &reference, id_options(&ids), set(&with(&path, "reference")));
+                        });
+                    }
                     params(ui, kind, &relation.params, &ids, &with(&path, "params"), state);
                 })
                 .response
@@ -247,16 +269,32 @@ fn params(
     state: &mut PanelState,
 ) {
     let Some(kind) = kind else { return };
-    if kind.fields.is_empty() {
-        return;
+    for field in &kind.fields {
+        let value = values.get(&field.name).unwrap_or(&field.default);
+        let path = with(base, &field.name);
+        row(ui, &field.name, |ui| control(ui, field, value, ids, &path, state));
     }
-    egui::Grid::new("params").num_columns(2).show(ui, |ui| {
-        for field in &kind.fields {
-            let value = values.get(&field.name).unwrap_or(&field.default);
-            ui.weak(&field.name);
-            control(ui, field, value, ids, &with(base, &field.name), state);
-            ui.end_row();
-        }
+}
+
+/// One named row: the name ends where the control begins, and the control takes
+/// the rest of the width. A name longer than its share is cut rather than
+/// allowed to push the control out of line.
+///
+/// The space is taken first and painted into after, because a label fills only
+/// the axis its layout justifies. `add_sized` justifies across the row it is
+/// in, which for a horizontal row is the vertical one, and leaves the name
+/// centred in its space with `halign` doing nothing.
+fn row(ui: &mut egui::Ui, name: &str, control: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        let size = egui::vec2(ui.available_width() * NAMES, ui.spacing().interact_size.y);
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        ui.place(
+            rect,
+            egui::Label::new(egui::RichText::new(name).weak())
+                .halign(egui::Align::RIGHT)
+                .truncate(),
+        );
+        control(ui);
     });
 }
 
@@ -326,7 +364,8 @@ fn number(ui: &mut egui::Ui, id: egui::Id, value: Option<f64>, path: &[Step], st
         Some((editing, value, _)) if *editing == id => *value,
         _ => in_spec,
     };
-    let response = ui.add(egui::DragValue::new(&mut shown).speed(0.005).max_decimals(4));
+    let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    let response = ui.add_sized(size, egui::DragValue::new(&mut shown).speed(0.005).max_decimals(4));
     if response.dragged() || response.has_focus() {
         state.editing = Some((id, shown, path.to_vec()));
     }
@@ -382,6 +421,7 @@ fn menu(
     edit: impl Fn(Value) -> Edit,
 ) {
     egui::ComboBox::from_id_salt(salt)
+        .width(ui.available_width())
         .selected_text(if current.is_empty() { "—" } else { current })
         .show_ui(ui, |ui| {
             for (label, value) in options {
