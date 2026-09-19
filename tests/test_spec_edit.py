@@ -270,3 +270,26 @@ def test_renaming_an_object_carries_the_task_params_naming_it(spec: Path):
     params = yaml.safe_load(spec.read_text())["task"]["subtasks"][0]["params"]
     assert params["pick_up_object"] == "plantain"
     assert params["destination_location"] == "bowl", "an unrelated param was rewritten"
+
+
+SIMREADY_CAN = (
+    "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady"
+    "/Residential/Kitchen/Food/Canned_Goods/Can_M01/sm_food_beverage_can_m01_01.usd"
+)
+
+
+def test_an_object_short_of_what_its_asset_needs_is_refused(spec: Path):
+    """Arena checks that the name exists, not what the asset takes: a SimReady
+    prop without its URL is a valid spec that fails to build."""
+    before = scene_of(spec).read_text()
+    result = spec_edit.add_object(spec, "can", "simready_usd_object", on=TABLE)
+    assert not result.ok
+    assert "usd_path" in result.errors[0], result.errors
+    assert scene_of(spec).read_text() == before
+
+
+def test_params_are_written_with_the_object(spec: Path):
+    result = spec_edit.add_object(spec, "can", "simready_usd_object", on=TABLE, params={"usd_path": SIMREADY_CAN})
+    assert result.ok, result.errors
+    objects = yaml.safe_load(scene_of(spec).read_text())["objects"]
+    assert {"id": "can", "registry_name": "simready_usd_object", "params": {"usd_path": SIMREADY_CAN}} in objects

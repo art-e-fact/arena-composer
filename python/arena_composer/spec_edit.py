@@ -148,7 +148,7 @@ class SpecFiles:
 
         try:
             reloaded = {path: yaml.safe_load(text) for path, text in texts.items()}
-            ArenaEnvGraphSpec.from_dict(self.merged(reloaded))
+            spec = ArenaEnvGraphSpec.from_dict(self.merged(reloaded))
         except ValidationError as error:
             # Not `str(error)`: that quotes the whole merged spec back as the
             # offending input, burying the one sentence worth reading.
@@ -157,7 +157,17 @@ class SpecFiles:
             # Arena asserts outside pydantic too, e.g. on a duplicate key
             # across the include.
             return [f"{type(error).__name__}: {error}"]
-        return []
+
+        # Arena checks that a registry name exists, not what the asset behind
+        # it takes; an entry short of a required parameter fails only when the
+        # spec is built.
+        from arena_composer import catalog
+
+        return [
+            f"objects.{index}.params: {obj.registry_name} needs {', '.join(missing)}"
+            for index, obj in enumerate(spec.objects)
+            if (missing := catalog.missing_params(obj.registry_name, obj.params))
+        ]
 
     def write(self, changed: list[str]) -> Result:
         """Validate the text an edit produced, then write the files it changes."""
@@ -195,15 +205,24 @@ def _message(entry: dict[str, Any]) -> str:
     return f"{location}: {message}" if location else message
 
 
-def add_object(path: Path, node_id: str, registry_name: str, on: str | None = None) -> Result:
+def add_object(
+    path: Path,
+    node_id: str,
+    registry_name: str,
+    on: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> Result:
     """Add an object to `path`'s scene, optionally resting on another asset.
 
     Without `on` the object takes no part in placement and lands at the origin,
     which for most scenes means inside the floor. It stays optional because an
     anchored scene may want the object placed by a relation added separately.
 
-    `registry_name` is checked by Arena, not here — its own field validator
-    rejects a name the asset registry does not know.
+    `params` is what the asset needs beyond its name — a SimReady prop's
+    `usd_path`, as the catalogue reports it. `registry_name` is checked by
+    Arena, not here: its own field validator rejects a name the asset registry
+    does not know. What the asset then needs is checked in
+    :meth:`SpecFiles.validate`, before the file is written.
     """
     files = SpecFiles(path)
     known = files.asset_ids()
@@ -212,7 +231,7 @@ def add_object(path: Path, node_id: str, registry_name: str, on: str | None = No
     if on is not None and on not in known:
         return Result.failed(f"no asset {on!r} to put {node_id!r} on; this spec has {known}")
 
-    files.section("objects").append({"id": node_id, "registry_name": registry_name, "params": {}})
+    files.section("objects").append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
     changed = [f"added object {node_id!r} ({registry_name})"]
     if on is not None:
         files.section("relations").append({"kind": "on", "subject": node_id, "reference": on, "params": {}})

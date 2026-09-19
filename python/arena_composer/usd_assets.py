@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from urllib.parse import urlparse
 
 from pxr import Usd
 
@@ -24,6 +23,12 @@ _cache_dir = DEFAULT_CACHE_DIR
 # Downloads are cached on disk; this memo also skips the per-call remote stat.
 _local_paths: dict[str, str] = {}
 _patched = False
+
+
+def cache_dir() -> Path:
+    """Where remote assets are mirrored. The SimReady index lives there too, so
+    one setting moves both."""
+    return _cache_dir
 
 
 def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
@@ -79,7 +84,10 @@ def _relink_url_references(local_root: str) -> None:
 
         def repoint(asset_path: str, layer_dir: str = layer_dir) -> str:
             nonlocal rewritten
-            local_path = _mirrored_path(asset_path) if "://" in asset_path else os.path.join(layer_dir, asset_path)
+            if "://" in asset_path:
+                local_path = mirrored(asset_path)
+            else:
+                local_path = os.path.join(layer_dir, asset_path)
             if local_path is None:
                 return asset_path
             pending.append(os.path.normpath(local_path))
@@ -93,7 +101,15 @@ def _relink_url_references(local_root: str) -> None:
             layer.Save()
 
 
-def _mirrored_path(url: str) -> str | None:
-    """Local copy of a downloaded URL, or None when it was never mirrored."""
-    path = _cache_dir / urlparse(url).path.lstrip("/")
-    return str(path) if path.is_file() else None
+def mirrored(url: str) -> str | None:
+    """Local copy of a downloaded URL, or None when it was never mirrored.
+
+    The layout is Isaac Lab's — ``<cache>/<scheme>/<host>/<path>`` — and is
+    taken from its own function rather than spelled out again here, so the two
+    cannot drift apart. A copy that exists is reported without asking the
+    server whether it is current; that check is the download's own.
+    """
+    from isaaclab.utils.assets import _mirror_path
+
+    path = _mirror_path(url, str(_cache_dir))
+    return path if os.path.isfile(path) else None

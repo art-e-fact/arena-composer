@@ -1,10 +1,10 @@
 """An MCP server for authoring Arena environment specs.
 
-Five tools, chosen against the question "what can the agent not already do with
+Six tools, chosen against the question "what can the agent not already do with
 Read and Edit?" — listing a spec's objects did not survive that test, since the
 YAML is short and reading it is exact and free. What survived either touches
-live state (the asset registry, the solver, a GPU) or knows something about the
-task/scene file pair that a text edit does not.
+live state (the asset registry, the SimReady index, the solver, a GPU) or knows
+something about the task/scene file pair that a text edit does not.
 
 The server describes itself: ``INSTRUCTIONS`` below and each tool's own
 docstring are what a client shows the model, so they are the documentation for
@@ -22,13 +22,14 @@ import contextlib
 import hashlib
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import Context, Image, MCPServer
 
-from arena_composer import catalog, render, spec_edit
-from arena_composer.resolve_layout import DEFAULT_SEED
+from arena_composer import catalog, render, simready, spec_edit, usd_assets
+from arena_composer.resolve_layout import DEFAULT_SEED, SpecError
 
 #: Sent to the client at handshake, as the model's orientation to this server.
 #: Per-tool detail lives in the tool docstrings; this is what ties them into an
@@ -45,7 +46,9 @@ of the two an edit belongs in, so address them at either path.
 How the tools fit together:
 
 1. `search_assets` to find a `registry_name`. Never guess one: the registry is
-   the only place these names exist.
+   the only place these names exist. NVIDIA's SimReady props — ~1,500 objects
+   beyond the registry — are searched too once `reindex_assets` has built the
+   local index; a hit among them carries the `params` to add it with.
 2. `add_object` / `remove_object` to edit. Editing the YAML directly is fine
    too, and is the way to do anything these two do not cover.
 3. `describe_scene` for where the solver actually put things, and whether the
@@ -114,23 +117,58 @@ def _resolve(path: Path, seed: int) -> dict[str, Any]:
 def search_assets(query: str = "", role: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """Find assets to use as an object, background or embodiment `registry_name`.
 
+    Two sources. Arena's registry, and NVIDIA's SimReady props: ~1,500
+    physics-ready objects on a public bucket, searched once `reindex_assets`
+    has built the local index. A SimReady hit shares one `registry_name` with
+    every other and is told apart by its `params`, which `add_object` has to be
+    given as they are. Never make a URL up; the index is where they come from.
+
+    `cached` says whether the asset's USD is already on this machine. The
+    first resolve of one that is not downloads it: tens of megabytes for a
+    prop, more for a scene.
+
     Args:
-        query: Words to match against a registered asset's name and tags, e.g.
-            "banana" or "ycb bowl". Empty matches everything.
+        query: Words to match against an asset's name, tags and file name,
+            e.g. "banana" or "ycb bowl". Empty matches everything.
         role: Restrict to "object", "background" or "embodiment".
-        limit: How many to return, best match first.
+        limit: How many to return, best match first — registered before
+            SimReady.
     """
     with _quiet():
-        found = catalog.search(query, role=role, limit=limit)
-    return [
-        {
-            "registry_name": asset.registry_name,
-            "role": asset.role,
-            "tags": asset.tags,
-            **({"object_type": asset.object_type} if asset.object_type else {}),
-        }
-        for asset in found
-    ]
+        return [_hit(asset) for asset in catalog.search(query, role=role, limit=limit)]
+
+
+def _hit(asset: catalog.Asset) -> dict[str, Any]:
+    """One search result, carrying only the fields the asset has."""
+    return {
+        "name": asset.name,
+        "registry_name": asset.registry_name,
+        "role": asset.role,
+        "tags": asset.tags,
+        **({"object_type": asset.object_type} if asset.object_type else {}),
+        **({"params": asset.params} if asset.params else {}),
+        **({"cached": usd_assets.mirrored(asset.usd_path) is not None} if asset.usd_path else {}),
+    }
+
+
+@mcp.tool()
+async def reindex_assets() -> dict[str, Any]:
+    """Build the local index of NVIDIA's SimReady props, so `search_assets`
+    finds them.
+
+    Needed once: the index is a file, kept until this runs again, and shared
+    with a viewer open on the same machine. Takes tens of seconds — a listing
+    of the bucket, with no asset downloaded. Run it again to pick up props
+    published since.
+    """
+    started = time.monotonic()
+    assets = await asyncio.to_thread(_reindex)
+    return {"indexed": len(assets), "index": str(simready.index_path()), "seconds": round(time.monotonic() - started, 1)}
+
+
+def _reindex() -> list[simready.RemoteAsset]:
+    with _quiet():
+        return simready.build()
 
 
 @mcp.tool()
@@ -144,6 +182,11 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
 
     Takes seconds. Prefer it after a run of edits rather than between each.
 
+    An object whose `params.usd_path` cannot be used — a URL that is not on the
+    server, or a prop that is not the single rigid body the sim would spawn —
+    comes back as `{"ok": false, "errors": [...]}`, one line per object, with
+    no layout.
+
     Args:
         spec: Path to the task or scene YAML.
         seed: Placement seed. The solver samples a different valid layout per
@@ -152,7 +195,12 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
     path = _spec_path(spec)
     # Off the event loop: a resolve blocks for seconds and the server has to
     # stay answerable for all of them.
-    dump = await asyncio.to_thread(_resolve, path, seed)
+    try:
+        dump = await asyncio.to_thread(_resolve, path, seed)
+    except SpecError as error:
+        # A spec that validates but names an asset the sim cannot use is the
+        # same normal case as a refused edit, and reads the same way.
+        return {"ok": False, "errors": error.errors}
     return {
         "env_name": dump["env_name"],
         "spec_path": dump["spec_path"],
@@ -174,7 +222,13 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
 
 
 @mcp.tool()
-def add_object(spec: str, id: str, registry_name: str, on: str | None = None) -> dict[str, Any]:
+def add_object(
+    spec: str,
+    id: str,
+    registry_name: str,
+    on: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Add an object to a scene, resting on another asset.
 
     Writes to whichever of the spec and its included scene owns `objects` —
@@ -187,9 +241,12 @@ def add_object(spec: str, id: str, registry_name: str, on: str | None = None) ->
         registry_name: A name from `search_assets`.
         on: Id of the asset to place it on. Without one the object takes no
             part in placement and lands at the origin.
+        params: The `params` the search hit carries, as they are: a SimReady
+            prop needs its `usd_path`. An object short of what its asset needs
+            is refused before the file is written.
     """
     with _quiet():
-        return vars(spec_edit.add_object(_spec_path(spec), id, registry_name, on))
+        return vars(spec_edit.add_object(_spec_path(spec), id, registry_name, on, params))
 
 
 @mcp.tool()

@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import json
 import sys
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -48,9 +49,23 @@ from arena_composer.usd_assets import localize, use_local_asset_cache
 DEFAULT_SEED = 42
 
 
+class SpecError(Exception):
+    """A spec that validates but names an asset the sim could not use. One
+    line per asset, since a scene wrong in one place is often wrong in two."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("\n".join(errors))
+        self.errors = errors
+
+
 def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[str, Any]:
-    """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds."""
+    """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
+
+    Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
+    used; anything else Arena raises passes through.
+    """
     use_local_asset_cache()
+    check_usd_params(spec.objects)
     assets = instantiate_assets_from_spec(spec, AssetRegistry())
     _attach_spatial_relations_to_assets(spec.relations, assets)
 
@@ -78,6 +93,42 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[st
         "lighting": _lighting(spec, assets),
         "viewer": _viewer(assets[spec.background.id]),
     }
+
+
+def check_usd_params(objects: Iterable[Any]) -> None:
+    """Fail early, naming the object, where a ``params.usd_path`` cannot be used.
+
+    A URL is the one input Arena does not vet: the spec validates with any
+    string there, and a file that is not on the server, or a prop that is not
+    the single rigid body the sim will spawn it as, would otherwise surface
+    from inside the solver, or not until the sim. The download this costs is
+    the one the resolve was about to make anyway.
+
+    `objects` are the spec's object entries — anything with an `id`, a
+    `registry_name` and `params`.
+    """
+    from isaaclab_arena.assets.simready_constants import SIMREADY_PHYSICS_VARIANTS, SIMREADY_USD_OBJECT_REGISTRY_NAME
+    from isaaclab_arena.utils.usd.rigid_bodies import read_asset_rigid_body_paths
+
+    errors = []
+    for obj in objects:
+        usd_path = obj.params.get("usd_path")
+        if not usd_path:
+            continue
+        if "://" not in usd_path and not Path(usd_path).is_file():
+            errors.append(f"{obj.id}: no file at {usd_path}")
+            continue
+        try:
+            local = localize(usd_path)
+        except Exception as error:
+            errors.append(f"{obj.id}: {error}")
+            continue
+        if obj.registry_name == SIMREADY_USD_OBJECT_REGISTRY_NAME:
+            bodies = read_asset_rigid_body_paths(local, SIMREADY_PHYSICS_VARIANTS)
+            if len(bodies) != 1:
+                errors.append(f"{obj.id}: {usd_path} has {len(bodies)} rigid bodies; the sim spawns it as exactly one")
+    if errors:
+        raise SpecError(errors)
 
 
 def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED) -> dict[str, Any]:

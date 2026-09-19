@@ -220,6 +220,23 @@ What matters when changing this code:
   disagree: PyYAML is YAML 1.1, where a bare `on` is the boolean true, so the `on` relation
   kind has to go out quoted. Validating the in-memory documents would not catch that.
 
+### Remote assets
+
+NVIDIA's SimReady props are not in Arena's registry. A spec names one as
+`registry_name: simready_usd_object` with the prop's URL in `params.usd_path`, the form Arena's
+own generator writes. Where those URLs come from is `arena_composer.simready`: one listing of the
+public bucket, written as `simready-index.json` into the asset cache directory
+(`ARENA_COMPOSER_ASSET_CACHE`, default `~/.cache/arena-composer/usd`) beside the USDs it names, so
+the MCP server and a viewer read the same file and either may rebuild it. `catalog.search` merges it
+with the registry; the vocabulary the viewer gets does not carry it yet.
+
+Nothing downloads a prop until a spec naming it is resolved. That resolve checks the URL and the
+rigid-body count first and raises `resolve_layout.SpecError` naming the object, because those are
+the two things Arena's validator does not check: it verifies that a registry name exists, not what
+the asset behind it takes. The other half of that gap is `catalog.missing_params`, which
+`spec_edit` runs on every write so a `simready_usd_object` without its `usd_path` is refused rather
+than written.
+
 ## Tests
 
 ```bash

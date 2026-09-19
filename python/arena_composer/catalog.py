@@ -1,10 +1,13 @@
-"""What Arena's registries have to offer: the assets, and the relation and task
-kinds a spec can name.
+"""What a spec can name: the assets, and the relation and task kinds.
 
-The registries are live things that populate themselves on import, so this is
-the one part of authoring a spec that cannot be answered by reading files.
+Assets come from two places. Arena's registries are live things that populate
+themselves on import, so they are the one part of authoring a spec that cannot
+be answered by reading files. NVIDIA's SimReady props are not registered at
+all — a spec names one through the generic ``simready_usd_object`` and the
+prop's URL — and come from the local index :mod:`arena_composer.simready`
+builds, when there is one.
 
-Assets are large: dumping them costs more context than it is worth, and an
+Assets are many: dumping them costs more context than it is worth, and an
 agent only ever needs the handful matching what it is looking for — hence
 :func:`search` rather than a listing. The editor is the exception and takes
 :func:`catalog` whole, because a form filters faster than a round trip.
@@ -21,14 +24,17 @@ import inspect
 import sys
 import types
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
+from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
 class Asset:
-    """One registered asset, as a spec's ``registry_name`` sees it."""
+    """One asset a spec can name: registered with Arena, or a SimReady prop the
+    local index knows."""
 
     registry_name: str
     #: `embodiment`, `background` or `object`.
@@ -36,10 +42,20 @@ class Asset:
     tags: list[str]
     #: Physics type for objects (`rigid`, `articulated`, ...), else None.
     object_type: str | None
+    #: What to call it: the registry name, or a remote asset's folder name,
+    #: since every remote asset shares one registry name.
+    name: str
+    #: The USD it spawns from, where the asset says. It is what a resolve
+    #: downloads, so whether that has happened yet can be told before a pick.
+    usd_path: str | None = None
+    #: What a spec entry has to carry in `params` beyond the registry name:
+    #: the URL, for a remote asset.
+    params: dict[str, Any] = field(default_factory=dict)
 
     def matches(self, terms: list[str]) -> bool:
-        """Whether every term appears in the name or a tag."""
-        haystack = " ".join([self.registry_name, *self.tags]).lower()
+        """Whether every term appears in the name, a tag or the USD's file name."""
+        stem = Path(urlparse(self.usd_path).path).stem if self.usd_path else ""
+        haystack = " ".join([self.name, *self.tags, stem]).lower()
         return all(term in haystack for term in terms)
 
 
@@ -48,7 +64,9 @@ def catalog() -> tuple[Asset, ...]:
     """Every registered asset. Cached: the registry does not change at runtime,
     and building it imports the whole asset package."""
     from isaaclab_arena.agentic_environment_generation.catalogues import build_asset_catalogue
+    from isaaclab_arena.assets.registries import AssetRegistry
 
+    registry = AssetRegistry()
     built = build_asset_catalogue()
     return tuple(
         Asset(
@@ -56,6 +74,8 @@ def catalog() -> tuple[Asset, ...]:
             role=role,
             tags=list(entry.get("tags") or []),
             object_type=entry.get("object_type"),
+            name=entry["name"],
+            usd_path=_class_usd_path(registry.get_asset_by_name(entry["name"])),
         )
         for role, entries in (
             ("embodiment", built.embodiments),
@@ -66,9 +86,50 @@ def catalog() -> tuple[Asset, ...]:
     )
 
 
+def _class_usd_path(cls: type) -> str | None:
+    """The USD a registered class spawns, where that is a plain attribute. Not
+    every class has one: some compose their USD at construction, some spawn
+    procedurally."""
+    usd_path = getattr(cls, "usd_path", None)
+    return usd_path if isinstance(usd_path, str) and usd_path else None
+
+
+def remote() -> tuple[Asset, ...]:
+    """Every SimReady prop the local index knows, as an object a spec names
+    with ``simready_usd_object`` and the prop's URL in `params`. Empty until the
+    index is built; re-read when any process rebuilds it."""
+    from arena_composer import simready
+
+    return _remote(simready.index_stamp())
+
+
+@cache
+def _remote(stamp: int | None) -> tuple[Asset, ...]:
+    from isaaclab_arena.assets.registries import AssetRegistry
+    from isaaclab_arena.assets.simready_constants import SIMREADY_USD_OBJECT_REGISTRY_NAME
+
+    from arena_composer import simready
+
+    if stamp is None:
+        return ()
+    cls = AssetRegistry().get_asset_by_name(SIMREADY_USD_OBJECT_REGISTRY_NAME)
+    return tuple(
+        Asset(
+            registry_name=SIMREADY_USD_OBJECT_REGISTRY_NAME,
+            role="object",
+            tags=[*cls.tags, *asset.category.lower().split("/")],
+            object_type=_plain(cls.object_type),
+            name=asset.name,
+            usd_path=asset.usd_path,
+            params={"usd_path": asset.usd_path},
+        )
+        for asset in simready.load()
+    )
+
+
 def search(query: str = "", role: str | None = None, limit: int = 20) -> list[Asset]:
-    """Assets whose name or tags contain every whitespace-separated term in
-    `query`, nearest match first.
+    """Assets whose name, tags or USD file name contain every whitespace-separated
+    term in `query`, nearest match first.
 
     An empty query matches everything, which with `role` set is how to see what
     kinds of background or embodiment exist at all.
@@ -76,13 +137,38 @@ def search(query: str = "", role: str | None = None, limit: int = 20) -> list[As
     terms = query.lower().split()
     found = [
         asset
-        for asset in catalog()
+        for asset in (*catalog(), *remote())
         if asset.matches(terms) and (role is None or asset.role == role)
     ]
-    # A term matching the name itself beats one that only matched a tag, and a
+    # A term matching the name itself beats one that only matched a tag; a
+    # registered asset, which Arena has vetted, beats a remote one; and a
     # shorter name means fewer extra words around the match.
-    found.sort(key=lambda asset: (not any(t in asset.registry_name for t in terms), len(asset.registry_name)))
+    found.sort(
+        key=lambda asset: (not any(t in asset.name.lower() for t in terms), bool(asset.params), len(asset.name))
+    )
     return found[:limit]
+
+
+def missing_params(registry_name: str, params: dict[str, Any]) -> list[str]:
+    """Constructor parameters of the asset with no default that `params` does
+    not supply — what makes a spec entry fail to build after it validated.
+
+    Arena checks that a registry name exists, not what the asset behind it
+    takes: a ``simready_usd_object`` without its ``usd_path`` is a valid spec
+    that asserts when instantiated. `instance_name` is filled in from the
+    entry's id and not counted.
+    """
+    from isaaclab_arena.assets.registries import AssetRegistry
+
+    cls = AssetRegistry().get_asset_by_name(registry_name)
+    return [
+        param.name
+        for param in inspect.signature(cls.__init__).parameters.values()
+        if param.name not in ("self", "instance_name")
+        and param.default is inspect.Parameter.empty
+        and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
+        and param.name not in params
+    ]
 
 
 #: Modules whose classes name a node in the graph rather than a value. A
