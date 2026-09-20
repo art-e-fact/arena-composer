@@ -105,6 +105,24 @@ tree and does nothing. It also offers only the two behaviours we do not want: ig
 lets a press on the panel orbit, or `EguiFocusIncludesHover`, which stops a drag the moment it
 crosses onto the panel.
 
+### The backdrop
+
+The window draws on two cameras (`src/background.rs`). The backdrop's is a `Camera2d` at
+`order: -1` carrying one full-window UI node with a `BackgroundGradient`; the layout's clears
+`ClearColorConfig::None` over it. The gradient cannot go on the layout's camera, because the UI
+pass runs after the 3D one and a full-screen node there covers the layout.
+
+Two defaults stop resolving once there is a second camera, so the layout's carries both markers
+by hand: `PrimaryEguiContext`, since `bevy_egui` otherwise attaches it to the first camera it
+finds, and `IsDefaultUiCamera`, since a root node without a `UiTargetCamera` goes to the highest
+order camera. Drop either and the panel or the HUD moves to the backdrop's camera — the window
+still opens, so check a change here against a screenshot.
+
+Keep a backdrop out of the 3D pass. Everything drawn there is tonemapped, so a backdrop built as
+geometry arrives as the inverse of a curve this code does not own: an unlit dome authored
+`#39414f` landed at `#8b94a3`, with its whole ramp flattened. A UI gradient and `ClearColor` both
+reach the frame as written.
+
 ### Two answers per edit
 
 Writing the YAML takes milliseconds and solving the layout it implies takes seconds, so an edit is

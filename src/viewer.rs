@@ -14,10 +14,14 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use bevy::asset::{AssetPlugin, UnapprovedPathMode};
+use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
+use bevy::ui::IsDefaultUiCamera;
+use bevy_egui::PrimaryEguiContext;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
+use crate::background;
 use crate::layout::{ArenaRoot, View, ambient, framing, spawn_lighting, spawn_scene};
 use crate::scene::Scene;
 
@@ -111,7 +115,10 @@ fn setup(world: &mut World) {
         .0;
     spawn_scene(world, &scene);
     spawn_lighting(world, &scene);
-    spawn_camera(world, &scene);
+    // Before the camera: the backdrop wants one below it, and decides how the
+    // layout's camera clears over it.
+    let clear = background::spawn(world);
+    spawn_camera(world, &scene, clear);
     spawn_hud(world, &scene);
     show_in_form(world, &scene);
     take_assets(world, std::slice::from_ref(&scene));
@@ -205,10 +212,18 @@ fn apply_updates(world: &mut World) {
     }
 }
 
-fn spawn_camera(world: &mut World, scene: &Scene) {
+fn spawn_camera(world: &mut World, scene: &Scene, clear: ClearColorConfig) {
     let framed = framing(View::Default, scene);
     world.spawn((
         Camera3d::default(),
+        Camera {
+            clear_color: clear,
+            ..default()
+        },
+        // Both explicit because there may be a backdrop camera below this one,
+        // and neither egui's nor the UI's default picks a camera we can name.
+        PrimaryEguiContext,
+        IsDefaultUiCamera,
         framed.transform,
         framed.projection,
         // Radius, yaw and pitch are left unset so the controller derives them
