@@ -170,7 +170,9 @@ impl Vocabulary {
     }
 }
 
-/// One registered asset, as a spec's `registry_name` names it.
+/// One asset a spec can name: registered with Arena, or a SimReady prop the
+/// local index knows. The two differ only in what an entry naming one has to
+/// carry, which is [`CatalogAsset::params`], so the browser lists them together.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct CatalogAsset {
@@ -179,6 +181,18 @@ pub struct CatalogAsset {
     pub role: String,
     pub tags: Vec<String>,
     pub object_type: Option<String>,
+    /// What to call it. The registry name for a registered asset, and the
+    /// prop's own folder name for a SimReady one — every one of those shares
+    /// the single registry name `simready_usd_object`.
+    pub name: String,
+    /// What an entry naming it needs in `params` beyond the registry name:
+    /// empty for a registered asset, the URL for a SimReady prop. Written
+    /// through as given, so picking one needs no knowledge of which kind it is.
+    pub params: Params,
+    /// The prop's picture, as the file Python mirrored it to. Empty until it
+    /// has been fetched, which is what the panel asks for; see
+    /// [`Request::Thumbnails`]. Never set for a registered asset.
+    pub thumbnail: String,
 }
 
 /// A registered relation or task kind, and the form that edits it.
@@ -213,21 +227,33 @@ pub struct Field {
 
 /// What the editor panel asks Python to do.
 ///
-/// A `Set` names one leaf wherever it can, so a parameter the form does not
-/// show is left where it is. The exception is a relation's kind: the old
-/// kind's parameters mean nothing to the new one, and whether the entry has a
-/// `reference` at all is the kind's to say, so that one replaces the entry.
+/// The first three edit the spec. A `Set` names one leaf wherever it can, so a
+/// parameter the form does not show is left where it is. The exception is a
+/// relation's kind: the old kind's parameters mean nothing to the new one, and
+/// whether the entry has a `reference` at all is the kind's to say, so that one
+/// replaces the entry.
 ///
 /// Python applies an edit through `arena_composer.spec_edit`, which owns which
 /// file the key lives in and validates before either file is written — so a
 /// rejected edit comes back as `errors` on the next scene with the spec
 /// untouched.
+///
+/// The last two ask for assets instead, and are answered by a message carrying
+/// [`Scene::remote`](crate::scene::Scene::remote). They are network, not a
+/// write, so `arena_composer.view` serves them beside the edits rather than in
+/// front of them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
-pub enum Edit {
+pub enum Request {
     Set { path: Vec<Step>, value: Value },
     Insert { path: Vec<Step>, value: Value },
     Remove { path: Vec<Step> },
+    /// Crawl NVIDIA's bucket again and write the index the prop list comes
+    /// from. A minute of network, and no asset is downloaded by it.
+    Reindex,
+    /// Fetch the pictures of these props, named by the USD each spawns from —
+    /// what the panel has on screen and has no picture for.
+    Thumbnails { urls: Vec<String> },
 }
 
 /// One step into the merged spec: `["relations", 2, "params", "side"]`.

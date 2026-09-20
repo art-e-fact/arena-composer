@@ -1,14 +1,15 @@
-//! Drawing the spec, and turning a control's click into an [`Edit`].
+//! Drawing the spec, and turning a control's click into a [`Request`].
 
 use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
+use super::browser::{Browser, Files, Images};
 use super::relations::{self, RelationGizmos};
 use super::{Form, PointerOverPanel, send};
 use crate::layout::Placed;
-use crate::spec::{Edit, Field, Kind, Params, Relation, Step, Value};
+use crate::spec::{Field, Kind, Params, Relation, Request, Step, Value};
 
 /// How wide the panel opens. Draggable from there.
 const WIDTH: f32 = 360.0;
@@ -20,8 +21,9 @@ const NAMES: f32 = 0.4;
 
 /// Everything the panel remembers that is not in the spec.
 pub struct PanelState {
-    /// What the asset browser is filtered to.
-    pub search: String,
+    /// The asset browser's own: what it is filtered to, and the pictures it
+    /// has on hand.
+    browser: Browser,
     /// The number being dragged or typed into: the control, the value it
     /// shows, and where in the spec that value belongs. One, because only one
     /// control can be under the pointer at a time. The path is carried so the
@@ -41,12 +43,14 @@ pub struct PanelState {
 
 /// `ARENA_VIEWER_SHOW_RELATIONS=all`, or `=2,5` for those positions in the
 /// list, starts with those relations drawn: the way to see them in a
-/// screenshot, where there is nothing to hover.
+/// screenshot, where there is nothing to hover. `ARENA_VIEWER_SEARCH=basket`
+/// opens the asset browser filtered, for the same reason — a screenshot has
+/// nobody to type for it.
 impl Default for PanelState {
     fn default() -> Self {
         let shown = std::env::var("ARENA_VIEWER_SHOW_RELATIONS").unwrap_or_default();
         Self {
-            search: String::new(),
+            browser: Browser::filtered(std::env::var("ARENA_VIEWER_SEARCH").unwrap_or_default()),
             editing: None,
             renaming: None,
             revision: 0,
@@ -60,10 +64,13 @@ pub fn draw(
     mut contexts: EguiContexts,
     form: Res<Form>,
     placed: Res<Placed>,
+    files: Files,
     mut gizmos: Gizmos<RelationGizmos>,
     mut state: Local<PanelState>,
     mut over_panel: ResMut<PointerOverPanel>,
 ) -> Result {
+    // Cloned, so `contexts` is free to be handed on to the browser — which
+    // needs it for egui's texture table. An `egui::Context` is a handle.
     let ctx = contexts.ctx_mut()?.clone();
     // A panel needs a `Ui` to dock into, and the context's own root one is not
     // handed out — so this is the whole window, as a `Ui`.
@@ -74,10 +81,11 @@ pub fn draw(
             .layer_id(egui::LayerId::background())
             .max_rect(ctx.viewport_rect()),
     );
+    let mut images = Images::new(&files, &mut contexts);
     let shown = egui::Panel::right("spec")
         .default_size(WIDTH)
         .min_size(240.0)
-        .show(&mut window, |ui| panel(ui, &form, &mut state));
+        .show(&mut window, |ui| panel(ui, &form, &mut state, &mut images));
     // Measured here because this is the only place the panel's rect exists;
     // see [`PointerOverPanel`] for why egui cannot be asked instead.
     over_panel.0 = ctx
@@ -123,7 +131,7 @@ fn spinner() -> egui::Spinner {
 }
 
 /// Draw the panel, and say which relations it wants drawn in the view.
-fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet<usize> {
+fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Images) -> BTreeSet<usize> {
     // A half-made edit belongs to the spec it was made against.
     if state.revision != form.revision {
         state.revision = form.revision;
@@ -141,7 +149,7 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet<usi
     egui::Panel::bottom("assets")
         .resizable(true)
         .default_size(200.0)
-        .show(ui, |ui| super::browser::show(ui, form, &mut state.search));
+        .show(ui, |ui| super::browser::show(ui, form, &mut state.browser, images));
 
     egui::ScrollArea::vertical()
         .auto_shrink(false)
@@ -158,15 +166,15 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
             let path = vec![Step::from("objects"), Step::from(index)];
             ui.horizontal(|ui| {
                 if remove(ui) {
-                    send(Edit::Remove { path: path.clone() });
+                    send(Request::Remove { path: path.clone() });
                 }
                 name(ui, ui.make_persistent_id(index), &node.id, with(&path, "id"), state);
                 ui.weak(&node.registry_name);
             });
         }
-        // No add button: an object is a registered asset, and the browser below
-        // is where those are. Picking there is what makes "add" a decision
-        // rather than a surprise.
+        // No add button: an object is an asset somebody offers, and the
+        // browser below is where those are. Picking there is what makes "add"
+        // a decision rather than a surprise.
         ui.weak("add one from the asset list below");
     });
 }
@@ -189,7 +197,7 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
                     ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {
                         if remove(ui) {
-                            send(Edit::Remove { path: path.clone() });
+                            send(Request::Remove { path: path.clone() });
                         }
                         // Right to left: the toggle takes the far edge and the
                         // kind spreads over whatever is left between them.
@@ -343,7 +351,7 @@ fn control(
             // way a dragged number has one.
             let mut on = matches!(value, Value::Bool(true));
             if ui.checkbox(&mut on, "").changed() {
-                send(Edit::Set { path: path.to_vec(), value: Value::Bool(on) });
+                send(Request::Set { path: path.to_vec(), value: Value::Bool(on) });
             }
         }
         _ => {
@@ -379,7 +387,7 @@ fn name(ui: &mut egui::Ui, id: egui::Id, current: &str, path: Vec<Step>, state: 
     let typed = std::mem::take(text);
     state.renaming = None;
     if !ui.input(|input| input.key_pressed(egui::Key::Escape)) && !typed.is_empty() && typed != current {
-        send(Edit::Set { path, value: Value::text(typed) });
+        send(Request::Set { path, value: Value::text(typed) });
     }
 }
 
@@ -398,7 +406,7 @@ fn number(ui: &mut egui::Ui, id: egui::Id, value: Option<f64>, path: &[Step], st
         state.editing = Some((id, shown, path.to_vec()));
     }
     if (response.drag_stopped() || response.lost_focus()) && shown != in_spec {
-        send(Edit::Set { path: path.to_vec(), value: Value::Number(shown) });
+        send(Request::Set { path: path.to_vec(), value: Value::Number(shown) });
     }
 }
 
@@ -446,7 +454,7 @@ fn menu(
     salt: &str,
     current: &str,
     options: Vec<(String, Value)>,
-    edit: impl Fn(Value) -> Edit,
+    edit: impl Fn(Value) -> Request,
     width: f32,
 ) -> egui::Response {
     egui::ComboBox::from_id_salt(salt)
@@ -462,14 +470,14 @@ fn menu(
         .response
 }
 
-fn set(path: &[Step]) -> impl Fn(Value) -> Edit {
+fn set(path: &[Step]) -> impl Fn(Value) -> Request {
     let path = path.to_vec();
-    move |value| Edit::Set { path: path.clone(), value }
+    move |value| Request::Set { path: path.clone(), value }
 }
 
-fn insert(path: &[Step]) -> impl Fn(Value) -> Edit {
+fn insert(path: &[Step]) -> impl Fn(Value) -> Request {
     let path = path.to_vec();
-    move |value| Edit::Insert { path: path.clone(), value }
+    move |value| Request::Insert { path: path.clone(), value }
 }
 
 fn id_options(ids: &[&str]) -> Vec<(String, Value)> {

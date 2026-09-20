@@ -27,7 +27,7 @@ from pathlib import Path
 import msgpack
 import yaml
 
-from arena_composer import spec_edit, viewer_process
+from arena_composer import simready, spec_edit, usd_assets, viewer_process
 from arena_composer.payload import encode, encode_spec
 from arena_composer.resolve_layout import DEFAULT_SEED, resolve_layout_from_yaml
 from arena_composer.usd_assets import use_local_asset_cache
@@ -38,6 +38,15 @@ WATCH_INTERVAL = 0.5
 # An editor writes a file in bursts, and a spec caught mid-write does not parse.
 # Resolve once it has held still this long.
 SETTLE = 0.3
+
+#: What the panel can ask for that is not an edit — see :func:`_serve_assets`.
+#: Both are network against NVIDIA's bucket and neither touches the spec.
+ASSET_REQUESTS = ("reindex", "thumbnails")
+
+#: How many times an asset request's answer is retried. Its message carries the
+#: spec, so a spec caught mid-write fails to build one, and unlike an edit's
+#: answer nothing polls behind this one — the request is already served.
+ANSWER_TRIES = 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,7 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     use_local_asset_cache(args.asset_cache)
-    payload = _resolve(args.spec, args.seed)
+    # The opening payload is the only one that carries the SimReady props: the
+    # window keeps the list it is given, and a payload written to a file has
+    # nothing else to fill its browser from.
+    payload = _resolve(args.spec, args.seed, remote=True)
 
     if args.payload:
         args.payload.write_bytes(payload)
@@ -61,12 +73,12 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(_view(args.spec, args.seed, payload))
 
 
-def _resolve(spec: Path, seed: int) -> bytes:
+def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
     """Resolve `spec` into a packed scene. Seconds of work."""
     # Arena and the solver print progress to stdout; keep it off stdout so a
     # caller can still pipe this command's own output somewhere.
     with contextlib.redirect_stdout(sys.stderr):
-        return encode(resolve_layout_from_yaml(spec, seed=seed))
+        return encode(resolve_layout_from_yaml(spec, seed=seed), remote=remote)
 
 
 async def _view(spec: Path, seed: int, payload: bytes) -> int:
@@ -98,7 +110,7 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
     await _send(proc, payload)
     running = [
         asyncio.create_task(_reload_on_change(spec, seed, proc)),
-        asyncio.create_task(_apply_edits(spec, seed, proc)),
+        asyncio.create_task(_serve_requests(spec, seed, proc)),
     ]
     try:
         return await proc.wait()
@@ -123,8 +135,8 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
     await proc.stdin.drain()
 
 
-async def _apply_edits(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
-    """Apply the edits the editor sends, and draw what they produce.
+async def _serve_requests(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
+    """Serve what the editor asks for: edits to the spec, and asset requests.
 
     An accepted edit is answered twice: with the spec as soon as it is on disk,
     and with the layout it resolves to once the solver has caught up. Only the
@@ -136,14 +148,31 @@ async def _apply_edits(spec: Path, seed: int, proc: asyncio.subprocess.Process) 
     the two files a key lives in and validates before either is touched, so a
     refused edit leaves the spec exactly as the editor is still drawing it —
     and is answered by that same spec, carrying the reason.
+
+    An asset request is neither written nor solved — it is a minute of network
+    at worst — so it goes to :func:`_serve_assets` and this loop reads on.
     """
     assert proc.stdout is not None
     asked = asyncio.Event()
-    solver = asyncio.create_task(_solve_when_asked(spec, seed, proc, asked))
+    wanted: asyncio.Queue[dict] = asyncio.Queue()
+    helpers = [
+        asyncio.create_task(_solve_when_asked(spec, seed, proc, asked)),
+        asyncio.create_task(_serve_assets(spec, proc, wanted)),
+    ]
     try:
-        while (edit := await _read_edit(proc.stdout)) is not None:
+        while (request := await _read_request(proc.stdout)) is not None:
+            if (op := request.get("op", "")) in ASSET_REQUESTS:
+                wanted.put_nowait(request)
+                if op == "reindex":
+                    # From here rather than from the worker, which may still be
+                    # fetching pictures: the button has to stop taking clicks
+                    # when one is asked for, not when one starts.
+                    with contextlib.suppress(Exception):
+                        await _send(proc, encode_spec(spec, indexing=True))
+                continue
+
             result = await asyncio.to_thread(
-                spec_edit.apply, spec, edit.get("op", ""), list(edit.get("path", [])), edit.get("value")
+                spec_edit.apply, spec, op, list(request.get("path", [])), request.get("value")
             )
             if proc.returncode is not None:
                 return  # the window closed while we were writing
@@ -157,7 +186,88 @@ async def _apply_edits(spec: Path, seed: int, proc: asyncio.subprocess.Process) 
             else:
                 print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
     finally:
-        solver.cancel()
+        for helper in helpers:
+            helper.cancel()
+
+
+async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, wanted: asyncio.Queue[dict]) -> None:
+    """Crawl the bucket, or fetch thumbnails, as the browser asks.
+
+    One request at a time, so a crawl and a batch of pictures never compete for
+    the same bucket. Within a batch the pictures do go together; see
+    :func:`_thumbnails`.
+
+    Every answer carries the prop list again, a failed one included: the panel
+    is waiting on that list, and an answer is what tells it to stop. The list
+    is where the crawl's result and the thumbnails' local paths both show up,
+    so there is nothing else to send back.
+    """
+    while True:
+        request = await wanted.get()
+        crawl = request.get("op") == "reindex"
+        errors: list[str] = []
+        try:
+            if crawl:
+                found = await asyncio.to_thread(simready.build)
+                print(f"{simready.index_path()}: {len(found)} assets", file=sys.stderr)
+            else:
+                urls = list(request.get("urls", []))
+                await _thumbnails(urls)
+                print(f"simready: fetched {len(urls)} thumbnail(s)", file=sys.stderr)
+        except Exception as error:
+            errors = [f"{type(error).__name__}: {error}"]
+            print(f"simready: {errors[0]}", file=sys.stderr)
+
+        if proc.returncode is not None:
+            return  # the window closed while we were fetching
+        # A failed crawl still says it has stopped, or the button never comes
+        # back; the reason is in `errors` beside it.
+        await _answer(proc, spec, errors, indexing=False if crawl else None)
+
+
+async def _answer(
+    proc: asyncio.subprocess.Process,
+    spec: Path,
+    errors: list[str],
+    indexing: bool | None = None,
+) -> None:
+    """Send the browser what it is waiting for, waiting out a write to the spec.
+
+    The message carries the spec as every message does, so one caught mid-write
+    builds no message at all. An edit's answer can afford to drop on that —
+    `_reload_on_change` sends another the moment the file parses — but this is
+    a request's only reply, and the request has already been served.
+    """
+    for attempt in range(ANSWER_TRIES):
+        try:
+            await _send(proc, encode_spec(spec, errors, remote=True, indexing=indexing))
+            return
+        except Exception as error:
+            reason = error
+        await asyncio.sleep(SETTLE)
+    print(f"{spec}: an asset request went unanswered: {reason}", file=sys.stderr)
+
+
+async def _thumbnails(usd_paths: list[str]) -> None:
+    """Mirror the sidecar of each prop, so the panel can draw it off disk.
+
+    Fetched together rather than one after another: each is about 800 ms of
+    round trip, and a screenful in a row is eight seconds of blank rows. The
+    batch is a screenful because that is what the panel asks for, so this
+    leans on the default executor rather than bounding itself.
+    """
+    await asyncio.gather(*(asyncio.to_thread(_thumbnail, usd_path) for usd_path in usd_paths))
+
+
+def _thumbnail(usd_path: str) -> None:
+    """One sidecar into the mirror.
+
+    A prop with no published sidecar is skipped rather than raised. The panel
+    asks for one once and draws a blank for whatever never arrives, so a single
+    missing picture must not cost the rest of the batch theirs.
+    """
+    with contextlib.suppress(Exception):
+        usd_assets.localize(simready.thumbnail_url(usd_path))
 
 
 async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:
@@ -217,8 +327,8 @@ async def _draw(
         await _send(proc, encode_spec(spec, errors or [], solving=solving))
 
 
-async def _read_edit(stream: asyncio.StreamReader) -> dict | None:
-    """One edit off the viewer's stdout, or None once it has ended."""
+async def _read_request(stream: asyncio.StreamReader) -> dict | None:
+    """One request off the viewer's stdout, or None once it has ended."""
     try:
         header = await stream.readexactly(viewer_process.HEADER)
         return msgpack.unpackb(await stream.readexactly(int.from_bytes(header, "big")))
@@ -228,10 +338,21 @@ async def _read_edit(stream: asyncio.StreamReader) -> dict | None:
 
 async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
     """Re-resolve `spec` on every write to it, or to the scene it includes, and
-    draw what comes out."""
+    draw what comes out. The SimReady index is watched from here too.
+
+    An index rebuilt by another process — the MCP server, or ``python -m
+    arena_composer.simready`` — is a new prop list and nothing else, so it is
+    sent on its own rather than costing a solve.
+    """
     stamps = _watched(spec)
+    index = simready.index_stamp()
     while True:
         await asyncio.sleep(WATCH_INTERVAL)
+        if (rebuilt := simready.index_stamp()) != index:
+            index = rebuilt
+            with contextlib.suppress(Exception):
+                await _send(proc, encode_spec(spec, remote=True))
+            print(f"{simready.index_path()}: reloaded", file=sys.stderr)
         if _watched(spec) == stamps:
             continue
         await asyncio.sleep(SETTLE)

@@ -55,13 +55,15 @@ The window has a panel (`src/editor/`) that draws the authored spec as a form an
 It runs on the same pipe, in both directions:
 
 - **Down stdin** — every payload carries the merged spec, which file owns each top-level key, and
-  the `vocabulary`: the assets, and every relation and task kind with a control per parameter.
-  That last part is *inferred* from Arena's registries in `arena_composer.catalog`, never listed
-  by hand, so a relation somebody registers themselves gets a form nobody wrote. All of it is
-  ~40 kB against megabytes of geometry, so it rides every scene rather than being asked for.
-- **Up stdout** — one `{op, path, value}` per edit, framed the way a scene is (`src/wire.rs`).
-  Python applies it through `spec_edit.apply` and answers twice, as below. **Nothing else may
-  write to the child's stdout**: Bevy logs to stderr, and one stray `println!` would land
+  the `vocabulary`: the registered assets, and every relation and task kind with a control per
+  parameter. That last part is *inferred* from Arena's registries in `arena_composer.catalog`,
+  never listed by hand, so a relation somebody registers themselves gets a form nobody wrote. All
+  of it is ~40 kB against megabytes of geometry, so it rides every scene rather than being asked
+  for. The SimReady props are the exception and ride `remote`, below.
+- **Up stdout** — one framed request per click (`src/wire.rs`, `spec::Request`). Three edit the
+  spec — `{op, path, value}`, applied through `spec_edit.apply` and answered twice, as below — and
+  two ask for assets, served by `view._serve_assets` and answered by the prop list. **Nothing else
+  may write to the child's stdout**: Bevy logs to stderr, and one stray `println!` would land
   mid-message and desynchronise the reader.
 
 Everything that adds something picks from the vocabulary first: an object comes from the asset
@@ -111,9 +113,11 @@ editor's half alone, ~40 kB, no resolve, `solving: true` — and the full payloa
 solve lands. The viewer keeps drawing the layout it has in between, and a spinner in each top-right
 corner says the view is behind the form.
 
-Only `assets` may be absent from a message. Every one carries the whole editor half, so
-`editor::Form::take` has no half a message to piece together; and `viewer::apply_updates` drains the
-newest of *each* kind rather than simply the newest, since both can land in one frame.
+Only `assets`, `remote` and `indexing` may be absent from a message. Every one carries the whole
+editor half, so `editor::Form::take` has no half a message to piece together; and
+`viewer::apply_updates` drains the newest of *each* kind rather than simply the newest, since both
+can land in one frame. `remote` and `indexing` are taken from every message in the frame instead of
+the newest, because a crawl finishing during an edit answers on a message of its own.
 
 A layout's copy of the editor half is as old as the solve that produced it, though, so the panel is
 answered only by the messages that carry no layout. `view._draw` sends one behind every layout, read
@@ -136,8 +140,9 @@ The panel is egui (`bevy_egui`), drawn each frame from `editor::Form` in the `Eg
 schedule — not `Update`, where there is no context to draw into yet. Immediate mode is
 what keeps the panel a pure function of the last payload: there is no widget tree to keep in step
 with the spec, so nothing here diffs, rebuilds or restores scroll. The only state it owns is UI
-state — the asset search, and the number under the pointer, which is held against `Form::revision`
-so a value does not snap back between letting go of it and the spec carrying it coming back.
+state — the asset search, the browser's uploaded pictures, and the number under the pointer, which
+is held against `Form::revision` so a value does not snap back between letting go of it and the spec
+carrying it coming back.
 
 `PanOrbitCamera` claims a drag from the cursor position alone and knows nothing about the panel over
 it, so `keep_the_camera_off_the_panel` toggles `enabled` from `EguiWantsInput`, latched between
@@ -194,7 +199,9 @@ cd arena_composer && cargo run --bin arena-render -- ../scene.msgpack top=top.pn
 
 `ARENA_VIEWER_SCREENSHOT=shot.png` on either viewer draws for a moment, writes the window to that
 path and quits — how to see what the panel actually looks like without a person at the keyboard.
-It captures the window and nothing else on the desktop.
+It captures the window and nothing else on the desktop. `ARENA_VIEWER_SEARCH=basket` opens the asset
+browser already filtered, and `ARENA_VIEWER_SHOW_RELATIONS=all` opens with the relations drawn,
+since a screenshot has nobody to type or hover for it.
 
 `--output` still writes the resolver's JSON dump. That stays the human- and agent-readable
 artifact; the payload is the renderer's, and carries a strict subset of its fields.
@@ -228,7 +235,34 @@ own generator writes. Where those URLs come from is `arena_composer.simready`: o
 public bucket, written as `simready-index.json` into the asset cache directory
 (`ARENA_COMPOSER_ASSET_CACHE`, default `~/.cache/arena-composer/usd`) beside the USDs it names, so
 the MCP server and a viewer read the same file and either may rebuild it. `catalog.search` merges it
-with the registry; the vocabulary the viewer gets does not carry it yet.
+with the registry, and the viewer's asset browser lists both.
+
+The props do not ride the vocabulary. They are a megabyte where it is forty kilobytes, and they
+change only when the index is rebuilt or a picture is fetched, so they go as `remote` on the message
+that changed them and the panel keeps the last list it was sent. Three things send one: the payload
+that opens the window, an answer from `view._serve_assets`, and the poll in `view._reload_on_change`
+noticing that another process rebuilt the index.
+
+The browser asks for two things, both served without touching the spec. `Request::Reindex` crawls
+the bucket, about a minute, and downloads nothing. Whether one is running is `indexing`, which
+Python answers the way it answers `solving` — the panel cannot tell from the prop lists, since one
+arrives whenever a picture lands or another process rebuilds the index. It is set as soon as the
+request is *read*, not when the crawl starts, because a crawl waiting behind a batch of pictures is
+still a minute of a live button and a second crawl queued behind the first. `Request::Thumbnails` names the props it has on
+screen and no picture for, by the USD each spawns from — `simready.thumbnail_url` derives the
+sidecar, so the panel holds one URL per prop and not two. Python mirrors those PNGs beside the
+layers they belong to and the next `remote` carries their local paths, because the viewer draws from
+disk and opens no socket. A prop is asked for once: one the bucket has no picture for is never
+answered, and asking again would ask forever.
+
+An asset request's answer is retried (`view._answer`). It carries the spec as every message does, so
+a spec caught mid-write builds no message — and where an edit's answer can be dropped, because
+`_reload_on_change` sends another the moment the file parses, this is the request's only reply and
+the request has already been served.
+
+Never offer a prop as an object-set member. Members are built with no arguments, so there is nowhere
+to put the `usd_path` a `simready_usd_object` asserts on, and Arena's validator refuses the name
+outright.
 
 Nothing downloads a prop until a spec naming it is resolved. That resolve checks the URL and the
 rigid-body count first and raises `resolve_layout.SpecError` naming the object, because those are

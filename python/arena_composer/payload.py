@@ -21,6 +21,11 @@ preceded by one: the spec a layout carries was read when its solve began, and
 the editor can be several edits past that by the time the solve lands. So the
 panel is answered by the messages carrying no layout, and a full payload's own
 spec is read only to open one (``viewer::setup``).
+
+The SimReady props travel apart for the opposite reason. They are a megabyte of
+table that changes only when the index is rebuilt or a thumbnail lands, so
+`remote` rides the message that changed it and no other; the panel keeps the
+last list it was sent.
 """
 
 from __future__ import annotations
@@ -40,8 +45,13 @@ from arena_composer.usd import Node, extract, open_stage
 _UNDRAWN_ROLES = {"object_reference"}
 
 
-def build_payload(dump: dict[str, Any]) -> dict[str, Any]:
-    """Turn a resolved-layout dump into the structure the viewer decodes."""
+def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
+    """Turn a resolved-layout dump into the structure the viewer decodes.
+
+    `remote` carries the SimReady props along. On by default, because a payload
+    written to a file is opened on its own by ``arena-viewer`` and has nothing
+    else to fill the browser from; a viewer being fed already has the list.
+    """
     geometries: list[list[dict[str, Any]]] = []
     by_usd: dict[str, int] = {}
 
@@ -76,6 +86,7 @@ def build_payload(dump: dict[str, Any]) -> dict[str, Any]:
         "spec": dump.get("spec") or {},
         "owners": _owners(dump.get("spec_path")),
         "vocabulary": _vocabulary(),
+        "remote": _remote() if remote else None,
         # A layout that resolved is the answer to whatever was asked of it, so
         # this clears whatever the last refusal put in front of the form.
         "errors": [],
@@ -104,30 +115,69 @@ def _owners(spec_path: str | None) -> dict[str, str]:
 
 @cache
 def _vocabulary() -> dict[str, Any]:
-    """Everything a spec may name: the assets, and the relation and task kinds
-    with the form that edits each.
+    """Everything registered with Arena that a spec may name: the assets, and
+    the relation and task kinds with the form that edits each.
 
     Sent whole rather than searched. It is ~30 kB against megabytes of
-    geometry, and a form filters faster than a round trip.
+    geometry, and a form filters faster than a round trip. Cached because none
+    of it changes while the process runs — which is also why the SimReady
+    props, which do, are :func:`_remote` and not part of this.
     """
     from arena_composer import catalog
 
     return {
-        "assets": [
-            {"registry_name": a.registry_name, "role": a.role, "tags": a.tags, "object_type": a.object_type}
-            for a in catalog.catalog()
-        ],
+        "assets": [_asset(asset) for asset in catalog.catalog()],
         "relations": [asdict(kind) for kind in catalog.relations()],
         "tasks": [asdict(kind) for kind in catalog.tasks()],
     }
 
 
-def encode(dump: dict[str, Any]) -> bytes:
+def _remote() -> list[dict[str, Any]]:
+    """The SimReady props the local index knows, each with its thumbnail where
+    that has been fetched. Empty until the index is built.
+
+    The picture is given as the file it was mirrored to, not as the URL it came
+    from: the viewer draws from disk and opens no socket. A prop whose sidecar
+    has not been fetched carries no path, which is what the panel asks about.
+    """
+    from arena_composer import catalog
+    from arena_composer.usd_assets import mirrored
+
+    return [
+        {**_asset(asset), "thumbnail": mirrored(asset.thumbnail) or ""}
+        for asset in catalog.remote()
+    ]
+
+
+def _asset(asset: Any) -> dict[str, Any]:
+    """One asset as the browser lists it.
+
+    `params` is what an entry naming it has to carry beyond the registry name —
+    empty for a registered asset, the URL for a SimReady prop — so the panel
+    writes an entry that builds without knowing which kind it picked.
+    """
+    return {
+        "registry_name": asset.registry_name,
+        "role": asset.role,
+        "tags": asset.tags,
+        "object_type": asset.object_type,
+        "name": asset.name,
+        "params": asset.params,
+    }
+
+
+def encode(dump: dict[str, Any], remote: bool = True) -> bytes:
     """Build and serialize the payload."""
-    return msgpack.packb(build_payload(dump), use_bin_type=True)
+    return msgpack.packb(build_payload(dump, remote), use_bin_type=True)
 
 
-def encode_spec(spec_path: Path, errors: list[str] | None = None, solving: bool = False) -> bytes:
+def encode_spec(
+    spec_path: Path,
+    errors: list[str] | None = None,
+    solving: bool = False,
+    remote: bool = False,
+    indexing: bool | None = None,
+) -> bytes:
     """Pack the editor's half alone: the spec as written, with no layout.
 
     What answers an edit the moment it is on disk. :mod:`arena_composer.spec_edit`
@@ -139,6 +189,15 @@ def encode_spec(spec_path: Path, errors: list[str] | None = None, solving: bool 
     The spec is read back rather than carried over from the edit, so this is the
     same document :func:`build_payload` would report — validated, with every
     default filled in.
+
+    `remote` sends the SimReady props with it, which is how an answer to a
+    reindex or a thumbnail request reaches the panel. Off by default: nothing
+    else changes that list, and it is a megabyte.
+
+    `indexing` says whether a crawl of the bucket is running, and is left out
+    by every message that does not know — the panel keeps the last answer, the
+    way it keeps the last prop list. Only :func:`view._serve_assets` and the
+    request that starts one have anything to say about it.
     """
     from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 
@@ -147,6 +206,8 @@ def encode_spec(spec_path: Path, errors: list[str] | None = None, solving: bool 
             "spec": ArenaEnvGraphSpec.from_yaml(spec_path).model_dump(mode="json"),
             "owners": _owners(str(spec_path)),
             "vocabulary": _vocabulary(),
+            "remote": _remote() if remote else None,
+            "indexing": indexing,
             "errors": list(errors or []),
             "solving": solving,
         },

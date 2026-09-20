@@ -63,8 +63,17 @@ class RemoteAsset:
     @property
     def thumbnail(self) -> str:
         """The 256px sidecar the bucket keeps beside every entry layer."""
-        folder, layer = self.key.rsplit("/", 1)
-        return f"{BUCKET}/{folder}{_SIDECAR}{layer}.png"
+        return thumbnail_url(self.usd_path)
+
+
+def thumbnail_url(usd_path: str) -> str:
+    """The 256px sidecar published beside an entry layer.
+
+    Derived from the layer's own URL rather than looked up, so whoever holds a
+    spec entry's ``params.usd_path`` can ask for its picture without the index.
+    """
+    folder, layer = usd_path.rsplit("/", 1)
+    return f"{folder}{_SIDECAR}{layer}.png"
 
 
 def index_path() -> Path:

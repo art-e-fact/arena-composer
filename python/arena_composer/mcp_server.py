@@ -314,12 +314,16 @@ async def render_views(
 
 
 def _pack(path: Path, seed: int) -> bytes:
-    """Resolve a spec and pack it for the renderer."""
+    """Resolve a spec and pack it for the renderer.
+
+    Without the SimReady props: they exist for the asset browser to list, and a
+    render has no panel to list them in.
+    """
     dump = _resolve(path, seed)
     with _quiet():
         from arena_composer.payload import encode
 
-        return encode(dump)
+        return encode(dump, remote=False)
 
 
 def main() -> int:

@@ -114,6 +114,7 @@ fn setup(world: &mut World) {
     spawn_camera(world, &scene);
     spawn_hud(world, &scene);
     show_in_form(world, &scene);
+    take_assets(world, std::slice::from_ref(&scene));
 }
 
 /// Hand a scene to the editor panel, where there is one.
@@ -123,6 +124,20 @@ fn setup(world: &mut World) {
 fn show_in_form(world: &mut World, scene: &Scene) {
     if let Some(mut form) = world.get_resource_mut::<crate::editor::Form>() {
         form.take(scene);
+    }
+}
+
+/// Keep whatever any of `scenes` says about the assets.
+///
+/// Apart from [`show_in_form`] because the two answer different messages: a
+/// crawl that finishes while an edit is in flight lands on a message of its
+/// own, which need not be the one the panel is drawn from.
+fn take_assets(world: &mut World, scenes: &[Scene]) {
+    let Some(mut form) = world.get_resource_mut::<crate::editor::Form>() else {
+        return;
+    };
+    for scene in scenes {
+        form.take_assets(scene);
     }
 }
 
@@ -183,6 +198,7 @@ fn apply_updates(world: &mut World) {
     if let Some(scene) = received.iter().rev().find(|scene| scene.assets.is_none()) {
         show_in_form(world, scene);
     }
+    take_assets(world, &received);
 
     if ended {
         world.write_message(AppExit::Success);
@@ -372,6 +388,79 @@ mod tests {
         let form = world.resource::<crate::editor::Form>();
         assert_eq!(form.spec.env_name, "edited", "the form kept the older spec");
         assert!(form.solving, "the panel has nothing to say the view is behind");
+    }
+
+    /// The prop list answers a crawl, not an edit, so the message carrying it
+    /// need not be the one the panel is drawn from. Taking only that one would
+    /// drop a list that landed in the same frame as an edit's answer — and the
+    /// browser would go on waiting for a crawl that had already finished.
+    #[test]
+    fn a_prop_list_lands_whichever_message_carried_it() {
+        use crate::spec::CatalogAsset;
+
+        let (sender, updates) = std::sync::mpsc::channel();
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<crate::editor::Form>()
+            .insert_resource(ResolvedScene(scene([1.0, 0.0, 0.0])))
+            .insert_resource(SceneUpdates(Mutex::new(updates)))
+            .add_systems(Startup, setup)
+            .add_systems(Update, apply_updates);
+        app.update();
+
+        // The crawl's answer, and then an edit's — the panel takes the second.
+        let crawled = Scene {
+            remote: Some(vec![CatalogAsset {
+                name: "Plastic_Basket_A01".into(),
+                ..default()
+            }]),
+            ..default()
+        };
+        sender.send(crawled).expect("the viewer still listening");
+        let mut edited = Scene::default();
+        edited.spec.env_name = "edited".into();
+        sender.send(edited).expect("the viewer still listening");
+        app.update();
+
+        let form = app.world().resource::<crate::editor::Form>();
+        assert_eq!(form.spec.env_name, "edited", "the panel took the wrong message");
+        let names: Vec<&str> = form.remote.iter().map(|asset| asset.name.as_str()).collect();
+        assert_eq!(names, ["Plastic_Basket_A01"], "the prop list was dropped");
+        assert!(!form.indexing, "a message that said nothing about a crawl started one");
+    }
+
+    /// Whether a crawl is running is Python's answer, and it is kept until
+    /// Python says otherwise. A message that says nothing about one — an edit
+    /// answered while the crawl runs, or the pictures it asked for landing —
+    /// must not put the button back before the crawl is done.
+    #[test]
+    fn a_crawl_runs_until_python_says_it_stopped() {
+        let (sender, updates) = std::sync::mpsc::channel();
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<crate::editor::Form>()
+            .insert_resource(ResolvedScene(scene([1.0, 0.0, 0.0])))
+            .insert_resource(SceneUpdates(Mutex::new(updates)))
+            .add_systems(Startup, setup)
+            .add_systems(Update, apply_updates);
+        app.update();
+
+        let said = |indexing: Option<bool>| Scene {
+            indexing,
+            ..default()
+        };
+        sender.send(said(Some(true))).expect("the viewer still listening");
+        app.update();
+        assert!(app.world().resource::<crate::editor::Form>().indexing);
+
+        // An edit's answer, and a batch of pictures: neither ends the crawl.
+        sender.send(said(None)).expect("the viewer still listening");
+        app.update();
+        assert!(app.world().resource::<crate::editor::Form>().indexing, "the crawl was cut short");
+
+        sender.send(said(Some(false))).expect("the viewer still listening");
+        app.update();
+        assert!(!app.world().resource::<crate::editor::Form>().indexing);
     }
 
     /// A layout carries the spec its solve began from, so an edit made while it

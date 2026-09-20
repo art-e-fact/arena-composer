@@ -21,7 +21,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 
-use crate::spec::{Spec, Vocabulary};
+use crate::spec::{CatalogAsset, Spec, Vocabulary};
 
 /// Lays Arena's Z-up world down onto Bevy's Y-up one.
 pub fn arena_to_bevy() -> Quat {
@@ -52,6 +52,19 @@ pub struct Scene {
     /// Which of the task and scene files holds each top-level key.
     pub owners: HashMap<String, String>,
     pub vocabulary: Vocabulary,
+    /// The SimReady props the local index knows, absent when this message
+    /// changes nothing about them — which is every message but the first, an
+    /// answer to [`Request::Reindex`](crate::spec::Request::Reindex) or to
+    /// [`Request::Thumbnails`](crate::spec::Request::Thumbnails), and a rebuild
+    /// noticed on disk. They are a megabyte of table against a vocabulary's
+    /// thirty kilobytes, so they travel only when they have changed and the
+    /// panel keeps the last list it was sent.
+    pub remote: Option<Vec<CatalogAsset>>,
+    /// Whether a crawl of the bucket is under way, absent when this message
+    /// says nothing about one. Python's to answer, because only it knows
+    /// whether the request is queued, running or done — the panel would have
+    /// to guess from the next prop list, and those arrive for other reasons.
+    pub indexing: Option<bool>,
     /// Why the last edit was refused, empty when it landed.
     pub errors: Vec<String>,
     /// Whether a layout for this spec is still being solved, so the panel can
@@ -262,6 +275,27 @@ mod tests {
         assert_eq!(asset.transform().rotation, Quat::IDENTITY);
         assert!(scene.geometry_of(asset).is_empty());
         assert!(!scene.lighting.auto_injected_dome_light);
+    }
+
+    /// Almost no message carries the prop list, and one that omits it must not
+    /// read as an empty list — the panel would blank its browser on every edit.
+    #[test]
+    fn a_message_without_props_carries_no_list() {
+        let packed = |scene: serde_json::Value| Scene::from_msgpack(&rmp_serde::to_vec_named(&scene).unwrap()).unwrap();
+
+        assert!(packed(serde_json::json!({"env_name": "t"})).remote.is_none());
+        let sent = packed(serde_json::json!({
+            "remote": [{
+                "registry_name": "simready_usd_object",
+                "name": "Plastic_Basket_A01",
+                "params": {"usd_path": "https://bucket/basket.usd"},
+                "thumbnail": "/cache/https/bucket/.thumbs/256x256/basket.usd.png",
+            }],
+        }));
+        let props = sent.remote.expect("the list this message carried");
+        assert_eq!(props[0].name, "Plastic_Basket_A01");
+        assert_eq!(props[0].params["usd_path"].as_text(), Some("https://bucket/basket.usd"));
+        assert!(props[0].thumbnail.ends_with("basket.usd.png"));
     }
 
     /// The blobs are raw little-endian arrays, and a truncated one is dropped

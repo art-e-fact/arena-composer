@@ -5,8 +5,8 @@
 //! in four big-endian bytes, and the reader takes exactly that many.
 //!
 //! Both directions use that framing. Scenes arrive on stdin from
-//! `arena_composer.viewer_process.pack_scene`; edits leave on stdout for
-//! `arena_composer.view` to apply. stdout is free for this because Bevy logs
+//! `arena_composer.viewer_process.pack_scene`; requests leave on stdout for
+//! `arena_composer.view` to serve. stdout is free for this because Bevy logs
 //! to stderr — keep it that way, since one stray `println!` in the viewer
 //! would land mid-message and desynchronise the reader.
 
@@ -16,7 +16,7 @@ use std::sync::mpsc::Sender;
 use bevy::log::error;
 
 use crate::scene::Scene;
-use crate::spec::Edit;
+use crate::spec::Request;
 
 /// Read one scene, or `None` once the stream has ended.
 pub fn read_scene(stream: &mut impl Read) -> anyhow::Result<Option<Scene>> {
@@ -52,13 +52,13 @@ pub fn forward_scenes(mut stream: impl Read, scenes: Sender<Scene>) {
     }
 }
 
-/// Send one edit, framed the way a scene is.
+/// Send one request, framed the way a scene is.
 ///
-/// Flushed rather than left to the buffer: a pipe is block-buffered and an
-/// edit carries no newline, so an unflushed one waits for the next — which is
-/// the user's next keystroke, or never.
-pub fn write_edit(sink: &mut impl Write, edit: &Edit) -> anyhow::Result<()> {
-    let payload = rmp_serde::to_vec_named(edit)?;
+/// Flushed rather than left to the buffer: a pipe is block-buffered and a
+/// request carries no newline, so an unflushed one waits for the next — which
+/// is the user's next keystroke, or never.
+pub fn write_request(sink: &mut impl Write, request: &Request) -> anyhow::Result<()> {
+    let payload = rmp_serde::to_vec_named(request)?;
     sink.write_all(&(payload.len() as u32).to_be_bytes())?;
     sink.write_all(&payload)?;
     sink.flush()?;
@@ -86,16 +86,16 @@ mod tests {
         assert!(read_scene(&mut stream).unwrap().is_none());
     }
 
-    /// An edit goes out framed the same way a scene comes in, so the reader on
-    /// the other end can be the mirror of `read_scene`.
+    /// A request goes out framed the same way a scene comes in, so the reader
+    /// on the other end can be the mirror of `read_scene`.
     #[test]
-    fn an_edit_is_framed_by_its_length() {
+    fn a_request_is_framed_by_its_length() {
         use crate::spec::{Step, Value};
 
         let mut sink = Vec::new();
-        write_edit(
+        write_request(
             &mut sink,
-            &Edit::Set {
+            &Request::Set {
                 path: vec![Step::from("relations"), Step::from(2usize), Step::from("params")],
                 value: Value::Number(0.08),
             },
@@ -112,6 +112,25 @@ mod tests {
         assert_eq!(
             decoded,
             serde_json::json!({"op": "set", "path": ["relations", 2, "params"], "value": 0.08}),
+        );
+    }
+
+    /// The two asset requests carry no path, and are told apart by `op` alone —
+    /// which is what `arena_composer.view.ASSET_REQUESTS` matches on before it
+    /// tries to read one as an edit.
+    #[test]
+    fn an_asset_request_is_named_by_its_op() {
+        let sent = |request: &Request| {
+            let mut sink = Vec::new();
+            write_request(&mut sink, request).unwrap();
+            rmp_serde::from_slice::<serde_json::Value>(&sink[4..]).unwrap()
+        };
+        assert_eq!(sent(&Request::Reindex), serde_json::json!({"op": "reindex"}));
+        assert_eq!(
+            sent(&Request::Thumbnails {
+                urls: vec!["https://bucket/basket.usd".into()],
+            }),
+            serde_json::json!({"op": "thumbnails", "urls": ["https://bucket/basket.usd"]}),
         );
     }
 

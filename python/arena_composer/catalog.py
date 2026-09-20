@@ -25,7 +25,7 @@ import sys
 import types
 import typing
 from dataclasses import dataclass, field
-from functools import cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 from urllib.parse import urlparse
@@ -51,6 +51,9 @@ class Asset:
     #: What a spec entry has to carry in `params` beyond the registry name:
     #: the URL, for a remote asset.
     params: dict[str, Any] = field(default_factory=dict)
+    #: A picture of the asset, where one is published beside it. A URL like
+    #: `usd_path`: whether it has been fetched is `usd_assets.mirrored`'s to say.
+    thumbnail: str | None = None
 
     def matches(self, terms: list[str]) -> bool:
         """Whether every term appears in the name, a tag or the USD's file name."""
@@ -103,7 +106,9 @@ def remote() -> tuple[Asset, ...]:
     return _remote(simready.index_stamp())
 
 
-@cache
+# One entry, because only the current index is ever asked for: a crawl started
+# from the viewer replaces it, and every generation before it is dead weight.
+@lru_cache(maxsize=1)
 def _remote(stamp: int | None) -> tuple[Asset, ...]:
     from isaaclab_arena.assets.registries import AssetRegistry
     from isaaclab_arena.assets.simready_constants import SIMREADY_USD_OBJECT_REGISTRY_NAME
@@ -122,6 +127,7 @@ def _remote(stamp: int | None) -> tuple[Asset, ...]:
             name=asset.name,
             usd_path=asset.usd_path,
             params={"usd_path": asset.usd_path},
+            thumbnail=asset.thumbnail,
         )
         for asset in simready.load()
     )
