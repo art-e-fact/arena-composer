@@ -107,21 +107,24 @@ crosses onto the panel.
 
 ### The backdrop
 
-The window draws on two cameras (`src/background.rs`). The backdrop's is a `Camera2d` at
-`order: -1` carrying one full-window UI node with a `BackgroundGradient`; the layout's clears
-`ClearColorConfig::None` over it. The gradient cannot go on the layout's camera, because the UI
-pass runs after the 3D one and a full-screen node there covers the layout.
+The window clears to `BACKDROP` (`src/viewer.rs`), dark enough for a white robot on light tables
+to read against and distinct from the grey the panel is drawn in. `arena-render` does not set one
+and clears to Bevy's default.
 
-Two defaults stop resolving once there is a second camera, so the layout's carries both markers
-by hand: `PrimaryEguiContext`, since `bevy_egui` otherwise attaches it to the first camera it
-finds, and `IsDefaultUiCamera`, since a root node without a `UiTargetCamera` goes to the highest
-order camera. Drop either and the panel or the HUD moves to the backdrop's camera — the window
-still opens, so check a change here against a screenshot.
+It is a flat colour because that is all `ClearColorConfig` offers. A gradient has to be a
+`bevy_ui` node, and `bevy_ui`'s pass is scheduled `after(Core3dSystems::PostProcess)` on whichever
+camera owns it — so such a node covers the layout, and putting one behind costs a second
+`Camera2d` at `order: -1` to carry it, `ClearColorConfig::None` on the layout's, and three markers
+the layout's camera does not otherwise need: `IsDefaultUiCamera`, `PrimaryEguiContext`, and
+`EguiGlobalSettings::auto_create_primary_context = false`. Without that last one `bevy_egui` marks
+a camera of its own — which of the two follows the archetype order of an `Added<Camera>` query,
+not the spawn order — and two primary contexts panic every system that draws into egui's pass.
 
 Keep a backdrop out of the 3D pass. Everything drawn there is tonemapped, so a backdrop built as
 geometry arrives as the inverse of a curve this code does not own: an unlit dome authored
-`#39414f` landed at `#8b94a3`, with its whole ramp flattened. A UI gradient and `ClearColor` both
-reach the frame as written.
+`#39414f` landed at `#8b94a3`, with its whole ramp flattened. `ClearColor` is written into the
+target rather than shaded, and a UI node is drawn past the tonemapper, so both reach the frame as
+authored.
 
 ### Two answers per edit
 

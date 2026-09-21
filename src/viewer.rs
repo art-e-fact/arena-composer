@@ -14,14 +14,10 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use bevy::asset::{AssetPlugin, UnapprovedPathMode};
-use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
-use bevy::ui::IsDefaultUiCamera;
-use bevy_egui::PrimaryEguiContext;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::background;
 use crate::layout::{ArenaRoot, View, ambient, framing, spawn_lighting, spawn_scene};
 use crate::scene::Scene;
 
@@ -38,9 +34,14 @@ struct SceneUpdates(Mutex<Receiver<Scene>>);
 #[derive(Component)]
 struct Hud;
 
+/// What the window clears to: dark enough for a white robot on light tables to
+/// read against, and not the grey the editor panel is drawn in.
+const BACKDROP: Color = Color::srgb(57.0 / 255.0, 65.0 / 255.0, 79.0 / 255.0); // #39414f
+
 pub fn run(scene: Scene, updates: Receiver<Scene>) {
     let mut app = App::new();
-    app.add_plugins((
+    app.insert_resource(ClearColor(BACKDROP))
+        .add_plugins((
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -115,10 +116,7 @@ fn setup(world: &mut World) {
         .0;
     spawn_scene(world, &scene);
     spawn_lighting(world, &scene);
-    // Before the camera: the backdrop wants one below it, and decides how the
-    // layout's camera clears over it.
-    let clear = background::spawn(world);
-    spawn_camera(world, &scene, clear);
+    spawn_camera(world, &scene);
     spawn_hud(world, &scene);
     show_in_form(world, &scene);
     take_assets(world, std::slice::from_ref(&scene));
@@ -212,18 +210,10 @@ fn apply_updates(world: &mut World) {
     }
 }
 
-fn spawn_camera(world: &mut World, scene: &Scene, clear: ClearColorConfig) {
+fn spawn_camera(world: &mut World, scene: &Scene) {
     let framed = framing(View::Default, scene);
     world.spawn((
         Camera3d::default(),
-        Camera {
-            clear_color: clear,
-            ..default()
-        },
-        // Both explicit because there may be a backdrop camera below this one,
-        // and neither egui's nor the UI's default picks a camera we can name.
-        PrimaryEguiContext,
-        IsDefaultUiCamera,
         framed.transform,
         framed.projection,
         // Radius, yaw and pitch are left unset so the controller derives them

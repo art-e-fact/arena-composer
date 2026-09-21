@@ -9,7 +9,6 @@
 //! Each has a Python front end (the [`python`] module, behind the `python`
 //! feature) and a `[[bin]]` that reads the same payload off disk.
 
-pub mod background;
 pub mod editor;
 pub mod layout;
 pub mod render;
