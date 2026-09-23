@@ -5,9 +5,11 @@ is seconds and the write that precedes it is milliseconds, so the two answers
 are on separate paths — which is also what lets a burst of edits share one solve
 instead of paying for one each.
 
-The browser's two requests are neither written nor solved. They are network
-against NVIDIA's bucket, so they are served beside the edits, and both are
-answered by the prop list — the only thing either of them changes.
+A crawl is neither written nor solved. It is minutes of network against
+NVIDIA's bucket, so it is served beside the edits, and it is answered by the
+prop list — the only thing it changes. The pass that catches the registered
+assets up on their pictures is answered the same way, and runs beside both.
+Neither says anything about the last edit or its solve.
 """
 
 from __future__ import annotations
@@ -159,10 +161,10 @@ def test_a_refused_edit_is_answered_without_a_solve(monkeypatch, tmp_path: Path)
     asyncio.run(run())
 
 
-def _packed(spec, errors=None, solving=False, remote=False, indexing=None) -> bytes:
+def _packed(spec, errors=None, solving=None, remote=False, indexing=None) -> bytes:
     """Stand in for `payload.encode_spec`, which would import Arena."""
     return msgpack.packb(
-        {"errors": list(errors or []), "remote": remote, "indexing": indexing}, use_bin_type=True
+        {"errors": errors, "solving": solving, "remote": remote, "indexing": indexing}, use_bin_type=True
     )
 
 
@@ -191,14 +193,18 @@ def test_a_crawl_says_it_started_and_answers_with_the_prop_list(monkeypatch, tmp
     """The button stops taking clicks when the crawl is asked for, not when it
     gets around to running — a minute of crawling is a minute of clicks, and
     each one would queue another crawl behind the first."""
-    crawled: list[bool] = []
-    monkeypatch.setattr(view.simready, "build", lambda: crawled.append(True) or [])
+    found = [SimpleNamespace(usd_path="https://bucket/Baskets/basket.usd")]
+    fetched: list[list[str]] = []
+    monkeypatch.setattr(view.simready, "build", lambda: found)
+    monkeypatch.setattr(view.simready, "fetch_thumbnails", lambda usd_paths: fetched.append(usd_paths) or 1)
 
     answers = _served(monkeypatch, {"op": "reindex"}, tmp_path)
-    assert crawled == [True], "the request never reached the crawl"
+    assert fetched == [["https://bucket/Baskets/basket.usd"]], "the crawl did not fetch what it indexed"
     assert [answer["indexing"] for answer in answers] == [True, False]
     assert [answer["remote"] for answer in answers] == [False, True], "the crawl produced no list"
-    assert answers[-1]["errors"] == []
+    # A crawl knows nothing of the last edit, so it must not wipe its refusal
+    # or stop the spinner of the solve behind it.
+    assert [(answer["errors"], answer["solving"]) for answer in answers] == [(None, None)] * 2
 
 
 def test_a_failed_crawl_still_says_it_stopped(monkeypatch, tmp_path: Path):
@@ -219,7 +225,7 @@ def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
     watcher sends another. This one is a request's only reply."""
     attempts: list[int] = []
 
-    def mid_write(spec, errors=None, solving=False, remote=False, indexing=None) -> bytes:
+    def mid_write(spec, errors=None, solving=None, remote=False, indexing=None) -> bytes:
         attempts.append(1)
         if len(attempts) < 3:
             raise ValueError("while scanning a simple key")
@@ -227,6 +233,7 @@ def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(view, "SETTLE", 0.01)
     monkeypatch.setattr(view.simready, "build", list)
+    monkeypatch.setattr(view.simready, "fetch_thumbnails", len)
     monkeypatch.setattr(view, "encode_spec", mid_write)
     monkeypatch.setattr(
         view.spec_edit, "apply", lambda *_: pytest.fail("an asset request must not be written to the spec")
@@ -245,39 +252,49 @@ def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
     assert answers[-1]["indexing"] is False, "the crawl's answer was lost with the write"
 
 
-def test_thumbnails_are_fetched_beside_their_layer(monkeypatch, tmp_path: Path):
-    """A request names a prop by the USD it spawns from, which is what a spec
-    entry carries. The sidecar is derived from that rather than sent, so the
-    panel holds one URL per prop and not two."""
-    fetched: list[str] = []
-    monkeypatch.setattr(view.usd_assets, "localize", lambda url: fetched.append(url) or url)
+def test_the_startup_pass_offers_the_registered_assets_alone(monkeypatch, tmp_path: Path):
+    """The registered assets are in no index, so nothing but this pass would
+    ever fetch their pictures — and they are what the browser opens on. The
+    props are left to the reindex button: an index built before its pictures
+    were, or by the MCP server, is up to 170 MB nobody asked for here.
 
-    answers = _served(
-        monkeypatch,
-        {"op": "thumbnails", "urls": ["https://bucket/Baskets/Plastic_Basket_A01/sm_misc_basket_a01.usd"]},
-        tmp_path,
-    )
-    assert fetched == ["https://bucket/Baskets/Plastic_Basket_A01/.thumbs/256x256/sm_misc_basket_a01.usd.png"]
-    assert [answer["remote"] for answer in answers] == [True]
+    A pass that found nothing answers with nothing: the prop list is a
+    megabyte, and on a machine that has fetched them there is nothing to say."""
+    offered: list[str] = []
+
+    def fetch(usd_paths, found: list[int]) -> int:
+        offered.extend(usd_paths)
+        return found.pop()
+
+    monkeypatch.setattr(view, "encode_spec", _packed)
+    monkeypatch.setattr(view.catalog, "catalog", lambda: (SimpleNamespace(usd_path="https://bucket/ycb.usd"),))
+    monkeypatch.setattr(view.catalog, "remote", lambda: pytest.fail("the props were offered at startup"))
+
+    async def run(found: list[int]) -> list[dict]:
+        monkeypatch.setattr(view.simready, "fetch_thumbnails", lambda paths: fetch(paths, found))
+        viewer = _Viewer()
+        await view._catch_up_on_pictures(tmp_path / "task.yaml", viewer)
+        return viewer.answers
+
+    answers = asyncio.run(run([1]))
+    assert [(answer["remote"], answer["errors"], answer["solving"]) for answer in answers] == [(True, None, None)]
+    assert offered == ["https://bucket/ycb.usd"]
+    assert asyncio.run(run([0])) == [], "a pass that fetched nothing still sent a prop list"
 
 
-def test_a_missing_sidecar_does_not_cost_the_batch(monkeypatch, tmp_path: Path):
-    """Not every prop publishes a picture. One that does not must not take the
-    pictures of everything asked for beside it."""
-    fetched: list[str] = []
+def test_a_failed_startup_pass_costs_the_pictures_and_nothing_else(monkeypatch, tmp_path: Path):
+    """Its task is awaited when the window closes, so an exception it let
+    through would surface there as a traceback in place of an exit status."""
 
-    def localize(url: str) -> str:
-        if "missing" in url:
-            raise FileNotFoundError(url)
-        fetched.append(url)
-        return url
+    def unreachable(usd_paths) -> int:
+        raise OSError("bucket unreachable")
 
-    monkeypatch.setattr(view.usd_assets, "localize", localize)
+    monkeypatch.setattr(view.catalog, "catalog", tuple)
+    monkeypatch.setattr(view.simready, "fetch_thumbnails", unreachable)
 
-    answers = _served(
-        monkeypatch,
-        {"op": "thumbnails", "urls": ["https://bucket/a/missing.usd", "https://bucket/b/there.usd"]},
-        tmp_path,
-    )
-    assert fetched == ["https://bucket/b/.thumbs/256x256/there.usd.png"]
-    assert [answer["remote"] for answer in answers] == [True], "one missing picture ended the request"
+    async def run() -> list[dict]:
+        viewer = _Viewer()
+        await view._catch_up_on_pictures(tmp_path / "task.yaml", viewer)
+        return viewer.answers
+
+    assert asyncio.run(run()) == []

@@ -115,23 +115,15 @@ mod tests {
         );
     }
 
-    /// The two asset requests carry no path, and are told apart by `op` alone —
-    /// which is what `arena_composer.view.ASSET_REQUESTS` matches on before it
+    /// An asset request carries no path, and is told apart by `op` alone —
+    /// which is what `arena_composer.view.ASSET_REQUEST` matches on before it
     /// tries to read one as an edit.
     #[test]
     fn an_asset_request_is_named_by_its_op() {
-        let sent = |request: &Request| {
-            let mut sink = Vec::new();
-            write_request(&mut sink, request).unwrap();
-            rmp_serde::from_slice::<serde_json::Value>(&sink[4..]).unwrap()
-        };
-        assert_eq!(sent(&Request::Reindex), serde_json::json!({"op": "reindex"}));
-        assert_eq!(
-            sent(&Request::Thumbnails {
-                urls: vec!["https://bucket/basket.usd".into()],
-            }),
-            serde_json::json!({"op": "thumbnails", "urls": ["https://bucket/basket.usd"]}),
-        );
+        let mut sink = Vec::new();
+        write_request(&mut sink, &Request::Reindex).unwrap();
+        let decoded: serde_json::Value = rmp_serde::from_slice(&sink[4..]).unwrap();
+        assert_eq!(decoded, serde_json::json!({"op": "reindex"}));
     }
 
     /// The end of the stream reaches the viewer as a closed channel.

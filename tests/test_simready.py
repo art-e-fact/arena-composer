@@ -1,10 +1,13 @@
-"""The SimReady index: how a bucket listing becomes assets, and that a page of
-the listing is read the way S3 writes one."""
+"""The SimReady index: how a bucket listing becomes assets, that a page of the
+listing is read the way S3 writes one, and how the pictures beside the assets
+are fetched."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+import pytest
 
 from arena_composer import simready
 
@@ -41,12 +44,16 @@ def test_an_asset_is_a_sidecar_whose_layer_is_listed():
     assert asset.name == "Plastic_Basket_A01"
     assert asset.category == "Residential/Kitchen/Baskets"
     assert asset.usd_path == f"{simready.BUCKET}/{keys[0]}"
-    assert asset.thumbnail == f"{simready.BUCKET}/{keys[1]}"
+    assert simready.thumbnail_url(asset.usd_path) == f"{simready.BUCKET}/{keys[1]}"
+    assert simready.thumbnail_url("sm_basket.usd") == "", "no folder, so nowhere to look"
 
 
 def test_the_index_is_read_back_unless_its_root_has_moved(tmp_path: Path, monkeypatch):
     index = tmp_path / "index.json"
     monkeypatch.setattr(simready, "index_path", lambda: index)
+    # Building an index fetches nothing: an agent searching by name has no use
+    # for 170 MB of pictures.
+    monkeypatch.setattr(simready, "fetch_thumbnails", lambda usd_paths: pytest.fail("the index fetched pictures"))
     monkeypatch.setattr(
         simready,
         "list_keys",
@@ -62,3 +69,52 @@ def test_the_index_is_read_back_unless_its_root_has_moved(tmp_path: Path, monkey
     document["root"] = "https://elsewhere/Assets/Isaac/7.0/Isaac/SimReady"
     index.write_text(json.dumps(document))
     assert simready.load() == []
+
+
+def test_a_picture_is_fetched_beside_its_layer(monkeypatch):
+    """The sidecar is derived from the layer's own URL and not looked up, so an
+    asset needs no second field to say where its picture is. One layer that
+    publishes none must not cost the rest of the batch theirs."""
+    fetched: list[str] = []
+
+    def localize(url: str) -> str:
+        if "missing" in url:
+            raise FileNotFoundError(url)
+        fetched.append(url)
+        return url
+
+    monkeypatch.setattr("arena_composer.usd_assets.localize", localize)
+    # On disk once fetched, and not before.
+    monkeypatch.setattr("arena_composer.usd_assets.mirrored", lambda url: url if url in fetched else None)
+
+    got = simready.fetch_thumbnails(
+        [
+            "https://bucket/Baskets/Plastic_Basket_A01/sm_misc_basket_a01.usd",
+            "https://bucket/a/missing.usd",
+            "",
+        ]
+    )
+    assert fetched == ["https://bucket/Baskets/Plastic_Basket_A01/.thumbs/256x256/sm_misc_basket_a01.usd.png"]
+    assert got == 1, "a missing sidecar was counted as fetched"
+
+
+def test_a_picture_already_on_disk_is_not_asked_about_again(monkeypatch):
+    """What makes a second pass over the catalogue free, an interrupted crawl
+    resumable, and the startup pass affordable: a mirrored copy is taken as
+    current without a round trip to say so."""
+    monkeypatch.setattr("arena_composer.usd_assets.localize", lambda url: pytest.fail(f"asked for {url}"))
+    monkeypatch.setattr("arena_composer.usd_assets.mirrored", lambda url: f"/cache/{url}")
+
+    assert simready.fetch_thumbnails(["https://bucket/a/x.usd", "https://bucket/a/x.usd"]) == 0
+
+
+def test_a_local_layer_with_no_picture_is_never_counted_as_fetched(tmp_path: Path):
+    """Some assets are registered from a directory another SDK downloaded, and
+    `usd_assets.localize` hands such a path straight back without complaint.
+    Counting that as a fetch would make every startup answer with a megabyte
+    of prop list saying nothing had changed."""
+    layer = tmp_path / "Broccoli008" / "Broccoli008.usd"
+    layer.parent.mkdir()
+    layer.touch()
+
+    assert simready.fetch_thumbnails([str(layer)]) == 0

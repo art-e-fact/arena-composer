@@ -373,7 +373,7 @@ mod tests {
         // The solve for the previous edit, then the next edit answered at once.
         sender.send(scene([0.0, 0.0, 5.0])).expect("the viewer still listening");
         let mut pending = Scene {
-            solving: true,
+            solving: Some(true),
             ..default()
         };
         pending.spec.env_name = "edited".into();
@@ -486,7 +486,7 @@ mod tests {
         // The second edit, answered from the file, and then the solve for the
         // first, carrying the spec as it read before that edit was made.
         let mut edited = Scene {
-            solving: true,
+            solving: Some(true),
             ..default()
         };
         edited.spec.env_name = "second".into();

@@ -113,40 +113,40 @@ def _owners(spec_path: str | None) -> dict[str, str]:
     }
 
 
-@cache
 def _vocabulary() -> dict[str, Any]:
     """Everything registered with Arena that a spec may name: the assets, and
     the relation and task kinds with the form that edits each.
 
     Sent whole rather than searched. It is ~30 kB against megabytes of
-    geometry, and a form filters faster than a round trip. Cached because none
-    of it changes while the process runs — which is also why the SimReady
-    props, which do, are :func:`_remote` and not part of this.
+    geometry, and a form filters faster than a round trip.
+    """
+    from arena_composer import catalog
+
+    return {"assets": [_asset(asset) for asset in catalog.catalog()], **_kinds()}
+
+
+@cache
+def _kinds() -> dict[str, Any]:
+    """The relation and task kinds, each with the form that edits it. Cached:
+    a form is inferred by introspecting a constructor, and no registry changes
+    while the process runs.
+
+    The assets are not cached with them, because an asset's picture arrives
+    after the asset does — see :func:`_thumbnail`.
     """
     from arena_composer import catalog
 
     return {
-        "assets": [_asset(asset) for asset in catalog.catalog()],
         "relations": [asdict(kind) for kind in catalog.relations()],
         "tasks": [asdict(kind) for kind in catalog.tasks()],
     }
 
 
 def _remote() -> list[dict[str, Any]]:
-    """The SimReady props the local index knows, each with its thumbnail where
-    that has been fetched. Empty until the index is built.
-
-    The picture is given as the file it was mirrored to, not as the URL it came
-    from: the viewer draws from disk and opens no socket. A prop whose sidecar
-    has not been fetched carries no path, which is what the panel asks about.
-    """
+    """The SimReady props the local index knows. Empty until it is built."""
     from arena_composer import catalog
-    from arena_composer.usd_assets import mirrored
 
-    return [
-        {**_asset(asset), "thumbnail": mirrored(asset.thumbnail) or ""}
-        for asset in catalog.remote()
-    ]
+    return [_asset(asset) for asset in catalog.remote()]
 
 
 def _asset(asset: Any) -> dict[str, Any]:
@@ -154,7 +154,9 @@ def _asset(asset: Any) -> dict[str, Any]:
 
     `params` is what an entry naming it has to carry beyond the registry name —
     empty for a registered asset, the URL for a SimReady prop — so the panel
-    writes an entry that builds without knowing which kind it picked.
+    writes an entry that builds without knowing which kind it picked. The URL
+    is given again as `usd_path` whether `params` carries it or not, because a
+    row is searched and hovered by it.
     """
     return {
         "registry_name": asset.registry_name,
@@ -162,8 +164,25 @@ def _asset(asset: Any) -> dict[str, Any]:
         "tags": asset.tags,
         "object_type": asset.object_type,
         "name": asset.name,
+        "usd_path": asset.usd_path or "",
+        "thumbnail": _thumbnail(asset.usd_path),
         "params": asset.params,
     }
+
+
+def _thumbnail(usd_path: str | None) -> str:
+    """The asset's picture as a local file, or empty where none is on disk.
+
+    A path and not a URL: the viewer draws from disk and opens no socket, and
+    asks for nothing — what is fetched is fetched before the list is sent. Both
+    kinds of asset are looked up the same way: the bucket keeps a picture
+    beside a layer, whoever published it, and an asset that composes its USD
+    has no layer and so no picture.
+    """
+    from arena_composer.simready import thumbnail_url
+    from arena_composer.usd_assets import mirrored
+
+    return mirrored(thumbnail_url(usd_path or "")) or ""
 
 
 def encode(dump: dict[str, Any], remote: bool = True) -> bytes:
@@ -174,7 +193,7 @@ def encode(dump: dict[str, Any], remote: bool = True) -> bytes:
 def encode_spec(
     spec_path: Path,
     errors: list[str] | None = None,
-    solving: bool = False,
+    solving: bool | None = None,
     remote: bool = False,
     indexing: bool | None = None,
 ) -> bytes:
@@ -190,14 +209,16 @@ def encode_spec(
     same document :func:`build_payload` would report — validated, with every
     default filled in.
 
-    `remote` sends the SimReady props with it, which is how an answer to a
-    reindex or a thumbnail request reaches the panel. Off by default: nothing
-    else changes that list, and it is a megabyte.
+    `remote` sends the SimReady props with it, which is how a crawl's answer and
+    newly fetched pictures reach the panel. Off by default: nothing else changes
+    that list, and it is a megabyte.
 
-    `indexing` says whether a crawl of the bucket is running, and is left out
-    by every message that does not know — the panel keeps the last answer, the
-    way it keeps the last prop list. Only :func:`view._serve_assets` and the
-    request that starts one have anything to say about it.
+    `errors`, `solving` and `indexing` are each left out by a message that has
+    nothing to say about them, and the panel keeps the last answer it had, the
+    way it keeps the last prop list. A message about assets knows nothing of
+    the last edit or the solve behind it, so sending it must not clear a
+    refusal or stop a spinner. Pass ``[]`` to say an edit landed, and
+    ``False`` to say no solve is coming.
     """
     from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 
@@ -208,7 +229,7 @@ def encode_spec(
             "vocabulary": _vocabulary(),
             "remote": _remote() if remote else None,
             "indexing": indexing,
-            "errors": list(errors or []),
+            "errors": None if errors is None else list(errors),
             "solving": solving,
         },
         use_bin_type=True,

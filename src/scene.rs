@@ -54,9 +54,9 @@ pub struct Scene {
     pub vocabulary: Vocabulary,
     /// The SimReady props the local index knows, absent when this message
     /// changes nothing about them — which is every message but the first, an
-    /// answer to [`Request::Reindex`](crate::spec::Request::Reindex) or to
-    /// [`Request::Thumbnails`](crate::spec::Request::Thumbnails), and a rebuild
-    /// noticed on disk. They are a megabyte of table against a vocabulary's
+    /// answer to [`Request::Reindex`](crate::spec::Request::Reindex), a rebuild
+    /// noticed on disk, and the startup pass that fetches the pictures the
+    /// catalogue is missing. They are a megabyte of table against a vocabulary's
     /// thirty kilobytes, so they travel only when they have changed and the
     /// panel keeps the last list it was sent.
     pub remote: Option<Vec<CatalogAsset>>,
@@ -65,11 +65,14 @@ pub struct Scene {
     /// whether the request is queued, running or done — the panel would have
     /// to guess from the next prop list, and those arrive for other reasons.
     pub indexing: Option<bool>,
-    /// Why the last edit was refused, empty when it landed.
-    pub errors: Vec<String>,
+    /// Why the last edit was refused, empty when it landed, and absent when
+    /// this message is not about an edit — a message about assets knows
+    /// nothing of the last one, and must not clear its refusal.
+    pub errors: Option<Vec<String>>,
     /// Whether a layout for this spec is still being solved, so the panel can
-    /// say the view it is over has yet to catch up.
-    pub solving: bool,
+    /// say the view it is over has yet to catch up. Absent, for the same
+    /// reason as `errors`, from a message that knows nothing of the solve.
+    pub solving: Option<bool>,
 }
 
 impl Scene {

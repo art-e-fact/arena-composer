@@ -259,22 +259,64 @@ the MCP server and a viewer read the same file and either may rebuild it. `catal
 with the registry, and the viewer's asset browser lists both.
 
 The props do not ride the vocabulary. They are a megabyte where it is forty kilobytes, and they
-change only when the index is rebuilt or a picture is fetched, so they go as `remote` on the message
-that changed them and the panel keeps the last list it was sent. Three things send one: the payload
-that opens the window, an answer from `view._serve_assets`, and the poll in `view._reload_on_change`
-noticing that another process rebuilt the index.
+change only when the index is rebuilt or pictures are fetched, so they go as `remote` on the message
+that changed them and the panel keeps the last list it was sent. Four things send one: the payload
+that opens the window, `view._catch_up_on_pictures` when it fetched something, an answer from
+`view._serve_assets`, and the poll in `view._reload_on_change` noticing that another process rebuilt
+the index.
 
-The browser asks for two things, both served without touching the spec. `Request::Reindex` crawls
-the bucket, about a minute, and downloads nothing. Whether one is running is `indexing`, which
-Python answers the way it answers `solving` — the panel cannot tell from the prop lists, since one
-arrives whenever a picture lands or another process rebuilds the index. It is set as soon as the
-request is *read*, not when the crawl starts, because a crawl waiting behind a batch of pictures is
-still a minute of a live button and a second crawl queued behind the first. `Request::Thumbnails` names the props it has on
-screen and no picture for, by the USD each spawns from — `simready.thumbnail_url` derives the
-sidecar, so the panel holds one URL per prop and not two. Python mirrors those PNGs beside the
-layers they belong to and the next `remote` carries their local paths, because the viewer draws from
-disk and opens no socket. A prop is asked for once: one the bucket has no picture for is never
-answered, and asking again would ask forever.
+### Pictures
+
+A picture is published beside a layer, whoever published the layer: `.thumbs/256x256/<layer>.png`,
+derived from the layer's URL by `simready.thumbnail_url` with nothing to look up. So a registered
+asset gets one the same way a prop does — most of Arena's YCB objects have a sidecar, and the ones
+that compose their USD rather than naming a published one have no `usd_path` and no picture to want.
+That is why `payload._asset` sends `usd_path` beside `params`: a registered asset's `params` is
+empty and has to stay empty, because it is what the entry a pick writes carries.
+
+They are fetched in bulk, never per row. `simready.fetch_thumbnails` takes the layers, skips
+whatever is already on disk without asking the server about it, and fetches the rest
+`WORKERS`-wide — the cost is a round trip each, not the ~100 kB each. A picture counts as fetched
+once it is on disk, so a layer with nothing beside it, or one that is already a local file, is never
+counted however often it is offered. Two callers, both in the viewer:
+
+- `view._serve_assets`, after a crawl, for every prop it indexed — up to ~170 MB, which is why only
+  the reindex button asks for it. Skipping what is on disk makes an interrupted crawl resumable.
+- `view._catch_up_on_pictures`, at startup, for the **registered assets only** (~20 MB the first
+  time, a stat each after). They are in no index, so nothing else would fetch theirs. Never widen
+  it to `catalog.remote()`: an index built before its pictures — by the MCP server, or by an older
+  viewer — would turn every launch into an unrequested 170 MB download.
+
+`simready.build` fetches nothing. It is shared with the MCP server's `reindex_assets`, whose caller
+is an agent searching by name that has no use for a picture.
+
+The viewer never asks for a picture and never receives one over the pipe. `payload._asset` reports
+the mirrored file's path, or empty, and the panel loads that path off disk through Bevy's asset
+server. Empty therefore means *there is none*, not *not yet* — so a blank row is final and the panel
+has nothing to wait for. The vocabulary's asset list is rebuilt per message for this reason where
+`payload._kinds` stays cached: the assets do not change, but which of their pictures are on disk
+does.
+
+### Crawling
+
+`Request::Reindex` is the one thing the browser asks for that is not an edit, and it touches no
+spec. The viewer lists the bucket (about a minute), writes the index, then fetches every prop's
+picture (about as long again, ~170 MB at a mean of 110 kB each) — which is why it is behind an
+explicit button. The names are usable before the pictures are: `view._reload_on_change` notices
+the index within a poll, so the panel gets a list while the pictures are still landing and the
+crawl's own answer carries them behind it.
+
+A message about assets knows nothing of the last edit or the solve behind it, so it leaves
+`errors` and `solving` out, and the panel keeps what it had — the same *absent means no news*
+rule as `remote` and `indexing`. `encode_spec` sends them only when given; pass `[]` to say an
+edit landed. `Form::take` bumps `revision`, which drops a half-made edit, only when the spec
+differs or a refusal arrives — so pictures landing never cost a name being typed, and a refused
+value still snaps back.
+
+Whether a crawl is running is `indexing`, which Python answers the way it answers `solving` — the
+panel cannot tell from the prop lists, since one arrives whenever pictures land or another process
+rebuilds the index. It is set as soon as the request is *read*, not when the crawl starts, because a
+crawl queued behind another is still minutes of a live button.
 
 An asset request's answer is retried (`view._answer`). It carries the spec as every message does, so
 a spec caught mid-write builds no message — and where an edit's answer can be dropped, because

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The task and the scene it includes, merged as Arena merges them.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Spec {
     pub env_name: String,
@@ -48,7 +48,7 @@ impl Spec {
 }
 
 /// An embodiment, a background or an object: an id and the asset behind it.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Node {
     pub id: String,
@@ -56,7 +56,7 @@ pub struct Node {
     pub params: Params,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ObjectSet {
     pub id: String,
@@ -65,7 +65,7 @@ pub struct ObjectSet {
     pub params: Params,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ObjectReference {
     pub id: String,
@@ -76,7 +76,7 @@ pub struct ObjectReference {
     pub params: Params,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Relation {
     pub kind: String,
@@ -87,7 +87,7 @@ pub struct Relation {
     pub params: Params,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Task {
     /// `atomic`, `sequential` or `parallel`.
@@ -96,7 +96,7 @@ pub struct Task {
     pub subtasks: Vec<Subtask>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Subtask {
     pub kind: String,
@@ -189,9 +189,14 @@ pub struct CatalogAsset {
     /// empty for a registered asset, the URL for a SimReady prop. Written
     /// through as given, so picking one needs no knowledge of which kind it is.
     pub params: Params,
-    /// The prop's picture, as the file Python mirrored it to. Empty until it
-    /// has been fetched, which is what the panel asks for; see
-    /// [`Request::Thumbnails`]. Never set for a registered asset.
+    /// The USD it spawns from, whether or not `params` also carries it. It is
+    /// what a row is searched and hovered by, and empty for an asset that
+    /// composes its USD rather than naming a published one.
+    pub usd_path: String,
+    /// The asset's picture, as the file Python mirrored it to. Python fetches
+    /// every one it can before it sends a list, so a row either has its picture
+    /// or there is none to have: this is empty where the bucket publishes
+    /// none beside the layer.
     pub thumbnail: String,
 }
 
@@ -238,10 +243,10 @@ pub struct Field {
 /// rejected edit comes back as `errors` on the next scene with the spec
 /// untouched.
 ///
-/// The last two ask for assets instead, and are answered by a message carrying
-/// [`Scene::remote`](crate::scene::Scene::remote). They are network, not a
-/// write, so `arena_composer.view` serves them beside the edits rather than in
-/// front of them.
+/// The last asks for assets instead, and is answered by a message carrying
+/// [`Scene::remote`](crate::scene::Scene::remote). It is network, not a write,
+/// so `arena_composer.view` serves it beside the edits rather than in front of
+/// them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Request {
@@ -249,11 +254,9 @@ pub enum Request {
     Insert { path: Vec<Step>, value: Value },
     Remove { path: Vec<Step> },
     /// Crawl NVIDIA's bucket again and write the index the prop list comes
-    /// from. A minute of network, and no asset is downloaded by it.
+    /// from, then fetch every prop's picture. Minutes of network; no prop
+    /// itself is downloaded.
     Reindex,
-    /// Fetch the pictures of these props, named by the USD each spawns from —
-    /// what the panel has on screen and has no picture for.
-    Thumbnails { urls: Vec<String> },
 }
 
 /// One step into the merged spec: `["relations", 2, "params", "side"]`.

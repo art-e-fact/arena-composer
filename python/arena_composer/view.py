@@ -27,7 +27,7 @@ from pathlib import Path
 import msgpack
 import yaml
 
-from arena_composer import simready, spec_edit, usd_assets, viewer_process
+from arena_composer import catalog, simready, spec_edit, viewer_process
 from arena_composer.payload import encode, encode_spec
 from arena_composer.resolve_layout import DEFAULT_SEED, resolve_layout_from_yaml
 from arena_composer.usd_assets import use_local_asset_cache
@@ -39,9 +39,10 @@ WATCH_INTERVAL = 0.5
 # Resolve once it has held still this long.
 SETTLE = 0.3
 
-#: What the panel can ask for that is not an edit — see :func:`_serve_assets`.
-#: Both are network against NVIDIA's bucket and neither touches the spec.
-ASSET_REQUESTS = ("reindex", "thumbnails")
+#: The one thing the panel can ask for that is not an edit — see
+#: :func:`_serve_assets`. It is network against NVIDIA's bucket and does not
+#: touch the spec.
+ASSET_REQUEST = "reindex"
 
 #: How many times an asset request's answer is retried. Its message carries the
 #: spec, so a spec caught mid-write fails to build one, and unlike an edit's
@@ -111,6 +112,7 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
     running = [
         asyncio.create_task(_reload_on_change(spec, seed, proc)),
         asyncio.create_task(_serve_requests(spec, seed, proc)),
+        asyncio.create_task(_catch_up_on_pictures(spec, proc)),
     ]
     try:
         return await proc.wait()
@@ -149,26 +151,25 @@ async def _serve_requests(spec: Path, seed: int, proc: asyncio.subprocess.Proces
     refused edit leaves the spec exactly as the editor is still drawing it —
     and is answered by that same spec, carrying the reason.
 
-    An asset request is neither written nor solved — it is a minute of network
-    at worst — so it goes to :func:`_serve_assets` and this loop reads on.
+    An asset request is neither written nor solved — it is minutes of network
+    — so it goes to :func:`_serve_assets` and this loop reads on.
     """
     assert proc.stdout is not None
     asked = asyncio.Event()
-    wanted: asyncio.Queue[dict] = asyncio.Queue()
+    crawls: asyncio.Queue[None] = asyncio.Queue()
     helpers = [
         asyncio.create_task(_solve_when_asked(spec, seed, proc, asked)),
-        asyncio.create_task(_serve_assets(spec, proc, wanted)),
+        asyncio.create_task(_serve_assets(spec, proc, crawls)),
     ]
     try:
         while (request := await _read_request(proc.stdout)) is not None:
-            if (op := request.get("op", "")) in ASSET_REQUESTS:
-                wanted.put_nowait(request)
-                if op == "reindex":
-                    # From here rather than from the worker, which may still be
-                    # fetching pictures: the button has to stop taking clicks
-                    # when one is asked for, not when one starts.
-                    with contextlib.suppress(Exception):
-                        await _send(proc, encode_spec(spec, indexing=True))
+            if (op := request.get("op", "")) == ASSET_REQUEST:
+                crawls.put_nowait(None)
+                # From here rather than from the worker, which may still be on
+                # the crawl before this one: the button has to stop taking
+                # clicks when one is asked for, not when one starts.
+                with contextlib.suppress(Exception):
+                    await _send(proc, encode_spec(spec, indexing=True))
                 continue
 
             result = await asyncio.to_thread(
@@ -190,30 +191,26 @@ async def _serve_requests(spec: Path, seed: int, proc: asyncio.subprocess.Proces
             helper.cancel()
 
 
-async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, wanted: asyncio.Queue[dict]) -> None:
-    """Crawl the bucket, or fetch thumbnails, as the browser asks.
+async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, crawls: asyncio.Queue[None]) -> None:
+    """Crawl the bucket as the browser asks, one crawl at a time.
 
-    One request at a time, so a crawl and a batch of pictures never compete for
-    the same bucket. Within a batch the pictures do go together; see
-    :func:`_thumbnails`.
+    A crawl writes the index, then fetches the picture of everything in it —
+    about a minute each, and ~170 MB for the pictures, which is what the button
+    that asks for this says. The panel hears twice: `_reload_on_change` notices
+    the index the moment it lands and sends the names, and this answer carries
+    the pictures behind them.
 
-    Every answer carries the prop list again, a failed one included: the panel
-    is waiting on that list, and an answer is what tells it to stop. The list
-    is where the crawl's result and the thumbnails' local paths both show up,
-    so there is nothing else to send back.
+    That answer carries the prop list again, a failed crawl's included: the
+    panel is waiting on that list, and an answer is what tells it to stop.
     """
     while True:
-        request = await wanted.get()
-        crawl = request.get("op") == "reindex"
-        errors: list[str] = []
+        await crawls.get()
+        errors: list[str] | None = None
         try:
-            if crawl:
-                found = await asyncio.to_thread(simready.build)
-                print(f"{simready.index_path()}: {len(found)} assets", file=sys.stderr)
-            else:
-                urls = list(request.get("urls", []))
-                await _thumbnails(urls)
-                print(f"simready: fetched {len(urls)} thumbnail(s)", file=sys.stderr)
+            found = await asyncio.to_thread(simready.build)
+            print(f"{simready.index_path()}: {len(found)} assets", file=sys.stderr)
+            fetched = await asyncio.to_thread(simready.fetch_thumbnails, [asset.usd_path for asset in found])
+            print(f"simready: fetched {fetched} thumbnail(s)", file=sys.stderr)
         except Exception as error:
             errors = [f"{type(error).__name__}: {error}"]
             print(f"simready: {errors[0]}", file=sys.stderr)
@@ -222,13 +219,13 @@ async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, wanted: as
             return  # the window closed while we were fetching
         # A failed crawl still says it has stopped, or the button never comes
         # back; the reason is in `errors` beside it.
-        await _answer(proc, spec, errors, indexing=False if crawl else None)
+        await _answer(proc, spec, errors, indexing=False)
 
 
 async def _answer(
     proc: asyncio.subprocess.Process,
     spec: Path,
-    errors: list[str],
+    errors: list[str] | None = None,
     indexing: bool | None = None,
 ) -> None:
     """Send the browser what it is waiting for, waiting out a write to the spec.
@@ -248,26 +245,31 @@ async def _answer(
     print(f"{spec}: an asset request went unanswered: {reason}", file=sys.stderr)
 
 
-async def _thumbnails(usd_paths: list[str]) -> None:
-    """Mirror the sidecar of each prop, so the panel can draw it off disk.
+async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) -> None:
+    """Fetch whatever picture Arena's registered assets are missing, once, at
+    startup.
 
-    Fetched together rather than one after another: each is about 800 ms of
-    round trip, and a screenful in a row is eight seconds of blank rows. The
-    batch is a screenful because that is what the panel asks for, so this
-    leans on the default executor rather than bounding itself.
+    A prop's picture comes with the crawl that indexes it, but the registered
+    assets are in no index — nothing else would ever fetch theirs, and they are
+    what the browser opens on. A few hundred small files, ~20 MB, the first
+    time; a stat each after that. The props are not offered here even where
+    the index has some without pictures: that is up to 170 MB, and only the
+    reindex button asks for it.
+
+    The answer is sent only if something arrived. Without that, every startup
+    would spend a megabyte of prop list saying nothing had changed.
     """
-    await asyncio.gather(*(asyncio.to_thread(_thumbnail, usd_path) for usd_path in usd_paths))
-
-
-def _thumbnail(usd_path: str) -> None:
-    """One sidecar into the mirror.
-
-    A prop with no published sidecar is skipped rather than raised. The panel
-    asks for one once and draws a blank for whatever never arrives, so a single
-    missing picture must not cost the rest of the batch theirs.
-    """
-    with contextlib.suppress(Exception):
-        usd_assets.localize(simready.thumbnail_url(usd_path))
+    try:
+        fetched = await asyncio.to_thread(
+            simready.fetch_thumbnails, [asset.usd_path for asset in catalog.catalog()]
+        )
+    except Exception as error:
+        # Pictures are a nicety: a failure costs the blank rows and nothing more.
+        print(f"simready: {type(error).__name__}: {error}", file=sys.stderr)
+        return
+    print(f"simready: fetched {fetched} thumbnail(s)", file=sys.stderr)
+    if fetched and proc.returncode is None:
+        await _answer(proc, spec)
 
 
 async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:

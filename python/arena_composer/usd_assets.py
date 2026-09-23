@@ -108,7 +108,15 @@ def mirrored(url: str) -> str | None:
     taken from its own function rather than spelled out again here, so the two
     cannot drift apart. A copy that exists is reported without asking the
     server whether it is current; that check is the download's own.
+
+    A path that is not a URL is its own local copy, the same rule
+    :func:`localize` goes by — some assets are registered from a directory
+    another SDK has already downloaded, and what sits beside those layers is
+    just as much on disk as what was mirrored here.
     """
+    if "://" not in url:
+        return url if os.path.isfile(url) else None
+
     from isaaclab.utils.assets import _mirror_path
 
     path = _mirror_path(url, str(_cache_dir))

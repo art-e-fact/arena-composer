@@ -8,10 +8,12 @@
 //! way: the asset carries the `params` its own entry needs, so nothing here
 //! has to know which kind it picked.
 //!
-//! A prop's picture is a file Python mirrored, drawn from disk through Bevy's
-//! asset server — this side opens no socket. The rows on screen are the ones
-//! asked for, once each, so scrolling costs the pictures of what was scrolled
-//! past and nothing else.
+//! An asset's picture is a file Python mirrored, drawn from disk through
+//! Bevy's asset server — this side opens no socket and asks for nothing. Every
+//! picture there is to have is fetched before a list is sent, so a row with no
+//! `thumbnail` is a row the bucket publishes no picture for. What scrolling
+//! costs is the reading: only the visible rows are uploaded, and [`RESIDENT`]
+//! bounds how many stay.
 
 use std::collections::{HashMap, HashSet};
 
@@ -37,9 +39,6 @@ const RESIDENT: usize = 64;
 pub struct Browser {
     /// What the list is filtered to.
     search: String,
-    /// Props whose picture has been asked for. Asked once: one the bucket does
-    /// not have is never answered, and asking again would ask forever.
-    asked: HashSet<String>,
     /// The pictures on hand, by the path Python sent.
     thumbnails: HashMap<String, Thumbnail>,
 }
@@ -89,7 +88,7 @@ pub fn show(ui: &mut egui::Ui, form: &Form, browser: &mut Browser, images: &mut 
             ui.spinner().on_hover_text("listing NVIDIA's SimReady props…");
         } else if ui
             .button("⟳")
-            .on_hover_text("list NVIDIA's SimReady props — a minute of names, and no asset downloaded")
+            .on_hover_text("list NVIDIA's SimReady props and fetch their pictures — a couple of minutes and ~170 MB")
             .clicked()
         {
             send(Request::Reindex);
@@ -107,19 +106,19 @@ pub fn show(ui: &mut egui::Ui, form: &Form, browser: &mut Browser, images: &mut 
         .filter(|asset| asset.role == "object" && matches(asset, &terms))
         .collect();
 
-    // What this frame put on screen, and what it wants a picture of.
+    // What this frame put on screen, so the rest can be dropped.
     let mut drawn = HashSet::new();
-    let mut wanted = Vec::new();
-    let row = THUMBNAIL + ui.spacing().item_spacing.y;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         // Only the visible rows are drawn, which is what makes listing the
         // whole catalogue — a few hundred assets and a thousand props — cost
-        // nothing, and what keeps the pictures asked for down to a screenful.
-        .show_rows(ui, row, found.len(), |ui, visible| {
+        // nothing, and what keeps the uploaded textures down to a screenful.
+        // The height given is a row's own; the spacing between rows is added
+        // to it here, and adding it twice leaves a list longer than its rows.
+        .show_rows(ui, THUMBNAIL, found.len(), |ui, visible| {
             for asset in &found[visible] {
                 ui.horizontal(|ui| {
-                    thumbnail(ui, asset, browser, images, &mut drawn, &mut wanted);
+                    thumbnail(ui, asset, browser, images, &mut drawn);
                     if ui.button(&asset.name).on_hover_text(hover(asset)).clicked() {
                         send(Request::Insert {
                             path: vec![Step::from("objects")],
@@ -131,33 +130,24 @@ pub fn show(ui: &mut egui::Ui, form: &Form, browser: &mut Browser, images: &mut 
         });
 
     browser.evict(&drawn, images);
-    if !wanted.is_empty() {
-        send(Request::Thumbnails { urls: wanted });
-    }
 }
 
-/// Draw the asset's picture, ask for it, or leave the space it would take.
+/// Draw the asset's picture, or leave the space it would take.
 fn thumbnail(
     ui: &mut egui::Ui,
     asset: &CatalogAsset,
     browser: &mut Browser,
     images: &mut Images,
     drawn: &mut HashSet<String>,
-    wanted: &mut Vec<String>,
 ) {
     let size = egui::vec2(THUMBNAIL, THUMBNAIL);
     let blank = |ui: &mut egui::Ui| {
         let _ = ui.allocate_exact_size(size, egui::Sense::hover());
     };
 
+    // Nothing to draw and nothing to wait for: the bucket publishes no picture
+    // beside this layer, or the asset composes its USD and has no layer.
     if asset.thumbnail.is_empty() {
-        // A registered asset publishes no picture and carries no `usd_path`,
-        // so this asks for nothing on its behalf.
-        if let Some(url) = asset.params.get("usd_path").and_then(Value::as_text)
-            && browser.asked.insert(url.to_owned())
-        {
-            wanted.push(url.to_owned());
-        }
         return blank(ui);
     }
 
@@ -220,12 +210,7 @@ impl Browser {
 /// USD's file name — the same test `arena_composer.catalog.Asset.matches`
 /// makes, so the panel and an agent searching find the same things.
 fn matches(asset: &CatalogAsset, terms: &[String]) -> bool {
-    let file = asset
-        .params
-        .get("usd_path")
-        .and_then(Value::as_text)
-        .and_then(|url| url.rsplit('/').next())
-        .unwrap_or_default();
+    let file = asset.usd_path.rsplit('/').next().unwrap_or_default();
     let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
     let haystack = format!("{} {} {stem}", asset.name, asset.tags.join(" ")).to_lowercase();
     terms.iter().all(|term| haystack.contains(term))
@@ -235,9 +220,9 @@ fn matches(asset: &CatalogAsset, terms: &[String]) -> bool {
 /// the URL that makes it — every prop writes the same registry name, so the
 /// name alone would not say which one this is.
 fn hover(asset: &CatalogAsset) -> String {
-    match asset.params.get("usd_path").and_then(Value::as_text) {
-        Some(url) => format!("{}\n{url}", asset.registry_name),
-        None => asset.registry_name.clone(),
+    match asset.usd_path.as_str() {
+        "" => asset.registry_name.clone(),
+        url => format!("{}\n{url}", asset.registry_name),
     }
 }
 
@@ -279,6 +264,7 @@ mod tests {
         CatalogAsset {
             registry_name: "simready_usd_object".into(),
             name: name.into(),
+            usd_path: url.into(),
             params: [("usd_path".to_owned(), Value::text(url))].into_iter().collect(),
             ..Default::default()
         }

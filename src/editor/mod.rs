@@ -92,10 +92,10 @@ pub struct Form {
     pub errors: Vec<String>,
     /// Whether the layout under the panel is still catching up with this spec.
     pub solving: bool,
-    /// Bumped every time a new spec lands. A half-made edit is kept against the
-    /// spec it was made on and dropped when that spec is replaced, so a number
-    /// does not snap back to its old value between letting go of it and the
-    /// spec carrying it coming back.
+    /// Bumped when a different spec lands, or an edit is refused. A half-made
+    /// edit is kept against the spec it was made on and dropped when that spec
+    /// is replaced, so a number does not snap back to its old value between
+    /// letting go of it and the spec carrying it coming back.
     pub revision: u64,
     /// Whether a crawl of the bucket is running. Python's answer, kept from
     /// whichever message last carried one.
@@ -111,12 +111,24 @@ impl Form {
     /// untouched. So there is no half a message to guard against here. The prop
     /// list is the one part that travels apart, and is [`Form::take_assets`]'s.
     pub fn take(&mut self, scene: &Payload) {
+        // Many messages carry the spec unchanged — a crawl's answer, pictures
+        // landing, a solve catching up — and one of those must not drop a name
+        // being typed. A refusal carries it unchanged too, and must: the value
+        // it refused goes back to the one the spec still holds.
+        let refused = scene.errors.as_ref().is_some_and(|errors| !errors.is_empty());
+        if refused || scene.spec != self.spec {
+            self.revision += 1;
+        }
+
         self.spec = scene.spec.clone();
         self.vocabulary = scene.vocabulary.clone();
         self.owners = scene.owners.clone();
-        self.errors = scene.errors.clone();
-        self.solving = scene.solving;
-        self.revision += 1;
+        if let Some(errors) = &scene.errors {
+            self.errors = errors.clone();
+        }
+        if let Some(solving) = scene.solving {
+            self.solving = solving;
+        }
     }
 
     /// Keep what `scene` says about the assets, where it says anything.
@@ -202,7 +214,40 @@ fn camera_takes_input(mid_drag: bool, pointer_taken: bool) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::camera_takes_input;
+    use super::{Form, Payload, camera_takes_input};
+
+    /// Only a new spec or a refusal ends a half-made edit. Anything else —
+    /// here, pictures landing — leaves it, along with what the panel was
+    /// saying about the last edit and the solve behind it.
+    #[test]
+    fn a_message_about_assets_leaves_the_edit_in_hand() {
+        let mut form = Form::default();
+        let mut answer = Payload {
+            errors: Some(vec![]),
+            solving: Some(true),
+            ..Default::default()
+        };
+        answer.spec.env_name = "edited".into();
+        form.take(&answer);
+        let revision = form.revision;
+
+        let mut pictures = Payload::default();
+        pictures.spec.env_name = "edited".into();
+        form.take(&pictures);
+        assert_eq!(form.revision, revision, "pictures landing dropped the edit in hand");
+        assert!(form.solving, "pictures landing stopped the spinner");
+
+        let refused = Payload {
+            errors: Some(vec!["objects.0: named by a task".into()]),
+            ..pictures.clone()
+        };
+        form.take(&refused);
+        assert!(form.revision > revision, "a refused value would stay on screen");
+        assert_eq!(form.errors, ["objects.0: named by a task"]);
+
+        form.take(&pictures);
+        assert_eq!(form.errors, ["objects.0: named by a task"], "the refusal was wiped");
+    }
 
     /// Crossing the edge mid-drag settles nothing: an orbit that wanders over
     /// the panel keeps orbiting, and a slider drag that wanders off it keeps
