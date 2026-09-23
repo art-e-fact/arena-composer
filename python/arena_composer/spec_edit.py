@@ -253,7 +253,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     * ``set`` — replace the leaf `steps` names. Setting an entry's ``id`` renames
       it in the relations that name it too.
     * ``insert`` — append `value` to the list `steps` names.
-    * ``remove`` — drop the entry `steps` names, and any relation left dangling.
+    * ``remove`` — drop what `steps` names: an entry, with any relation left
+      dangling, or a parameter, which hands it back to the kind's default.
 
     One leaf at a time rather than whole sections, so a key the editor's form
     never shows is not dropped by a write that passes over it. Which file the
@@ -290,9 +291,15 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
             # Capture the id before the entry goes, so the cascade can find the
-            # relations that named it.
-            node_id = parent[last].get("id") if key in _ID_SECTIONS and isinstance(parent[last], dict) else None
+            # relations that named it. Only a whole entry — `objects.2` — owns
+            # one; a parameter whose value is a mapping with an `id` does not.
+            names_entry = key in _ID_SECTIONS and len(steps) == 2 and isinstance(parent[last], dict)
+            node_id = parent[last].get("id") if names_entry else None
             del parent[last]
+            # ruamel writes a mapping emptied of a commented key at column 0,
+            # which does not parse. A fresh one writes as `{}`.
+            if isinstance(parent, dict) and not parent and len(steps) > 1:
+                _walk(document, steps[:-2])[steps[-2]] = {}
             if node_id and (dropped := _drop_relations_naming(files, node_id)):
                 changed.append(f"removed {dropped} relation(s) naming {node_id!r}")
             return files.write(changed)

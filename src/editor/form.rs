@@ -297,7 +297,13 @@ fn params(
     for field in &kind.fields {
         let value = values.get(&field.name).unwrap_or(&field.default);
         let path = with(base, &field.name);
-        row(ui, &field.name, |ui| control(ui, field, value, ids, &path, state));
+        // Unsetting drops the key, handing the parameter back to its default.
+        // Offered where the parameter takes None, the one state no control
+        // reaches, and only while the spec says something to drop.
+        let clearable = field.optional && !field.required && values.contains_key(&field.name);
+        row(ui, &field.name, clearable.then_some(path.as_slice()), |ui| {
+            control(ui, field, value, ids, &path, state)
+        });
     }
 }
 
@@ -309,7 +315,9 @@ fn params(
 /// is what puts the name against its control: a label fills only the axis its
 /// layout justifies, so neither `halign` nor `place` moves it off the centre of
 /// the space it was given.
-fn row(ui: &mut egui::Ui, name: &str, control: impl FnOnce(&mut egui::Ui)) {
+///
+/// With `clear`, the row ends in a button that removes that path from the spec.
+fn row(ui: &mut egui::Ui, name: &str, clear: Option<&[Step]>, control: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         let size = egui::vec2(ui.available_width() * NAMES, ui.spacing().interact_size.y);
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
@@ -319,7 +327,18 @@ fn row(ui: &mut egui::Ui, name: &str, control: impl FnOnce(&mut egui::Ui)) {
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         )
         .add(egui::Label::new(egui::RichText::new(name).weak()).truncate());
-        control(ui);
+        let Some(path) = clear else { return control(ui) };
+        // Right to left, so the button keeps the far edge and the control
+        // takes what is left of the row.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let unset = ui.small_button("×").on_hover_text("unset").clicked();
+            control(ui);
+            // Sent after the control, which may send an edit of its own as this
+            // click takes its focus: the removal has to land second.
+            if unset {
+                send(Request::Remove { path: path.to_vec() });
+            }
+        });
     });
 }
 
@@ -395,17 +414,28 @@ fn name(ui: &mut egui::Ui, id: egui::Id, current: &str, path: Vec<Step>, state: 
 /// dragged pixel is not something Python can keep up with. The view does follow
 /// it as it moves, without waiting for that; see [`pending`].
 fn number(ui: &mut egui::Ui, id: egui::Id, value: Option<f64>, path: &[Step], state: &mut PanelState) {
-    let in_spec = value.unwrap_or_default();
-    let mut shown = match &state.editing {
-        Some((editing, value, _)) if *editing == id => *value,
-        _ => in_spec,
+    let editing = match &state.editing {
+        Some((editing, value, _)) if *editing == id => Some(*value),
+        _ => None,
     };
+    let mut shown = editing.or(value).unwrap_or_default();
+    let mut drag = egui::DragValue::new(&mut shown).speed(0.005).max_decimals(4);
+    // No value is not zero: an unset `at_position.x` leaves the axis free,
+    // where 0.0 pins it to the origin. It drags from zero all the same.
+    if editing.or(value).is_none() {
+        drag = drag.custom_formatter(|_, _| "—".into());
+    }
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
-    let response = ui.add_sized(size, egui::DragValue::new(&mut shown).speed(0.005).max_decimals(4));
+    let response = ui.add_sized(size, drag);
     if response.dragged() || response.has_focus() {
         state.editing = Some((id, shown, path.to_vec()));
     }
-    if (response.drag_stopped() || response.lost_focus()) && shown != in_spec {
+    // Against the spec's value rather than the number drawn, so an unset
+    // parameter taken to exactly zero is still set.
+    // ponytail: clicking into an unset number and away again sets it to zero;
+    // latch whether anything was typed in `PanelState::editing` if that bites.
+    let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    if (response.drag_stopped() || response.lost_focus()) && !escaped && Some(shown) != value {
         send(Request::Set { path: path.to_vec(), value: Value::Number(shown) });
     }
 }

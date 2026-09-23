@@ -222,6 +222,32 @@ def test_removing_an_entry_takes_its_relations_with_it(spec: Path):
     assert all("distractor" not in (r["subject"], r.get("reference")) for r in scene["relations"])
 
 
+def test_unsetting_a_parameter_drops_its_key(spec: Path):
+    """Unset is the key gone, handing the parameter back to its default. The
+    last key of a commented block goes too: ruamel alone writes the emptied
+    mapping as a `{}` at column 0, which does not parse."""
+    authored = f"reference: {TABLE}\n  params:\n    # hand-tuned\n    clearance_m: 0.03\n    edge_margin_m: 0.02\n"
+    scene_of(spec).write_text(SCENE.replace(f"reference: {TABLE}\n  params: {{}}\n", authored, 1))
+
+    for name in ("edge_margin_m", "clearance_m"):
+        result = spec_edit.apply(spec, "remove", ["relations", 1, "params", name])
+        assert result.ok, result.errors
+
+    text = scene_of(spec).read_text()
+    assert yaml.safe_load(text)["relations"][1]["params"] == {}
+    assert "# hand-tuned" in text, "the author's comment was dropped"
+
+
+def test_removing_a_parameter_cascades_nothing(spec: Path):
+    """Only a whole entry owns an id. A parameter whose value is a mapping
+    carrying one is not an object, and removing it drops no relation."""
+    assert spec_edit.apply(spec, "set", ["objects", 0, "params", "probe"], {"id": TABLE}).ok
+    before = yaml.safe_load(scene_of(spec).read_text())["relations"]
+
+    assert spec_edit.apply(spec, "remove", ["objects", 0, "params", "probe"]).ok
+    assert yaml.safe_load(scene_of(spec).read_text())["relations"] == before
+
+
 def test_a_path_that_isnt_there_is_refused(spec: Path):
     """The editor can address a stale path — it draws the spec it was last
     sent. That has to come back as an error, not as an exception."""
