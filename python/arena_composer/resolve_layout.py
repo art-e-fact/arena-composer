@@ -24,8 +24,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from isaaclab.sim import CuboidCfg, SphereCfg
 from isaaclab_arena.assets.background import Background
 from isaaclab_arena.assets.deformable_object import DeformableObject
+from isaaclab_arena.assets.object import Object
 from isaaclab_arena.assets.object_reference import ObjectReference
 from isaaclab_arena.assets.object_set import RigidObjectSet
 from isaaclab_arena.assets.registries import AssetRegistry
@@ -43,6 +45,7 @@ from isaaclab_arena.relations.passive_collision_objects import get_passive_colli
 from isaaclab_arena.relations.placement_events import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
 from isaaclab_arena.relations.relations import get_anchor_objects
+from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 
 from arena_composer.usd_assets import localize, use_local_asset_cache
@@ -63,11 +66,13 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[st
     """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
 
     Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
-    used; anything else Arena raises passes through.
+    used, or that spawns neither a USD nor a shape to bound it by; anything
+    else Arena raises passes through.
     """
     use_local_asset_cache()
     check_usd_params(spec.objects)
     assets = instantiate_assets_from_spec(spec, AssetRegistry())
+    bound_spawned_shapes(assets)
     _attach_spatial_relations_to_assets(spec.relations, assets)
 
     # Assets without relations keep their configured pose; the rest are solved together.
@@ -128,6 +133,36 @@ def check_usd_params(objects: Iterable[Any]) -> None:
             bodies = read_asset_rigid_body_paths(local, SIMREADY_PHYSICS_VARIANTS)
             if len(bodies) != 1:
                 errors.append(f"{obj.id}: {usd_path} has {len(bodies)} rigid bodies; the sim spawns it as exactly one")
+    if errors:
+        raise SpecError(errors)
+
+
+def bound_spawned_shapes(assets: dict[str, Any]) -> None:
+    """Give each object spawned from a shape, not a USD, the bounding box of that shape.
+
+    Arena's ``Object.get_bounding_box`` reads the box from ``usd_path``, which
+    these leave unset, and returns one already set as it is. So the solver
+    places them by this box, and the payload draws it.
+    """
+    errors = []
+    for node_id, asset in assets.items():
+        # An object set names no USD of its own either, but bounds itself by its members'.
+        if not isinstance(asset, Object) or isinstance(asset, RigidObjectSet) or asset.usd_path:
+            continue
+        spawn = asset.object_cfg.spawn
+        if isinstance(spawn, CuboidCfg):
+            half_size = [size / 2 for size in spawn.size]
+        elif isinstance(spawn, SphereCfg):
+            half_size = [spawn.radius] * 3
+        else:
+            errors.append(f"{node_id}: spawns a {type(spawn).__name__}, which has no bounding box to place it by")
+            continue
+        asset.bounding_box = AxisAlignedBoundingBox(
+            min_point=tuple(-half for half in half_size), max_point=tuple(half_size)
+        )
+        # get_bounding_box asserts usd_path is not None before reading the box, and an object
+        # built from a spawner_cfg (`sphere`) has None where the procedural ones have "".
+        asset.usd_path = ""
     if errors:
         raise SpecError(errors)
 
@@ -218,8 +253,9 @@ def _geometry(asset: Any) -> dict[str, Any]:
         # extractor would draw at 1/100 size (usd/AGENTS.md, Known gaps). Read
         # spawner_cfg.usd_path and .scale here once the extractor agrees with Arena.
         return {**_usd_paths(None), "scale": [1.0, 1.0, 1.0]}
-    # Object and Background. usd_path is None for procedurally spawned assets (spawner_cfg).
-    return {**_usd_paths(asset.usd_path), "scale": list(asset.scale)}
+    # Object and Background. usd_path is empty for one spawned from a shape
+    # (bound_spawned_shapes), and the payload draws its bounding box.
+    return {**_usd_paths(asset.usd_path or None), "scale": list(asset.scale)}
 
 
 def _bounding_box(asset: Any) -> Any:

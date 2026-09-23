@@ -48,6 +48,9 @@ What currently doesn't draw. Check here before treating a render bug as new.
   centimetres (`metersPerUnit` 0.01) with a spawn `scale` of 0.01. Arena's bounding box takes the
   scale as the only unit conversion. `_convention` applies `metersPerUnit` on top of it, so the
   extracted mesh would be drawn at 1/100 size. Any asset authored in non-metre units is exposed to this.
+- Objects spawned from a shape config instead of a USD (`procedural_cube`, `procedural_table`,
+  `sphere`). `resolve_layout.bound_spawned_shapes` bounds them by the shape and the payload draws that
+  box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape, and the resolver refuses them.
 - The separate single-channel OmniPBR `metallic_texture`/`reflectionroughness_texture` pair, read as its
   scalar constants instead. Packing the two into one image needs a texture cache.
 
