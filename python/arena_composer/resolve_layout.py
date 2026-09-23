@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from isaaclab_arena.assets.background import Background
+from isaaclab_arena.assets.deformable_object import DeformableObject
 from isaaclab_arena.assets.object_reference import ObjectReference
 from isaaclab_arena.assets.object_set import RigidObjectSet
 from isaaclab_arena.assets.registries import AssetRegistry
@@ -210,6 +211,13 @@ def _geometry(asset: Any) -> dict[str, Any]:
             "scale": [1.0, 1.0, 1.0],
             "member_usd_paths": asset.member_usd_paths,
         }
+    if isinstance(asset, DeformableObject):
+        # Not an Object: it spawns from a spawner config and has no usd_path of its
+        # own, so the payload draws its bounding box.
+        # ponytail: the teddy bear's spawner does load a USD, but a centimetre one the
+        # extractor would draw at 1/100 size (usd/AGENTS.md, Known gaps). Read
+        # spawner_cfg.usd_path and .scale here once the extractor agrees with Arena.
+        return {**_usd_paths(None), "scale": [1.0, 1.0, 1.0]}
     # Object and Background. usd_path is None for procedurally spawned assets (spawner_cfg).
     return {**_usd_paths(asset.usd_path), "scale": list(asset.scale)}
 

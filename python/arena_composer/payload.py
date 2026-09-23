@@ -38,11 +38,16 @@ from typing import Any
 import msgpack
 import numpy as np
 
-from arena_composer.usd import Node, extract, open_stage
+from arena_composer.usd import Material, Node, extract, open_stage
+from arena_composer.usd.shapes import box
 
 # Roles whose USD is drawn by somebody else. An object reference is a prim
 # *inside* its parent's stage, so drawing it too would double the geometry.
 _UNDRAWN_ROLES = {"object_reference"}
+
+# An asset with no USD to read is drawn as its bounding box, in a colour of its
+# own: in the default grey it vanishes into a white table seen from above.
+_STAND_IN = Material(base_color=(0.3, 0.55, 0.9))
 
 
 def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
@@ -57,9 +62,16 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
 
     def geometry_index(asset: dict[str, Any]) -> int | None:
         """Extract the asset's USD once, however many assets share it."""
-        path = asset.get("local_usd_path")
-        if not path or asset.get("role") in _UNDRAWN_ROLES:
+        if asset.get("role") in _UNDRAWN_ROLES:
             return None
+        path = asset.get("local_usd_path")
+        if not path:
+            # The box it was placed by. It already carries the asset's scale, and
+            # the viewer applies that again.
+            scale = asset.get("scale", [1.0, 1.0, 1.0])
+            surface = box(np.divide(asset["bbox_min"], scale), np.divide(asset["bbox_max"], scale))
+            geometries.append([_encode_node(Node(asset["id"], surface, _STAND_IN))])
+            return len(geometries) - 1
         if path not in by_usd:
             by_usd[path] = len(geometries)
             geometries.append([_encode_node(node) for node in extract(open_stage(path))])

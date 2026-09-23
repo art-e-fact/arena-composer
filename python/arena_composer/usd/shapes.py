@@ -30,7 +30,18 @@ def read_shape(prim: Any) -> Surface | None:
     if builder is None:
         return None
     positions, triangles, uvs = builder(prim)
-    positions = _orient(positions, _axis(prim))
+    return _surface(_orient(positions, _axis(prim)), triangles, uvs)
+
+
+def box(low: Any, high: Any) -> Surface:
+    """An axis-aligned box between two corners — what an asset with no USD to read
+    is drawn as."""
+    low, high = np.asarray(low, dtype=np.float64), np.asarray(high, dtype=np.float64)
+    positions, triangles, uvs = _box(*(high - low) / 2.0)
+    return _surface(positions + (low + high) / 2.0, triangles, uvs)
+
+
+def _surface(positions: np.ndarray, triangles: np.ndarray, uvs: np.ndarray) -> Surface:
     return Surface(
         positions=np.ascontiguousarray(positions, dtype=np.float32),
         triangles=np.ascontiguousarray(triangles, dtype=np.uint32),

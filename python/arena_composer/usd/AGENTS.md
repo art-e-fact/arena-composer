@@ -42,6 +42,12 @@ What currently doesn't draw. Check here before treating a render bug as new.
   only `project_uvw` and `world_or_object` has nothing to read.
 - Prims that bind no material at all (~13% of the galileo backgrounds).
 - Lights authored inside an asset.
+- Deformable objects (`deformable_cube`, `deformable_surface`, `deformable_teddy_bear`). They spawn
+  from a spawner config rather than a `usd_path`, and `payload.build_payload` draws their bounding box
+  in flat blue instead. The teddy bear's spawner does load a USD, but that USD is authored in
+  centimetres (`metersPerUnit` 0.01) with a spawn `scale` of 0.01. Arena's bounding box takes the
+  scale as the only unit conversion. `_convention` applies `metersPerUnit` on top of it, so the
+  extracted mesh would be drawn at 1/100 size. Any asset authored in non-metre units is exposed to this.
 - The separate single-channel OmniPBR `metallic_texture`/`reflectionroughness_texture` pair, read as its
   scalar constants instead. Packing the two into one image needs a texture cache.
 
