@@ -113,7 +113,19 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
     }
 }
 
-fn find<'a>(placed: &'a Placed, id: &str) -> Option<&'a Asset> {
+/// The surface an `on` with `params` would stand its subject on, over
+/// `parent` — what a drop shows before it is let go. The whole top in red
+/// where the margin has eaten it, since nothing can stand there.
+pub fn draw_surface(parent: &Asset, params: &Params, kind: Option<&Kind>, gizmos: &mut Gizmos<RelationGizmos>) {
+    let mut draw = Draw { gizmos, to_bevy: arena_to_bevy() };
+    let bounds = world_aabb(parent);
+    match support(&Args { params, kind }, bounds) {
+        Some(surface) => draw.face(surface, 2, surface.0.z, REGION),
+        None => draw.face(bounds, 2, bounds.1.z, FORBIDDEN),
+    }
+}
+
+pub fn find<'a>(placed: &'a Placed, id: &str) -> Option<&'a Asset> {
     placed.0.iter().find(|asset| asset.id == id)
 }
 

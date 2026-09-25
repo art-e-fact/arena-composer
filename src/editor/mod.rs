@@ -31,6 +31,7 @@
 //! each keeps it drawn; see [`relations`].
 
 mod browser;
+mod drop;
 mod form;
 mod relations;
 
@@ -54,7 +55,7 @@ pub fn plugin(app: &mut App) {
         .init_gizmo_group::<relations::RelationGizmos>()
         // The panel belongs in egui's own pass, not in `Update`: that is where
         // a context exists to draw into.
-        .add_systems(EguiPrimaryContextPass, form::draw)
+        .add_systems(EguiPrimaryContextPass, (form::draw, drop::drop_onto_the_layout).chain())
         // Between the two, so the camera acts on the pass that just ran:
         // `ProcessOutput` is where egui publishes what this frame's panel made
         // of the pointer, and the camera set is what reads `enabled` after. In

@@ -1,5 +1,6 @@
-//! The asset browser: everything a spec can name, searchable, one click to add
-//! an object.
+//! The asset browser: everything a spec can name, searchable. A click adds an
+//! object on the anchor; a drag drops it onto something in the layout (see
+//! [`super::drop`]).
 //!
 //! Two kinds of asset are listed together. Arena's registered ones ride in the
 //! vocabulary and are always there. NVIDIA's SimReady props ride in
@@ -22,7 +23,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 
 use super::{Form, send};
-use crate::spec::{CatalogAsset, Request, Step, Value};
+use crate::spec::{CatalogAsset, Params, Request, Spec, Step, Value};
 
 /// How big a picture is drawn, and so how tall every row is — the space is
 /// taken whether the row has one or not, so the names line up down the list.
@@ -119,11 +120,17 @@ pub fn show(ui: &mut egui::Ui, form: &Form, browser: &mut Browser, images: &mut 
             for asset in &found[visible] {
                 ui.horizontal(|ui| {
                     thumbnail(ui, asset, browser, images, &mut drawn);
-                    if ui.button(&asset.name).on_hover_text(hover(asset)).clicked() {
-                        send(Request::Insert {
-                            path: vec![Step::from("objects")],
-                            value: entry(asset, &form.spec.node_ids()),
-                        });
+                    // A click adds the asset onto the anchor; a drag carries it
+                    // out onto the layout, where `super::drop` takes it. One
+                    // widget senses both: egui hands a click on a drag-only
+                    // widget laid over a button to neither of them.
+                    let button = egui::Button::new(&asset.name).sense(egui::Sense::click_and_drag());
+                    let response = ui.add(button).on_hover_text(hover(asset));
+                    if response.clicked() {
+                        add(&form.spec, asset, None);
+                    }
+                    if response.drag_started() {
+                        egui::DragAndDrop::set_payload(ui.ctx(), (*asset).clone());
                     }
                 });
             }
@@ -226,18 +233,75 @@ fn hover(asset: &CatalogAsset) -> String {
     }
 }
 
-/// The object entry a pick writes.
+/// Add `asset` as a new object, standing on `onto` or else on the anchor.
+pub(super) fn add(spec: &Spec, asset: &CatalogAsset, onto: Option<&str>) {
+    for request in additions(spec, asset, onto) {
+        send(request);
+    }
+}
+
+/// What adding `asset` writes: the object, and the `on` that places it.
+///
+/// Arena places only the objects that have a relation. One without stays at
+/// its default pose, and the solver steers everything else around it — so an
+/// add carries an `on` wherever there is something to stand on: `onto`, else
+/// the anchor. With neither, the object goes in alone.
 ///
 /// The id is worked out on the click rather than when the row is drawn, so
 /// adding two of the same asset gives two ids and not one. It comes from the
 /// asset's name and not its registry name, which for a prop is the one name
-/// every prop shares.
+/// every prop shares. Python applies the two writes in order, so the `on` names
+/// an id the first has already written.
+// ponytail: two writes, so a refused object gets its `on` refused as well, and
+// that second error replaces the first. One batched request if that bites.
+fn additions(spec: &Spec, asset: &CatalogAsset, onto: Option<&str>) -> Vec<Request> {
+    let id = unused(&asset.name.to_lowercase(), &spec.node_ids());
+    let mut requests = vec![Request::Insert {
+        path: vec![Step::from("objects")],
+        value: entry(asset, &id),
+    }];
+    if let Some(reference) = onto.or_else(|| anchor(spec)) {
+        requests.push(Request::Insert {
+            path: vec![Step::from("relations")],
+            value: Value::map([
+                ("kind", Value::text("on")),
+                ("subject", Value::text(&id)),
+                ("reference", Value::text(reference)),
+                ("params", Value::Map(on_params(spec, reference))),
+            ]),
+        });
+    }
+    requests
+}
+
+/// The node the solver holds still and places everything else against.
+pub(super) fn anchor(spec: &Spec) -> Option<&str> {
+    let relation = spec.relations.iter().find(|relation| relation.kind == "is_anchor")?;
+    Some(&relation.subject)
+}
+
+/// The parameters an added `on` takes from what it stands on.
+///
+/// A background or an object reference is a surface — a table, a counter —
+/// and keeps the kind's defaults: contained, and off the rim. An object is
+/// about the size of what gets put on it, so containment inside its inset top
+/// rarely fits, and it asks for the footprints to overlap instead.
+pub(super) fn on_params(spec: &Spec, reference: &str) -> Params {
+    let object = spec.objects.iter().any(|node| node.id == reference)
+        || spec.object_sets.iter().any(|set| set.id == reference);
+    match object {
+        true => Params::from([("overlap".to_owned(), Value::Bool(true))]),
+        false => Params::new(),
+    }
+}
+
+/// The object entry an add writes, under `id`.
 ///
 /// `params` goes in as the asset gave it: empty for a registered asset, and
 /// the URL for a prop, which is the whole of what makes that entry build.
-fn entry(asset: &CatalogAsset, taken: &[&str]) -> Value {
+fn entry(asset: &CatalogAsset, id: &str) -> Value {
     Value::map([
-        ("id", Value::text(unused(&asset.name.to_lowercase(), taken))),
+        ("id", Value::text(id)),
         ("registry_name", Value::text(&asset.registry_name)),
         ("params", Value::Map(asset.params.clone())),
     ])
@@ -257,6 +321,7 @@ fn unused(stem: &str, taken: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::Relation;
 
     /// A SimReady prop as the payload carries one: one registry name for all
     /// of them, and the URL that says which.
@@ -308,19 +373,55 @@ mod tests {
         assert!(!matches(&basket, &["usd".into()]), "the suffix is not a word to search by");
     }
 
+    fn banana() -> CatalogAsset {
+        CatalogAsset {
+            registry_name: "banana_ycb_robolab".into(),
+            name: "banana_ycb_robolab".into(),
+            ..Default::default()
+        }
+    }
+
+    /// A table as the background, a bowl on it, and the table anchored unless
+    /// asked otherwise.
+    fn spec(anchored: bool) -> Spec {
+        let node = |id: &str| crate::spec::Node { id: id.into(), ..Default::default() };
+        let mut spec = Spec {
+            background: node("table"),
+            objects: vec![node("bowl")],
+            ..Default::default()
+        };
+        if anchored {
+            spec.relations.push(Relation { kind: "is_anchor".into(), subject: "table".into(), ..Default::default() });
+        }
+        spec
+    }
+
+    /// Each entry the requests insert, and where.
+    fn inserted(requests: &[Request]) -> Vec<(String, HashMap<String, Value>)> {
+        requests
+            .iter()
+            .map(|request| match request {
+                Request::Insert { path, value: Value::Map(entry) } => match path.as_slice() {
+                    [Step::Key(key)] => (key.clone(), entry.clone()),
+                    other => panic!("inserted at {other:?}"),
+                },
+                other => panic!("not an insert of an entry: {other:?}"),
+            })
+            .collect()
+    }
+
     /// A prop's entry has to carry the URL: `simready_usd_object` is one name
     /// for fifteen hundred assets, and the URL is what picks this one. Its id
     /// comes from the prop's own name for the same reason.
     #[test]
     fn a_picked_prop_writes_the_url_that_makes_it() {
         let basket = prop("Plastic_Basket_A01", "https://bucket/Plastic_Basket_A01/basket.usd");
-        let Value::Map(written) = entry(&basket, &["table"]) else {
-            panic!("an entry is a mapping");
-        };
-        assert_eq!(written["id"], Value::text("plastic_basket_a01"));
-        assert_eq!(written["registry_name"], Value::text("simready_usd_object"));
+        let written = inserted(&additions(&spec(true), &basket, None));
+        let (_, object) = &written[0];
+        assert_eq!(object["id"], Value::text("plastic_basket_a01"));
+        assert_eq!(object["registry_name"], Value::text("simready_usd_object"));
         assert_eq!(
-            written["params"],
+            object["params"],
             Value::map([("usd_path", Value::text("https://bucket/Plastic_Basket_A01/basket.usd"))]),
         );
     }
@@ -329,15 +430,43 @@ mod tests {
     /// and no parameters.
     #[test]
     fn a_picked_registered_asset_writes_no_params() {
-        let asset = CatalogAsset {
-            registry_name: "banana_ycb_robolab".into(),
-            name: "banana_ycb_robolab".into(),
-            ..Default::default()
-        };
-        let Value::Map(written) = entry(&asset, &["banana_ycb_robolab"]) else {
-            panic!("an entry is a mapping");
-        };
-        assert_eq!(written["id"], Value::text("banana_ycb_robolab_2"));
-        assert_eq!(written["params"], Value::map([]));
+        let mut spec = spec(true);
+        spec.objects.push(crate::spec::Node { id: "banana_ycb_robolab".into(), ..Default::default() });
+        let written = inserted(&additions(&spec, &banana(), None));
+        let (_, object) = &written[0];
+        assert_eq!(object["id"], Value::text("banana_ycb_robolab_2"));
+        assert_eq!(object["params"], Value::map([]));
+    }
+
+    /// A click stands the new object on the anchor, contained like anything
+    /// else on a table — an object with no relation is never placed at all.
+    #[test]
+    fn a_click_puts_the_object_on_the_anchor() {
+        let written = inserted(&additions(&spec(true), &banana(), None));
+        let keys: Vec<&str> = written.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(keys, ["objects", "relations"], "the object has to exist before the `on` names it");
+        let (_, on) = &written[1];
+        assert_eq!(on["kind"], Value::text("on"));
+        assert_eq!(on["subject"], Value::text("banana_ycb_robolab"));
+        assert_eq!(on["reference"], Value::text("table"));
+        assert_eq!(on["params"], Value::map([]), "a surface keeps the kind's defaults");
+    }
+
+    /// Dropped onto an object, the `on` asks for overlap: containment inside a
+    /// bowl's inset top rarely fits a thing the size of a bowl's contents.
+    #[test]
+    fn a_drop_onto_an_object_asks_for_overlap() {
+        let written = inserted(&additions(&spec(true), &banana(), Some("bowl")));
+        let (_, on) = &written[1];
+        assert_eq!(on["reference"], Value::text("bowl"));
+        assert_eq!(on["params"], Value::map([("overlap", Value::Bool(true))]));
+    }
+
+    /// With no anchor and nothing named, there is nothing to stand on, and the
+    /// object goes in alone as it always did.
+    #[test]
+    fn without_an_anchor_a_click_adds_the_object_alone() {
+        let written = inserted(&additions(&spec(false), &banana(), None));
+        assert_eq!(written.len(), 1, "{written:?}");
     }
 }

@@ -191,6 +191,28 @@ goes out once, when the drag ends.
 `ARENA_VIEWER_SHOW_RELATIONS=all` (or `=2,5`, positions in the relations list) starts the viewer
 with those drawn — with `ARENA_VIEWER_SCREENSHOT`, the way to look at them without a pointer.
 
+### Adding an object
+
+A click on a browser row adds the asset onto the anchor; a drag drops it onto whatever it is let go
+over. Either way the add is two inserts — the object, then an `on` naming it — which
+`view._serve_requests` applies in order. Every add carries that `on` because Arena places only
+objects that have a relation: one without keeps its default pose, and the solver steers the rest
+around it as a fixed obstacle. An `on` to a background or an object reference keeps the kind's
+defaults; one to an object asks for `overlap`, since containment inside an object's inset top
+rarely fits what is put on it.
+
+The drag is egui's from end to end. The row's button hands egui the asset as its drag-and-drop
+payload, and `drop::drop_onto_the_layout`, chained after `form::draw` in egui's pass, is the only
+thing that reads it. Keep the button sensing click *and* drag: egui gives a click on a drag-only
+widget laid over a button (what `Ui::dnd_drag_source` builds) to neither of them.
+
+While the payload is held off the panel, a mesh ray cast under the cursor picks the target: the
+smallest placed box holding the hit, never the embodiment, with a reference winning a tie with its
+parent. That is what makes a hit on a counter name the `table_top` reference, which has no mesh of
+its own to be hit. With no target the anchor stands in. The surface the `on` will stand the object
+on is drawn over the target with the relation gizmos. Let go over the panel, or press Escape, and
+nothing is added.
+
 `arena_composer.render` draws a packed scene from named views and writes a PNG each, in a
 child process that exits when it is done (`arena_composer.render_process` → `src/render.rs`).
 No window and no display server: Bevy runs headless with `synchronous_pipeline_compilation`,

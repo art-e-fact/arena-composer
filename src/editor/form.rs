@@ -175,7 +175,7 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
         // No add button: an object is an asset somebody offers, and the
         // browser below is where those are. Picking there is what makes "add"
         // a decision rather than a surprise.
-        ui.weak("add one from the asset list below");
+        ui.weak("click one in the asset list below, or drag it onto the layout");
     });
 }
 
