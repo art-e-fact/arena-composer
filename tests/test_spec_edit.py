@@ -330,3 +330,57 @@ def test_params_are_written_with_the_object(spec: Path):
     assert result.ok, result.errors
     objects = yaml.safe_load(scene_of(spec).read_text())["objects"]
     assert {"id": "can", "registry_name": "simready_usd_object", "params": {"usd_path": SIMREADY_CAN}} in objects
+
+
+def with_embodiment_params(spec: Path, params: str) -> None:
+    """Give the scene's DROID the `params` block `params`, indented under it."""
+    block = "".join(f"    {line}\n" for line in params.splitlines())
+    authored = SCENE.replace("droid_abs_joint_pos\n  params: {}\n", f"droid_abs_joint_pos\n  params:\n{block}", 1)
+    scene_of(spec).write_text(authored)
+
+
+def switch_embodiment(spec: Path, registry_name: str) -> spec_edit.Result:
+    return spec_edit.apply(spec, "set", ["embodiment", "registry_name"], registry_name)
+
+
+def test_switching_the_embodiment_drops_the_params_the_new_one_does_not_take(spec: Path):
+    """A DROID's stand is its own constructor's; handed to a Franka it fails the
+    build. The id stays, since everything else names the robot by it."""
+    with_embodiment_params(spec, "enable_cameras: true\nstand_height_m: 1.2")
+
+    result = switch_embodiment(spec, "franka_ik")
+    assert result.ok, result.errors
+    assert any("stand_height_m" in line for line in result.changed), result.changed
+
+    embodiment = yaml.safe_load(scene_of(spec).read_text())["embodiment"]
+    assert embodiment == {"id": "droid", "registry_name": "franka_ik", "params": {"enable_cameras": True}}
+
+
+def test_switching_between_droid_variants_keeps_the_stand(spec: Path):
+    """The variants differ in how the robot is commanded, not in what it stands
+    on, so a param both take survives."""
+    with_embodiment_params(spec, "stand_height_m: 1.2")
+
+    assert switch_embodiment(spec, "droid_differential_ik").ok
+    assert yaml.safe_load(scene_of(spec).read_text())["embodiment"]["params"] == {"stand_height_m": 1.2}
+
+
+def test_an_embodiment_emptied_of_commented_params_still_parses(spec: Path):
+    """ruamel writes a mapping emptied of a commented key at column 0, which
+    does not parse — the same trap unsetting a relation's last param has."""
+    with_embodiment_params(spec, "# hand-tuned\nstand_height_m: 1.2")
+
+    assert switch_embodiment(spec, "franka_ik").ok
+    assert yaml.safe_load(scene_of(spec).read_text())["embodiment"]["params"] == {}
+
+
+@pytest.mark.parametrize("registry_name", ["banana_ycb_robolab", TABLE, "not_a_real_robot"])
+def test_only_a_robot_is_accepted_as_the_embodiment(spec: Path, registry_name: str):
+    """Arena checks that a name is registered, not that it is a robot: a banana
+    validates as the embodiment and fails when the scene is built."""
+    before = spec.read_text(), scene_of(spec).read_text()
+
+    result = switch_embodiment(spec, registry_name)
+    assert not result.ok
+    assert any(registry_name in error for error in result.errors), result.errors
+    assert (spec.read_text(), scene_of(spec).read_text()) == before

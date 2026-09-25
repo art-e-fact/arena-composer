@@ -154,14 +154,42 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Im
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
+            embodiment(ui, form);
             objects(ui, form, state);
             relations(ui, form, state)
         })
         .inner
 }
 
+/// The robot, picked from the registered embodiments.
+///
+/// A pick sets the registry name alone. The id stays, because relations, task
+/// params and CLI overrides name the robot by it; the old robot's params are
+/// Python's to sort, since only it can read what the new one's constructor
+/// takes.
+fn embodiment(ui: &mut egui::Ui, form: &Form) {
+    let node = &form.spec.embodiment;
+    group(ui, "embodiment", None, form.owner("embodiment"), |ui| {
+        row(ui, &node.id, None, |ui| {
+            let path = [Step::from("embodiment"), Step::from("registry_name")];
+            let width = ui.available_width();
+            menu(ui, "embodiment", &node.registry_name, embodiment_options(form), set(&path), width);
+        });
+    });
+}
+
+/// Every registered embodiment, as the registry name a pick writes.
+fn embodiment_options(form: &Form) -> Vec<(String, Value)> {
+    form.vocabulary
+        .assets
+        .iter()
+        .filter(|asset| asset.role == "embodiment")
+        .map(|asset| (asset.registry_name.clone(), Value::text(&asset.registry_name)))
+        .collect()
+}
+
 fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
-    group(ui, "objects", form.spec.objects.len(), form.owner("objects"), |ui| {
+    group(ui, "objects", Some(form.spec.objects.len()), form.owner("objects"), |ui| {
         for (index, node) in form.spec.objects.iter().enumerate() {
             let path = vec![Step::from("objects"), Step::from(index)];
             ui.horizontal(|ui| {
@@ -184,7 +212,7 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
 fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet<usize> {
     let ids = form.spec.node_ids();
     let mut shown = BTreeSet::new();
-    group(ui, "relations", form.spec.relations.len(), form.owner("relations"), |ui| {
+    group(ui, "relations", Some(form.spec.relations.len()), form.owner("relations"), |ui| {
         for (index, relation) in form.spec.relations.iter().enumerate() {
             let path = vec![Step::from("relations"), Step::from(index)];
             let kind = form.vocabulary.relation(&relation.kind);
@@ -556,9 +584,11 @@ fn subject_default(form: &Form) -> &str {
         .map_or(form.spec.background.id.as_str(), |node| node.id.as_str())
 }
 
-/// One top-level section, with the file that owns it.
-fn group(ui: &mut egui::Ui, name: &str, count: usize, owner: &str, body: impl FnOnce(&mut egui::Ui)) {
-    egui::CollapsingHeader::new(format!("{name}  ({count})  ·  {owner}"))
+/// One top-level section, with the file that owns it. `count` is for a list; a
+/// section holding one entry has none.
+fn group(ui: &mut egui::Ui, name: &str, count: Option<usize>, owner: &str, body: impl FnOnce(&mut egui::Ui)) {
+    let count = count.map_or(String::new(), |count| format!("  ({count})"));
+    egui::CollapsingHeader::new(format!("{name}{count}  ·  {owner}"))
         .id_salt(name)
         .default_open(true)
         .show(ui, body);
@@ -615,6 +645,30 @@ mod tests {
             Value::map([("side", Value::text("positive_y"))]),
             "a required parameter was left out"
         );
+    }
+
+    /// The robot is picked from the embodiments alone. Arena's own validator
+    /// takes a banana or a table in that slot, and the scene then fails to
+    /// build.
+    #[test]
+    fn the_embodiment_menu_offers_only_embodiments() {
+        let asset = |name: &str, role: &str| crate::spec::CatalogAsset {
+            registry_name: name.into(),
+            role: role.into(),
+            ..Default::default()
+        };
+        let mut form = Form::default();
+        form.vocabulary.assets = vec![
+            asset("franka_ik", "embodiment"),
+            asset("maple_table_robolab", "background"),
+            asset("banana_ycb_robolab", "object"),
+            asset("droid_abs_joint_pos", "embodiment"),
+        ];
+
+        let options = embodiment_options(&form);
+        let names: Vec<&str> = options.iter().map(|(label, _)| label.as_str()).collect();
+        assert_eq!(names, ["franka_ik", "droid_abs_joint_pos"]);
+        assert_eq!(options[1].1, Value::text("droid_abs_joint_pos"), "a pick writes the registry name");
     }
 
     /// A number under the pointer reaches the view where it has been dragged
