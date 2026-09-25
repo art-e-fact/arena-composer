@@ -7,6 +7,7 @@ check tests the uninteresting half.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -180,6 +181,16 @@ def test_a_spec_without_an_include_edits_itself(tmp_path: Path):
     assert result.ok, result.errors
     assert result.wrote == [str(path)]
     assert "apple" in [obj["id"] for obj in yaml.safe_load(path.read_text())["objects"]]
+
+
+def test_a_scene_is_refused_with_a_regex_that_finds_its_task(spec: Path):
+    with pytest.raises(ValueError) as refused:
+        spec_edit.check_entry(scene_of(spec))
+    pattern = str(refused.value).rsplit(maxsplit=1)[-1]
+
+    assert re.search(pattern, spec.read_text())
+    assert not re.search(pattern, spec.read_text().replace("scene.yaml", "other_scene.yaml"))
+    spec_edit.check_entry(spec)
 
 
 LONG_DESCRIPTION = "pick up the banana and place it in the bowl, then pick up the apple and put it on the plate"

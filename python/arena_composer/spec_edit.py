@@ -19,6 +19,7 @@ a rejected edit leaves the pair on disk exactly as it was.
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,23 @@ class Result:
     @classmethod
     def failed(cls, *errors: str) -> Result:
         return cls(ok=False, errors=list(errors))
+
+
+def check_entry(path: Path) -> None:
+    """Fail with a way to find its task when `path` is a scene: a file with
+    neither a ``task`` nor an include of its own.
+
+    A scene validates only merged with a task that includes it, and several
+    tasks can include one scene, so which to load is the caller's to name. The
+    message ends with a regex for the include line, to search the specs with.
+    """
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if isinstance(document, dict) and "task" not in document and INCLUDE not in document:
+        pattern = rf"""{INCLUDE}:\s*['"]?(.*/)?{re.escape(Path(path).name)}"""
+        raise ValueError(
+            f"{path} has no `task`, so it is a scene: pass the task YAML that includes it through `{INCLUDE}`."
+            f" To find one, search the specs for the regex {pattern}"
+        )
 
 
 class SpecFiles:

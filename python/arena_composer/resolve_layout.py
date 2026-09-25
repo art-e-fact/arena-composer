@@ -48,6 +48,7 @@ from isaaclab_arena.relations.relations import get_anchor_objects
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 
+from arena_composer import spec_edit
 from arena_composer.usd_assets import localize, use_local_asset_cache
 
 DEFAULT_SEED = 42
@@ -169,6 +170,7 @@ def bound_spawned_shapes(assets: dict[str, Any]) -> None:
 
 def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED) -> dict[str, Any]:
     """Load an env graph spec YAML and resolve it."""
+    spec_edit.check_entry(path)
     spec = ArenaEnvGraphSpec.from_yaml(path)
     return {"spec_path": str(Path(path).resolve()), **resolve_layout(spec, seed=seed)}
 

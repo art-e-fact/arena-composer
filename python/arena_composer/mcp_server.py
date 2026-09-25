@@ -40,8 +40,8 @@ Authoring tools for IsaacLab-Arena environment specs: the YAML under
 spatial relations a solver turns into a layout.
 
 A spec is usually two files — a task YAML including a scene YAML through
-`external_yaml` — which validate as one document. The edit tools work out which
-of the two an edit belongs in, so address them at either path.
+`external_yaml` — which validate as one document. Address the tools at the task;
+the edit tools work out which of the two an edit belongs in.
 
 How the tools fit together:
 
@@ -98,6 +98,7 @@ def _spec_path(spec: str) -> Path:
     path = Path(spec).expanduser().resolve()
     if not path.is_file():
         raise ValueError(f"no spec at {path}")
+    spec_edit.check_entry(path)
     return path
 
 
@@ -188,7 +189,7 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
     no layout.
 
     Args:
-        spec: Path to the task or scene YAML.
+        spec: Path to the task YAML.
         seed: Placement seed. The solver samples a different valid layout per
             seed, so pin it to compare two edits.
     """
@@ -236,7 +237,7 @@ def add_object(
     against the merged pair and both files are left untouched if it fails.
 
     Args:
-        spec: Path to the task or scene YAML.
+        spec: Path to the task YAML.
         id: Node id for the new object, unique within the spec.
         registry_name: A name from `search_assets`.
         on: Id of the asset to place it on. Without one the object takes no
@@ -257,7 +258,7 @@ def remove_object(spec: str, id: str) -> dict[str, Any]:
     validation error — what to do about the task is a decision, not a cleanup.
 
     Args:
-        spec: Path to the task or scene YAML.
+        spec: Path to the task YAML.
         id: Node id of the object to remove.
     """
     with _quiet():
@@ -292,7 +293,7 @@ async def render_views(
     looks right. That message is the renderer's, and is not about the spec.
 
     Args:
-        spec: Path to the task or scene YAML.
+        spec: Path to the task YAML.
         views: Which views to draw. Defaults to top and front.
         size: Image size in pixels, square.
         seed: Placement seed, as for `describe_scene`.
