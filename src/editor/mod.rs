@@ -37,9 +37,10 @@ mod relations;
 
 use std::collections::HashMap;
 
+use bevy::camera::SubCameraView;
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
-use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass};
+use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass, egui};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
 use crate::layout::Placed;
@@ -172,6 +173,23 @@ fn send(request: Request) {
     }
 }
 
+/// The layout camera's picture, off-centre so that its middle is the middle of
+/// what a `panel` on the right leaves of the `window`, both in one unit.
+///
+/// The window shows the right-hand part of a picture one panel wider, whose
+/// centre sits half a panel left of the window's. Only the ratios count, so egui
+/// points serve as well as pixels. Bevy culls against the projection without
+/// this offset, which leaves out only the right half of the strip under the
+/// panel.
+fn beside_the_panel(window: egui::Vec2, panel: f32) -> SubCameraView {
+    let (width, height, panel) = (window.x.round() as u32, window.y.round() as u32, panel.round() as u32);
+    SubCameraView {
+        full_size: UVec2::new(width + panel, height),
+        offset: Vec2::new(panel as f32, 0.0),
+        size: UVec2::new(width, height),
+    }
+}
+
 /// Keep the orbit camera off the panel.
 ///
 /// `PanOrbitCamera` claims a drag on the frame the button goes down, checking
@@ -215,7 +233,23 @@ fn camera_takes_input(mid_drag: bool, pointer_taken: bool) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Form, Payload, camera_takes_input};
+    use bevy::camera::CameraProjection;
+    use bevy::prelude::{PerspectiveProjection, Vec3};
+    use bevy_egui::egui;
+
+    use super::{Form, Payload, beside_the_panel, camera_takes_input};
+
+    /// What the camera looks at, straight ahead of it, is drawn in the middle
+    /// of what the panel leaves.
+    #[test]
+    fn the_focus_is_drawn_mid_view() {
+        let (width, panel) = (1280.0, 360.0);
+        let sub_view = beside_the_panel(egui::vec2(width, 720.0), panel);
+        let clip = PerspectiveProjection::default().get_clip_from_view_for_sub(&sub_view);
+        let ndc = clip.project_point3(Vec3::NEG_Z);
+        let drawn_at = (ndc.x + 1.0) / 2.0 * width;
+        assert!((drawn_at - (width - panel) / 2.0).abs() < 0.5, "{drawn_at}");
+    }
 
     /// Only a new spec or a refusal ends a half-made edit. Anything else —
     /// here, pictures landing — leaves it, along with what the panel was

@@ -7,7 +7,7 @@ use bevy_egui::{EguiContexts, egui};
 
 use super::browser::{Browser, Files, Images};
 use super::relations::{self, RelationGizmos};
-use super::{Form, PointerOverPanel, send};
+use super::{Form, PointerOverPanel, beside_the_panel, send};
 use crate::layout::Placed;
 use crate::spec::{Field, Kind, Params, Relation, Request, Step, Value};
 
@@ -60,6 +60,7 @@ impl Default for PanelState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     form: Res<Form>,
@@ -68,6 +69,7 @@ pub fn draw(
     mut gizmos: Gizmos<RelationGizmos>,
     mut state: Local<PanelState>,
     mut over_panel: ResMut<PointerOverPanel>,
+    camera: Option<Single<&mut Camera>>,
 ) -> Result {
     // Cloned, so `contexts` is free to be handed on to the browser — which
     // needs it for egui's texture table. An `egui::Context` is a handle.
@@ -91,6 +93,11 @@ pub fn draw(
     over_panel.0 = ctx
         .pointer_interact_pos()
         .is_some_and(|pointer| shown.response.rect.contains(pointer));
+    // Framed in what the panel leaves rather than behind it, and following its
+    // edge as it is dragged.
+    if let Some(mut camera) = camera {
+        camera.sub_camera_view = Some(beside_the_panel(ctx.viewport_rect().size(), shown.response.rect.width()));
+    }
 
     // The relations the panel wants seen, drawn over the layout. From here
     // rather than a system of its own: the hover is this frame's, and a gizmo

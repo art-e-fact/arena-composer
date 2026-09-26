@@ -105,6 +105,18 @@ tree and does nothing. It also offers only the two behaviours we do not want: ig
 lets a press on the panel orbit, or `EguiFocusIncludesHover`, which stops a drag the moment it
 crosses onto the panel.
 
+### Framing beside the panel
+
+The camera draws the whole window, and the panel is opaque over its part of it. So that what the
+camera looks at lands in the middle of what the panel leaves, `form::draw` sets the camera's
+`sub_camera_view` every frame from the panel's width (`editor::beside_the_panel`): the window shows
+the right-hand part of a picture one panel wider. The framing follows the panel's edge as it is
+dragged, and picking needs nothing of its own — `Camera::viewport_to_world` reads the same matrix.
+
+Keep it one camera. Narrowing it with `Camera::viewport` instead needs a second camera for egui,
+because `bevy_egui` sizes a context to its camera's viewport and the panel would dock inside the
+space it had just taken.
+
 ### The backdrop
 
 The window clears to `BACKDROP` (`src/viewer.rs`), dark enough for a white robot on light tables
