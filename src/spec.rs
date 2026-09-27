@@ -341,7 +341,7 @@ mod tests {
     #[ignore = "needs a payload from arena-resolve-layout --payload"]
     fn a_real_payload_carries_a_form_for_every_relation_it_uses() {
         let path =
-            std::env::var("ARENA_COMPOSER_PAYLOAD").unwrap_or_else(|_| "../scene.msgpack".to_string());
+            std::env::var("ARENA_COMPOSER_PAYLOAD").unwrap_or_else(|_| "scene.msgpack".to_string());
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("{path}: {e} — run arena-resolve-layout --payload first"));
         let scene = crate::scene::Scene::from_msgpack(&bytes).expect("decoding the payload");

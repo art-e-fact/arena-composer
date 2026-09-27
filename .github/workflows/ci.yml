@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release --locked
+
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The platform tag follows the newest glibc symbol the extension uses, so
+      # the wheel is built against manylinux_2_28's glibc, not the runner's.
+      - uses: PyO3/maturin-action@v1
+        with:
+          manylinux: "2_28"
+          args: --release --locked --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist
+
+  pytest:
+    needs: wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - uses: astral-sh/setup-uv@v6
+      # isaaclab_arena is not on PyPI, so the wheel goes in without its
+      # dependencies and the rest are named here; tests/conftest.py sets aside
+      # the tests that import Arena. Isaac Sim provides pxr in an Arena venv.
+      - run: |
+          uv venv --python 3.12
+          uv pip install --no-deps dist/*.whl
+          uv pip install msgpack numpy "mcp>=2" "ruamel.yaml>=0.18" pyyaml pytest usd-core
+          .venv/bin/pytest
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [cargo-test, pytest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      # The wheel is versioned from Cargo.toml, so the tag must name the same version.
+      - run: test -f dist/arena_composer-"${GITHUB_REF_NAME#v}"-*.whl
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

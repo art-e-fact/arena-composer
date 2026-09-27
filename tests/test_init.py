@@ -9,6 +9,7 @@ broken server rather than a missing install.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -19,7 +20,8 @@ import pytest
 from arena_composer.cli import init
 
 VENV = Path(sys.prefix)
-INSTALLED = (VENV / "bin" / "arena-mcp").exists()
+# The server imports Arena as it starts.
+INSTALLED = (VENV / "bin" / "arena-mcp").exists() and importlib.util.find_spec("isaaclab_arena") is not None
 
 
 def mcp_json_command(project: Path) -> list[str]:
@@ -62,7 +64,7 @@ def test_a_venv_at_the_project_root_is_refused(tmp_path: Path):
     assert not (tmp_path / "bin").exists()
 
 
-@pytest.mark.skipif(not INSTALLED, reason="needs arena-composer installed in this venv")
+@pytest.mark.skipif(not INSTALLED, reason="needs arena-composer and Arena installed in this venv")
 def test_the_mcp_json_command_starts_the_server_from_a_subdirectory(tmp_path: Path):
     """Started with no input, the server reaches end-of-stream and exits cleanly."""
     init(tmp_path, VENV)

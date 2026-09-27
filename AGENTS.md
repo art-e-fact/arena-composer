@@ -1,16 +1,29 @@
 # arena_composer
 
+A live editor, headless renderer and MCP server for IsaacLab-Arena environment specs.
+
 A mixed maturin project: Python under `python/`, Rust under `src/`, one package. **Python owns
 everything that needs OpenUSD** — Arena's registries and placement solver, plus reading the assets'
 geometry and materials. **Rust owns Bevy** and opens no USD at all. The contract between them is the
-MessagePack payload described below; both ends change together. This is meant to become its own
-project, so its documentation lives here rather than at the repo root.
+MessagePack payload described below; both ends change together.
 
 Also read
 [python/arena_composer/usd/AGENTS.md](python/arena_composer/usd/AGENTS.md) — how assets are read into
 the payload, and what currently doesn't render.
 
-Commands below run from the repo root, where `source setup.sh` leaves you.
+## Developing
+
+The package runs in Arena's venv, and the specs it works on belong to an Arena project, not to this
+repo. Install this checkout editable into that venv; cargo builds the extension, minutes the first
+time:
+
+```bash
+uv pip install --python <Arena's venv>/bin/python -e .
+```
+
+With that venv active, `cargo` and `pytest` run from this repo's root, and the `arena-*` commands
+from the project's, whose spec paths the examples below use. Arena exits on import unless the Isaac
+Sim EULA is accepted: export `OMNI_KIT_ACCEPT_EULA=YES`.
 
 ## The payload
 
@@ -241,15 +254,16 @@ table, do these two overlap — have no stable answer under perspective.
 
 ## Iterating on the Rust side
 
-Much faster through a packed payload, which skips Arena's import, the solve and the USD reads:
+Much faster through a packed payload, which skips Arena's import, the solve and the USD reads. Pack
+one in the project, then run the binaries here:
 
 ```bash
-arena-resolve-layout environments/tasks/banana_in_bowl.yaml --payload scene.msgpack
-cd arena_composer && cargo run --bin arena-viewer -- ../scene.msgpack
+arena-resolve-layout environments/tasks/banana_in_bowl.yaml --payload /tmp/scene.msgpack
 ```
 
 ```bash
-cd arena_composer && cargo run --bin arena-render -- ../scene.msgpack top=top.png front=front.png
+cargo run --bin arena-viewer -- /tmp/scene.msgpack
+cargo run --bin arena-render -- /tmp/scene.msgpack top=top.png front=front.png
 ```
 
 `ARENA_VIEWER_SCREENSHOT=shot.png` on either viewer draws for a moment, writes the window to that
@@ -385,7 +399,7 @@ than written.
 ## The wheel
 
 ```bash
-cd arena_composer && uv build --wheel && uvx auditwheel show dist/*.whl
+uv build --wheel && uvx auditwheel show dist/*.whl
 ```
 
 One wheel serves every Python from 3.12, since the extension is built against the abi3 stable ABI.
@@ -394,30 +408,37 @@ Two rules keep it installable:
 - **It links only glibc and libgcc_s**, the libraries a manylinux wheel may assume. That is why
   Bevy's default features are off: its audio links libasound and its gamepad support libudev, and
   every default collection brings both. Windowing and Vulkan are loaded with `dlopen` and do not
-  count. The platform tag follows the newest glibc symbol the extension references, so build a
-  wheel for release in a manylinux container.
+  count. The platform tag follows the newest glibc symbol the extension references, which is why
+  CI builds the wheel in a manylinux_2_28 container rather than on the runner.
 - **It is stripped.** Symbol names are ~40% of an unstripped extension. Stripped, the extension is
   ~105 MB installed and the wheel ~35 MB to download, against PyPI's 100 MB limit per file.
 
 `isaaclab_arena` is not on PyPI. The package goes into the venv Arena already built, where
 `uv pip install` takes the installed distribution for it.
 
+CI (`.github/workflows/ci.yml`) publishes on a tag: `v` and the version in `Cargo.toml`, which is
+the wheel's version too. The wheel goes on that tag's GitHub Release.
+
 ## Tests
 
 ```bash
-pytest arena_composer/tests
-```
-
-```bash
-cd arena_composer && cargo test
+pytest
+cargo test
 ```
 
 `cargo test` covers the payload decode, mesh/material building and the frame conventions, and needs
 no fixtures. `pytest` covers the spec edits against the real validator, and the render path as far
-as it goes without a GPU. Both suites have tests that need a real packed scene and are opt-in:
+as it goes without a GPU. Both suites have tests that need a real packed scene and are opt-in. Pack
+one in the project, then run them here:
 
 ```bash
-arena-resolve-layout environments/tasks/droid_banana_on_plate_maple_table.yaml --payload scene.msgpack
-cd arena_composer && ARENA_COMPOSER_PAYLOAD=../scene.msgpack cargo test -- --ignored
-ARENA_COMPOSER_PAYLOAD=scene.msgpack pytest arena_composer/tests
+arena-resolve-layout environments/tasks/droid_banana_on_plate_maple_table.yaml --payload /tmp/scene.msgpack
 ```
+
+```bash
+ARENA_COMPOSER_PAYLOAD=/tmp/scene.msgpack cargo test -- --ignored
+ARENA_COMPOSER_PAYLOAD=/tmp/scene.msgpack pytest
+```
+
+CI has no Arena, so it runs `cargo test` and only the pytest files `tests/conftest.py` does not set
+aside, against the wheel it built. Run the whole suite locally before tagging a release.

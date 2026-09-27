@@ -72,7 +72,7 @@ def test_every_view_draws_something_different(tmp_path: Path):
 
     Make a payload first:
     `arena-resolve-layout <spec>.yaml --payload scene.msgpack`, then
-    `ARENA_COMPOSER_PAYLOAD=scene.msgpack pytest arena_composer/tests`.
+    `ARENA_COMPOSER_PAYLOAD=scene.msgpack pytest`.
     """
     paths = render.render(Path(PAYLOAD).read_bytes(), tmp_path, render.VIEWS, size=256)
 

@@ -14,6 +14,8 @@ dependencies = [
     "isaaclab_arena>=0.3,<0.4",
     "msgpack>=1.1",
     "numpy",
+    # The YAML reader Arena validates specs with.
+    "pyyaml",
     # The MCP server (arena_composer.mcp_server).
     "mcp>=2",
     # Round-trip YAML: the stock dumper drops comments and key order, and a

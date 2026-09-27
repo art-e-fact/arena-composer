@@ -166,7 +166,7 @@ mod tests {
         use crate::scene::Scene;
 
         let path = std::env::var("ARENA_COMPOSER_PAYLOAD")
-            .unwrap_or_else(|_| "../scene.msgpack".to_string());
+            .unwrap_or_else(|_| "scene.msgpack".to_string());
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("{path}: {e} — run arena-resolve-layout --payload first"));
         let scene = Scene::from_msgpack(&bytes).expect("decoding the payload");

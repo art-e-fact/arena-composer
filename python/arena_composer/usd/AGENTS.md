@@ -62,7 +62,7 @@ standalone.
 
 ## Tests
 
-`pytest arena_composer/tests` covers this directory against minimal USDAs written inline:
+`pytest` covers this directory against minimal USDAs written inline:
 `test_usd_material.py` for the shading dialects, `test_usd_mesh.py` for the geometry reader. Every
 fixture is a reduction of something a real asset authors — name that asset in a comment when you add
 one, or the fixture reads as a mistake. Each file has a TODO at the top listing what is still uncovered.
