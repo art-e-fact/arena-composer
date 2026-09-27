@@ -1,4 +1,4 @@
-//! `arena_composer` — the Bevy half of this project's Arena tooling.
+//! `arena_composer` — the Bevy half of the Arena spec editor.
 //!
 //! Python resolves an `ArenaEnvGraphSpec` into a layout and extracts the USD
 //! geometry to draw it with (see `arena_composer.payload`); this crate draws

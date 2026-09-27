@@ -68,7 +68,7 @@ relations:
 
 @pytest.fixture
 def spec(tmp_path: Path) -> Path:
-    """A task spec and the scene it includes, laid out as this repo's are."""
+    """A task spec and the scene it includes, laid out in sibling directories."""
     (tmp_path / "tasks").mkdir()
     (tmp_path / "scenes").mkdir()
     (tmp_path / "scenes" / "scene.yaml").write_text(SCENE)

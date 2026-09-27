@@ -263,8 +263,8 @@ artifact; the payload is the renderer's, and carries a strict subset of its fiel
 
 ## The MCP server
 
-`arena_composer.mcp_server` — tools for authoring specs, started by the client configs at the repo
-root. The server describes itself through its `INSTRUCTIONS` and tool docstrings; that is what a
+`arena_composer.mcp_server` — tools for authoring specs, started by the client configs that
+`arena-composer init` writes (below). The server describes itself through its `INSTRUCTIONS` and tool docstrings; that is what a
 client shows the model, so document the tools there and nowhere else.
 
 What matters when changing this code:
@@ -281,6 +281,20 @@ What matters when changing this code:
   validates by **reading the text back with PyYAML** — the reader Arena uses. The two
   disagree: PyYAML is YAML 1.1, where a bare `on` is the boolean true, so the `on` relation
   kind has to go out quoted. Validating the in-memory documents would not catch that.
+
+### Starting it from a client
+
+`arena-composer init [PROJECT]` (`cli.py`) writes a launcher, `bin/arena-mcp`, and three client
+configs that name it: `.mcp.json` for Claude Code, `.vscode/mcp.json` and `.cursor/mcp.json`. It
+keeps any that already exist, so delete one to have it written again.
+
+Every config names the one launcher because each client has its own format and its own variable
+expansion. VS Code and Cursor expand `${workspaceFolder}` and name it directly. Claude Code starts a
+server from wherever `claude` was started and expands nothing in `command`, so `.mcp.json` searches
+upwards for it. The launcher finds the project from its own path, exports the EULA acceptance Isaac
+Sim exits without, and execs `arena-mcp` from the venv that ran `init`. That venv is named relative
+to the project when it is inside it, so the launcher can be checked in. What the launcher prints
+goes to stderr, because stdout is the protocol here too.
 
 ### Remote assets
 
@@ -367,6 +381,26 @@ the two things Arena's validator does not check: it verifies that a registry nam
 the asset behind it takes. The other half of that gap is `catalog.missing_params`, which
 `spec_edit` runs on every write so a `simready_usd_object` without its `usd_path` is refused rather
 than written.
+
+## The wheel
+
+```bash
+cd arena_composer && uv build --wheel && uvx auditwheel show dist/*.whl
+```
+
+One wheel serves every Python from 3.12, since the extension is built against the abi3 stable ABI.
+Two rules keep it installable:
+
+- **It links only glibc and libgcc_s**, the libraries a manylinux wheel may assume. That is why
+  Bevy's default features are off: its audio links libasound and its gamepad support libudev, and
+  every default collection brings both. Windowing and Vulkan are loaded with `dlopen` and do not
+  count. The platform tag follows the newest glibc symbol the extension references, so build a
+  wheel for release in a manylinux container.
+- **It is stripped.** Symbol names are ~40% of an unstripped extension. Stripped, the extension is
+  ~105 MB installed and the wheel ~35 MB to download, against PyPI's 100 MB limit per file.
+
+`isaaclab_arena` is not on PyPI. The package goes into the venv Arena already built, where
+`uv pip install` takes the installed distribution for it.
 
 ## Tests
 
