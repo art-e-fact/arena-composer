@@ -43,7 +43,7 @@ To see the window without a person at the keyboard:
 | Variable | Effect | Defined in |
 | --- | --- | --- |
 | `ARENA_VIEWER_SCREENSHOT=shot.png` | draw a moment, write the window (only) to the file, quit | [viewer.rs](../src/viewer.rs) |
-| `ARENA_VIEWER_SEARCH=basket` | open the asset browser filtered | [form.rs](../src/editor/form.rs) `PanelState` |
+| `ARENA_VIEWER_SEARCH=basket` | open the asset browser filtered, with the first match picked | [browser.rs](../src/editor/browser.rs) `Browser` |
 | `ARENA_VIEWER_SHOW_RELATIONS=all` or `=2,5` | open with those relations' gizmos drawn | [form.rs](../src/editor/form.rs) `PanelState` |
 
 ## Tests

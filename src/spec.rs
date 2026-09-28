@@ -200,6 +200,10 @@ pub struct CatalogAsset {
     /// or there is none to have: this is empty where the bucket publishes
     /// none beside the layer.
     pub thumbnail: String,
+    /// A SimReady prop's folders under the bucket's SimReady root, e.g.
+    /// `Residential/Kitchen/Baskets`: where the browser's tree files it.
+    /// Empty for a registered asset.
+    pub category: String,
 }
 
 impl CatalogAsset {

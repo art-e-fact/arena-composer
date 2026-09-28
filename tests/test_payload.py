@@ -28,6 +28,7 @@ def test_a_prop_carries_its_picture_once_that_is_on_disk(tmp_path: Path, monkeyp
     assert prop["name"] == "Plastic_Basket_A01"
     assert prop["registry_name"] == "simready_usd_object"
     assert prop["params"] == {"usd_path": f"{simready.BUCKET}/{layer}"}
+    assert prop["category"] == "Residential/Kitchen/Baskets", "where the browser's tree files it"
     assert prop["thumbnail"] == "", "a picture nobody has fetched is not a path"
 
     # Where `view._thumbnails` would have put it. Taken from Isaac Lab's own

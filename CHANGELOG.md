@@ -11,9 +11,15 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - The editor panel shows the background, object sets, object references and the task — its
   description, its composition and a card per subtask — where it showed only the robot, the
   objects and the relations.
-- The asset browser shows each asset as a card: its picture, name, whether it is registered with
-  Arena or a SimReady prop, its physics type, its tags, and how many the scene already holds. Drag
-  a card from anywhere on it.
+- The asset browser docks under the 3D view, as Isaac Sim's content browser does, and folds down
+  to its header. A folder tree files Arena's assets by role and SimReady props by their folders on
+  the bucket, each folder with how many assets match the search. The grid shows each asset's
+  picture, name and how many the scene already holds, at a size the slider sets.
+- A details panel beside the grid describes the asset picked: where it comes from, its registry
+  name, physics type, folder, USD path (with a copy button), its tags (a click searches by one)
+  and which of the scene's nodes use it.
+- Backgrounds and robots are in the asset browser, and the details' button makes one the scene's.
+- The details' add button stands the new object on the anchor or on any node picked beside it.
 
 ### Changed
 
@@ -27,11 +33,17 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   robot does.
 - Adding a second subtask to an `atomic` task makes it `sequential`, and removing back down to one
   makes it `atomic`, so the task stays valid at each step.
+- A click on an asset in the browser picks it and shows its details, where it added it. A double
+  click adds it, and a drag onto the layout still does.
+- The 3D view is framed in what the panels leave, as a window that size would be: a taller asset
+  browser zooms the layout out rather than covering it.
+- The status line moved to the top-left corner, above the asset browser.
 
 ### Fixed
 
 - A number typed into the editor panel was saved even when escaped from, and saved twice when
   entered.
+- The status line drew its separators as boxes.
 
 ## [0.2.0] - 2026-09-28
 

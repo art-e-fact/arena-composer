@@ -1,31 +1,129 @@
-//! The asset browser: everything a spec can name, searchable, each asset a
-//! card. A click on one adds an object on the anchor; a drag drops it onto
-//! something in the layout (see [`super::drop`]).
+//! The asset browser, docked under the 3D view the way Isaac Sim docks its
+//! content browser: a folder tree, a grid of tiles, and the details of the
+//! tile picked.
+//!
+//! A click picks a tile, and the details beside the grid say what it is and
+//! offer what can be done with it: add an object onto the anchor or onto any
+//! node, or make a background or a robot the scene's own. A double click on an
+//! object does what the details' add button does, and a drag drops it onto
+//! something in the layout (see [`super::drop`]). A background or a robot is
+//! only ever set from the details: either replaces a whole part of the scene,
+//! which one stray click should not do.
 //!
 //! Two kinds of asset are listed together. Arena's registered ones ride in the
 //! vocabulary and are always there. NVIDIA's SimReady props ride in
 //! [`Form::remote`] and are there once the index has been built, which is what
 //! the reindex button asks for. A pick writes the same kind of entry either
 //! way: the asset carries the `params` its own entry needs, so nothing here
-//! has to know which kind it picked. The card says which it is all the same,
+//! has to know which kind it picked. The details say which it is all the same,
 //! since a prop is fetched from the network on its first solve.
+
+use std::collections::BTreeMap;
 
 use bevy_egui::egui;
 
-use super::thumbnails::{Images, Thumbnails};
+use super::controls::row;
 use super::{Form, card, send};
 use crate::spec::{CatalogAsset, Params, Request, Spec, Step, Value};
 
-/// How tall a card is. Fixed, because the list draws only the cards on screen
-/// and has to know where each one falls without drawing the ones before it.
-const CARD: f32 = 52.0;
+/// How tall the dock opens. Draggable from there, and folded away by its
+/// header or by dragging its edge down to the window's foot.
+const HEIGHT: f32 = 280.0;
 
-/// The space between a card's border and what is on it.
+/// How wide the tree and the details open.
+const TREE: f32 = 190.0;
+const DETAILS: f32 = 270.0;
+
+/// The space between a tile's border and what is on it.
 const PAD: f32 = 5.0;
 
-pub fn show(ui: &mut egui::Ui, form: &Form, search: &mut String, thumbnails: &mut Thumbnails, images: &mut Images) {
+/// How large the details draw the picked asset's picture.
+const PICTURE: f32 = 96.0;
+
+/// What the browser remembers between frames. None of it is in the spec.
+pub struct Browser {
+    /// Whether the dock is open, or folded down to its header.
+    open: bool,
+    /// What the grid is filtered to.
+    search: String,
+    /// The folder the grid shows, with everything under it; empty for all.
+    folder: String,
+    /// The asset picked, by its registry name and its USD — every prop shares
+    /// the one registry name, and the URL is what tells two apart.
+    picked: Option<(String, String)>,
+    /// How wide a tile is drawn.
+    tile: f32,
+    /// What the add button stands an object on, by id; None for the anchor.
+    onto: Option<String>,
+    /// Pick the first match as soon as there is one.
+    pick_first: bool,
+}
+
+/// `ARENA_VIEWER_SEARCH=basket` opens the browser filtered, with the first
+/// match picked, since a screenshot has nobody to type or click for it.
+impl Default for Browser {
+    fn default() -> Self {
+        let search = std::env::var("ARENA_VIEWER_SEARCH").unwrap_or_default();
+        Self {
+            open: true,
+            pick_first: !search.is_empty(),
+            search,
+            folder: String::new(),
+            picked: None,
+            tile: 96.0,
+            onto: None,
+        }
+    }
+}
+
+/// One asset as the browser lists it.
+struct Listed<'a> {
+    asset: &'a CatalogAsset,
+    /// Where it comes from: `Arena` or `SimReady`.
+    source: &'static str,
+    /// Where the tree files it, e.g. `SimReady/Residential/Kitchen/Baskets`.
+    folder: String,
+}
+
+/// An asset's picture by the path the payload gave, or None while there is
+/// none to draw: [`super::thumbnails::Thumbnails::get`], outside a test.
+pub type Pictures<'a> = dyn FnMut(&str) -> Option<egui::TextureId> + 'a;
+
+/// Draw the browser docked along the foot of `ui`, and say where it landed.
+pub fn dock(ui: &mut egui::Ui, form: &Form, state: &mut Browser, pictures: &mut Pictures) -> egui::Rect {
+    let listed = listed(form);
+    // Folded, the dock is its header alone. The two are separate panels, so
+    // each keeps its own size. The open one stops at its least height, and
+    // folds only once its edge is dragged on down to the folded one's.
+    let folded = egui::Panel::bottom("assets folded").resizable(false);
+    let open = egui::Panel::bottom("assets").resizable(true).default_size(HEIGHT).min_size(140.0);
+    let mut is_open = state.open;
+    let shown = egui::Panel::show_switched(ui, &mut is_open, folded, open, |ui, open| {
+        let toggled = header(ui, form, state, open, listed.len());
+        if open {
+            ui.separator();
+            body(ui, form, state, &listed, pictures);
+        }
+        toggled
+    });
+    state.open = is_open != shown.inner;
+    shown.response.rect
+}
+
+/// The dock's top line: its fold, and while open the reindex button, the
+/// search and the tile size. Says whether the fold was clicked.
+fn header(ui: &mut egui::Ui, form: &Form, state: &mut Browser, open: bool, total: usize) -> bool {
     ui.horizontal(|ui| {
-        ui.label("assets");
+        let (glyph, hover) = match open {
+            true => ("⏷", "fold the browser away"),
+            false => ("⏵", "open the asset browser"),
+        };
+        let fold = egui::Button::new(egui::RichText::new(format!("{glyph} assets")).strong()).frame(false);
+        let toggled = ui.add(fold).on_hover_text(hover).clicked();
+        ui.weak(total.to_string());
+        if !open {
+            return toggled;
+        }
         // Python says whether a crawl is running, the way it says whether a
         // solve is. A prop list would be the wrong thing to read it from: one
         // arrives whenever a picture lands or another process rebuilds the
@@ -39,120 +137,450 @@ pub fn show(ui: &mut egui::Ui, form: &Form, search: &mut String, thumbnails: &mu
         {
             send(Request::Reindex);
         }
-        ui.add(
-            egui::TextEdit::singleline(search)
-                .hint_text("search name and tags")
-                .desired_width(f32::INFINITY),
-        );
-    });
+        // Right to left, so the slider keeps the far edge and the search takes
+        // what is left between.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add(egui::Slider::new(&mut state.tile, 64.0..=192.0).show_value(false)).on_hover_text("tile size");
+            ui.add(
+                egui::TextEdit::singleline(&mut state.search)
+                    .hint_text("search name and tags")
+                    .desired_width(f32::INFINITY),
+            );
+        });
+        toggled
+    })
+    .inner
+}
 
-    let terms: Vec<String> = search.split_whitespace().map(str::to_lowercase).collect();
-    let found: Vec<(&CatalogAsset, &str)> = form
-        .vocabulary
-        .assets
+/// The tree on the left, the details on the right, and the grid between.
+fn body(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed], pictures: &mut Pictures) {
+    let terms: Vec<String> = state.search.split_whitespace().map(str::to_lowercase).collect();
+    let matching: Vec<bool> = listed.iter().map(|item| matches(item.asset, &terms)).collect();
+    let tally = tally(listed, &matching);
+
+    egui::Panel::left("asset tree")
+        .resizable(true)
+        .default_size(TREE)
+        .min_size(120.0)
+        .show(ui, |ui| tree(ui, form, &tally, &mut state.folder));
+    egui::Panel::right("asset details")
+        .resizable(true)
+        .default_size(DETAILS)
+        .min_size(200.0)
+        .show(ui, |ui| details(ui, form, state, listed, pictures));
+
+    let shown: Vec<&Listed> = listed
         .iter()
-        .map(|asset| (asset, "Arena"))
-        .chain(form.remote.iter().map(|asset| (asset, "SimReady")))
-        .filter(|(asset, _)| asset.role == "object" && matches(asset, &terms))
+        .zip(&matching)
+        .filter(|(item, matched)| **matched && within(&item.folder, &state.folder))
+        .map(|(item, _)| item)
         .collect();
+    if state.pick_first
+        && let Some(first) = shown.first()
+    {
+        state.picked = Some(key(first.asset));
+        state.pick_first = false;
+    }
+    grid(ui, form, state, &shown, pictures);
+}
 
-    egui::ScrollArea::vertical()
-        .auto_shrink(false)
-        // Only the visible cards are drawn, which is what makes listing the
-        // whole catalogue — a few hundred assets and a thousand props — cost
-        // nothing, and what keeps the uploaded pictures down to a screenful.
-        // The height given is a card's own; the spacing between cards is added
-        // to it here, and adding it twice leaves a list longer than its cards.
-        .show_rows(ui, CARD, found.len(), |ui, visible| {
-            for &(asset, source) in &found[visible] {
-                let in_scene = form.spec.objects.iter().filter(|node| asset.is_named_by(node)).count();
-                let picture = thumbnails.get(&asset.thumbnail, images);
-                let response = asset_card(ui, asset, &details(asset, source), in_scene, picture);
-                // A click adds the asset onto the anchor; a drag carries it
-                // out onto the layout, where `super::drop` takes it.
-                if response.drag_started() {
-                    egui::DragAndDrop::set_payload(ui.ctx(), asset.clone());
-                }
-                if response.on_hover_text(hover(asset)).clicked() {
-                    add(&form.spec, asset, None);
-                }
+/// Every asset the browser offers, filed where the tree shows it. Objects
+/// first, since adding one is what the browser is mostly for: Arena's, then
+/// SimReady's, then the backgrounds and the robots.
+fn listed(form: &Form) -> Vec<Listed<'_>> {
+    let arena = |role: &'static str, folder: &'static str| {
+        form.vocabulary.assets.iter().filter(move |asset| asset.role == role).map(move |asset| Listed {
+            asset,
+            source: "Arena",
+            folder: format!("Arena/{folder}"),
+        })
+    };
+    let simready = form.remote.iter().map(|asset| Listed {
+        asset,
+        source: "SimReady",
+        folder: match asset.category.as_str() {
+            "" => "SimReady".to_owned(),
+            category => format!("SimReady/{category}"),
+        },
+    });
+    arena("object", "Objects")
+        .chain(simready)
+        .chain(arena("background", "Backgrounds"))
+        .chain(arena("embodiment", "Robots"))
+        .collect()
+}
+
+/// How many assets under each folder match the search, for every folder that
+/// holds an asset at all. A folder whose assets are all filtered out stays at
+/// nought rather than leaving, so the tree keeps its shape under a search.
+fn tally<'a>(listed: &'a [Listed], matching: &[bool]) -> BTreeMap<&'a str, usize> {
+    let mut tally = BTreeMap::new();
+    for (item, &matched) in listed.iter().zip(matching) {
+        let folder = item.folder.as_str();
+        let parents = folder.match_indices('/').map(|(end, _)| &folder[..end]);
+        for path in parents.chain([folder]) {
+            *tally.entry(path).or_default() += usize::from(matched);
+        }
+    }
+    tally
+}
+
+/// The folders directly under `parent`, or the roots under "".
+fn children<'a>(tally: &BTreeMap<&'a str, usize>, parent: &str) -> Vec<&'a str> {
+    tally
+        .keys()
+        .copied()
+        .filter(|path| match parent {
+            "" => !path.contains('/'),
+            parent => path
+                .strip_prefix(parent)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .is_some_and(|rest| !rest.contains('/')),
+        })
+        .collect()
+}
+
+/// Whether `folder` is `picked` or somewhere under it. Everything is under "".
+fn within(folder: &str, picked: &str) -> bool {
+    picked.is_empty() || folder.strip_prefix(picked).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+/// The folder tree, each folder with how many of its assets match.
+fn tree(ui: &mut egui::Ui, form: &Form, tally: &BTreeMap<&str, usize>, folder: &mut String) {
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        let all: usize = children(tally, "").iter().map(|root| tally[root]).sum();
+        ui.horizontal(|ui| {
+            ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+            leaf(ui, "all", all, folder.is_empty(), || folder.clear());
+        });
+        for root in children(tally, "") {
+            branch(ui, tally, root, folder);
+        }
+        if form.remote.is_empty() {
+            ui.weak(match form.indexing {
+                true => "listing SimReady props…",
+                false => "SimReady props: ⟳ lists them",
+            });
+        }
+    });
+}
+
+/// One folder, and the folders under it where it has any. The roots open
+/// folded out, and everything under them folded in.
+fn branch(ui: &mut egui::Ui, tally: &BTreeMap<&str, usize>, path: &str, folder: &mut String) {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let under = children(tally, path);
+    if under.is_empty() {
+        // Indented past where a fold arrow would be, so a folder with nothing
+        // under it lines up with its neighbours that have one.
+        ui.horizontal(|ui| {
+            ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+            leaf(ui, name, tally[path], folder == path, || *folder = path.to_owned());
+        });
+        return;
+    }
+    let id = ui.make_persistent_id(("asset folder", path));
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, !path.contains('/'))
+        .show_header(ui, |ui| leaf(ui, name, tally[path], folder == path, || *folder = path.to_owned()))
+        .body(|ui| {
+            for child in under {
+                branch(ui, tally, child, folder);
             }
         });
 }
 
-/// One asset as a card: its picture, its name, and what else is worth knowing
-/// before picking it — where it comes from, how it simulates, what it is
-/// tagged, and how many of it the scene holds already.
+/// A folder's name and count, picked by a click.
+fn leaf(ui: &mut egui::Ui, name: &str, count: usize, picked: bool, pick: impl FnOnce()) {
+    let glyph = if picked { "🗁" } else { "🗀" };
+    let text = egui::RichText::new(format!("{glyph} {name}  {count}"));
+    let text = if count == 0 { text.weak() } else { text };
+    if ui.selectable_label(picked, text).clicked() {
+        pick();
+    }
+}
+
+/// The assets in the picked folder that match the search, a tile each.
+fn grid(ui: &mut egui::Ui, form: &Form, state: &mut Browser, shown: &[&Listed], pictures: &mut Pictures) {
+    if shown.is_empty() {
+        ui.add_space(PAD);
+        match state.folder.is_empty() {
+            true => ui.weak("nothing matches the search"),
+            false => ui.weak(format!("nothing in {} matches the search", state.folder)),
+        };
+        if !state.folder.is_empty() && ui.button("search every folder").clicked() {
+            state.folder.clear();
+        }
+        return;
+    }
+    let size = egui::vec2(state.tile, state.tile + 2.0 * ui.text_style_height(&egui::TextStyle::Body) + PAD);
+    let gap = ui.spacing().item_spacing.x;
+    let columns = (((ui.available_width() + gap) / (size.x + gap)).floor() as usize).max(1);
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        // Only the rows on screen are drawn, which is what makes listing the
+        // whole catalogue — a few hundred assets and fifteen hundred props —
+        // cost nothing, and what keeps the uploaded pictures to a screenful.
+        // The height given is a row's own; the spacing between rows is added
+        // to it here, and adding it twice leaves a list longer than its rows.
+        .show_rows(ui, size.y, shown.len().div_ceil(columns), |ui, rows| {
+            for row in rows {
+                ui.horizontal(|ui| {
+                    for item in shown.iter().skip(row * columns).take(columns) {
+                        let asset = item.asset;
+                        let picture = pictures(&asset.thumbnail);
+                        let picked = state.picked == Some(key(asset));
+                        let response = tile(ui, asset, in_scene(&form.spec, asset).len(), picture, picked, size);
+                        // A drag carries an object out onto the layout, where
+                        // `super::drop` takes it.
+                        if response.drag_started() {
+                            egui::DragAndDrop::set_payload(ui.ctx(), asset.clone());
+                        }
+                        let response = response.on_hover_text(&asset.name);
+                        if response.clicked() {
+                            state.picked = Some(key(asset));
+                        }
+                        if response.double_clicked() && asset.role == "object" {
+                            add(&form.spec, asset, state.onto.as_deref());
+                        }
+                    }
+                });
+            }
+        });
+}
+
+/// One asset as a tile: its picture, its name under it, and how many of it the
+/// scene holds already.
 ///
-/// The whole card is one widget sensing both clicks and drags, so it can be
-/// picked up anywhere on it. Everything on it is painted rather than laid out
-/// as widgets of its own, which would take the pointer from the card under
-/// them.
-fn asset_card(
+/// The whole tile is one widget, so it can be picked up anywhere on it, and
+/// everything on it is painted: a widget laid over it would take the pointer.
+/// Only an object senses a drag, since only an object can be dropped.
+fn tile(
     ui: &mut egui::Ui,
     asset: &CatalogAsset,
-    details: &str,
     in_scene: usize,
     picture: Option<egui::TextureId>,
+    picked: bool,
+    size: egui::Vec2,
 ) -> egui::Response {
-    let size = egui::vec2(ui.available_width(), CARD);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    let sense = match asset.role.as_str() {
+        "object" => egui::Sense::click_and_drag(),
+        _ => egui::Sense::click(),
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
     if !ui.is_rect_visible(rect) {
         return response;
     }
     let visuals = ui.visuals();
-    let (fill, stroke) = match response.hovered() || response.dragged() {
-        true => (visuals.widgets.hovered.weak_bg_fill, visuals.widgets.hovered.bg_stroke),
-        false => (card::fill(visuals), visuals.widgets.noninteractive.bg_stroke),
+    let (fill, stroke) = if picked {
+        (visuals.selection.bg_fill.gamma_multiply(0.35), visuals.selection.stroke)
+    } else if response.hovered() || response.dragged() {
+        (visuals.widgets.hovered.weak_bg_fill, visuals.widgets.hovered.bg_stroke)
+    } else {
+        (card::fill(visuals), visuals.widgets.noninteractive.bg_stroke)
     };
     let radius = visuals.widgets.noninteractive.corner_radius;
     ui.painter().rect(rect, radius, fill, stroke, egui::StrokeKind::Inside);
 
-    // The picture's square keeps its place whether or not there is a picture,
-    // so the names line up down the list.
     let inner = rect.shrink(PAD);
-    let square = egui::Rect::from_min_size(inner.min, egui::Vec2::splat(inner.height()));
+    let square = egui::Rect::from_min_size(inner.min, egui::Vec2::splat(inner.width()));
+    picture_or_glyph(ui, asset, picture, square);
+
+    if in_scene > 0 {
+        let badge = egui::WidgetText::from(egui::RichText::new(format!("{in_scene} in scene")).small()).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            square.width(),
+            egui::TextStyle::Small,
+        );
+        let at = egui::Rect::from_min_size(
+            egui::pos2(square.right() - badge.size().x - 2.0 * PAD, square.top() + PAD),
+            badge.size() + egui::vec2(PAD, 2.0),
+        );
+        ui.painter().rect_filled(at, radius, visuals.selection.bg_fill);
+        ui.painter().galley(at.min + egui::vec2(PAD / 2.0, 1.0), badge, visuals.selection.stroke.color);
+    }
+
+    // Two lines, centred, and broken anywhere: a name is one word joined by
+    // underscores, with nowhere else to break it.
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let mut name = egui::text::LayoutJob::simple(asset.name.clone(), font, visuals.text_color(), inner.width());
+    name.wrap.max_rows = 2;
+    name.wrap.break_anywhere = true;
+    name.halign = egui::Align::Center;
+    let name = ui.painter().layout_job(name);
+    ui.painter().galley(egui::pos2(inner.center().x, square.bottom() + PAD / 2.0), name, visuals.text_color());
+    response
+}
+
+/// An asset's picture in `square`, or where it has none, the glyph its kind of
+/// card wears in the panel.
+fn picture_or_glyph(ui: &egui::Ui, asset: &CatalogAsset, picture: Option<egui::TextureId>, square: egui::Rect) {
+    let radius = ui.visuals().widgets.noninteractive.corner_radius;
     match picture {
         Some(texture) => egui::Image::new(egui::load::SizedTexture::new(texture, square.size()))
             .corner_radius(radius)
             .paint_at(ui, square),
         None => {
-            ui.painter().rect_filled(square, radius, visuals.extreme_bg_color);
+            ui.painter().rect_filled(square, radius, ui.visuals().extreme_bg_color);
+            let glyph = match asset.role.as_str() {
+                "embodiment" => "🕹",
+                "background" => "🏠",
+                _ => "📦",
+            };
+            let font = egui::FontId::proportional(square.height() / 3.0);
+            let color = ui.visuals().weak_text_color();
+            ui.painter().text(square.center(), egui::Align2::CENTER_CENTER, glyph, font, color);
         }
     }
-
-    let text = egui::Rect::from_min_max(egui::pos2(square.right() + PAD * 1.5, inner.top()), inner.max);
-    let line = |text: egui::RichText, width: f32| {
-        egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Truncate), width, egui::TextStyle::Body)
-    };
-    let mut name_width = text.width();
-    if in_scene > 0 {
-        let badge = egui::RichText::new(format!("{in_scene} in scene")).small();
-        let badge = line(badge.color(visuals.selection.stroke.color), text.width());
-        name_width -= badge.size().x + PAD;
-        ui.painter().galley(egui::pos2(text.right() - badge.size().x, text.top()), badge, visuals.text_color());
-    }
-    let tags = asset.tags.join(" · ");
-    let lines = [
-        line(egui::RichText::new(&asset.name).strong(), name_width),
-        line(egui::RichText::new(details).small().weak(), text.width()),
-        line(egui::RichText::new(tags).small().weak(), text.width()),
-    ];
-    let mut top = text.top();
-    for galley in lines {
-        let height = galley.size().y;
-        ui.painter().galley(egui::pos2(text.left(), top), galley, visuals.text_color());
-        top += height;
-    }
-    response
 }
 
-/// Where an asset comes from, and the physics it simulates with where it says.
-fn details(asset: &CatalogAsset, source: &str) -> String {
-    match &asset.object_type {
-        Some(object_type) => format!("{source} · {object_type}"),
-        None => source.to_owned(),
+/// What the picked asset is, and what can be done with it.
+fn details(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed], pictures: &mut Pictures) {
+    let Some(item) = listed.iter().find(|item| state.picked == Some(key(item.asset))) else {
+        ui.add_space(PAD);
+        ui.weak("Click an asset to see what it is. Double-click an object, or drag it onto the layout, to add it.");
+        return;
+    };
+    let asset = item.asset;
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        // The picture beside the name rather than over it, so what the asset
+        // is and what can be done with it fit a dock of the height it opens at.
+        ui.horizontal(|ui| {
+            let (square, _) = ui.allocate_exact_size(egui::Vec2::splat(PICTURE), egui::Sense::hover());
+            picture_or_glyph(ui, asset, pictures(&asset.thumbnail), square);
+            ui.vertical(|ui| {
+                ui.add(egui::Label::new(egui::RichText::new(&asset.name).strong()).wrap());
+                ui.weak(match item.source {
+                    "SimReady" => "NVIDIA SimReady prop, downloaded on its first solve",
+                    _ => "registered with Arena",
+                });
+                action(ui, form, asset, &mut state.onto);
+            });
+        });
+        ui.add_space(PAD);
+        row(ui, "registry name", None, |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(&asset.registry_name).monospace()).truncate());
+        });
+        if let Some(object_type) = &asset.object_type {
+            row(ui, "physics", None, |ui| {
+                ui.label(object_type);
+            });
+        }
+        row(ui, "folder", None, |ui| {
+            // Each step is a way back up the tree.
+            let folder = item.folder.as_str();
+            let steps = folder.match_indices('/').map(|(end, _)| end).chain([folder.len()]);
+            let mut start = 0;
+            for end in steps {
+                if start > 0 {
+                    ui.weak("›");
+                }
+                let step = egui::Button::new(&folder[start..end]).frame(false).small();
+                if ui.add(step).on_hover_text("show this folder").clicked() {
+                    state.folder = folder[..end].to_owned();
+                }
+                start = end + 1;
+            }
+        });
+        if !asset.usd_path.is_empty() {
+            row(ui, "usd", None, |ui| {
+                if ui.small_button("🗐").on_hover_text("copy the path").clicked() {
+                    ui.ctx().copy_text(asset.usd_path.clone());
+                }
+                let file = asset.usd_path.rsplit('/').next().unwrap_or_default();
+                ui.add(egui::Label::new(file).truncate()).on_hover_text(&asset.usd_path);
+            });
+        }
+        let nodes = in_scene(&form.spec, asset);
+        row(ui, "in scene", None, |ui| match nodes.is_empty() {
+            true => {
+                ui.weak("none");
+            }
+            false => {
+                ui.add(egui::Label::new(nodes.join(", ")).truncate());
+            }
+        });
+        if !asset.tags.is_empty() {
+            ui.add_space(PAD);
+            ui.horizontal_wrapped(|ui| {
+                for tag in &asset.tags {
+                    if ui.small_button(tag).on_hover_text("search by this tag").clicked() {
+                        state.search = tag.clone();
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// What the picked asset can be made into: a new object, standing on `onto`,
+/// or the scene's background or robot.
+fn action(ui: &mut egui::Ui, form: &Form, asset: &CatalogAsset, onto: &mut Option<String>) {
+    let spec = &form.spec;
+    let replaces = match asset.role.as_str() {
+        "background" => Some(("background", &spec.background)),
+        "embodiment" => Some(("embodiment", &spec.embodiment)),
+        _ => None,
+    };
+    if let Some((key, node)) = replaces {
+        // A pick sets the registry name alone, as the card's own menu does.
+        let label = if key == "background" { "use as the background" } else { "use as the robot" };
+        let current = asset.is_named_by(node);
+        let button = ui.add_enabled(!current, egui::Button::new(label));
+        if current {
+            button.on_disabled_hover_text("the scene's already");
+        } else if button.clicked() {
+            send(Request::Set {
+                path: vec![Step::from(key), Step::from("registry_name")],
+                value: Value::text(&asset.registry_name),
+            });
+        }
+        return;
     }
+    ui.horizontal(|ui| {
+        if ui.button("✚ add").on_hover_text("add it to the scene, standing on this").clicked() {
+            add(spec, asset, onto.as_deref());
+        }
+        ui.label("on");
+        onto_menu(ui, spec, onto);
+    });
+}
+
+/// Where the add button stands a new object: the anchor, or any node but the
+/// robot. A pick naming a node since removed falls back to the anchor.
+fn onto_menu(ui: &mut egui::Ui, spec: &Spec, onto: &mut Option<String>) {
+    let anchor = anchor(spec);
+    let targets: Vec<&str> =
+        spec.node_ids().into_iter().filter(|id| *id != spec.embodiment.id && Some(*id) != anchor).collect();
+    if onto.as_deref().is_some_and(|id| !targets.contains(&id)) {
+        *onto = None;
+    }
+    let anchored = anchor.map_or("nothing".to_owned(), |anchor| format!("{anchor} (anchor)"));
+    egui::ComboBox::from_id_salt("add onto")
+        .selected_text(onto.clone().unwrap_or_else(|| anchored.clone()))
+        .width(ui.available_width())
+        .show_ui(ui, |ui| {
+            ui.selectable_value(onto, None, anchored);
+            for id in targets {
+                ui.selectable_value(onto, Some(id.to_owned()), id);
+            }
+        });
+}
+
+/// What tells an asset apart from every other: its registry name, and its
+/// USD, which is all that tells one prop from the next.
+fn key(asset: &CatalogAsset) -> (String, String) {
+    (asset.registry_name.clone(), asset.usd_path.clone())
+}
+
+/// The ids of the scene's nodes naming `asset`.
+fn in_scene<'a>(spec: &'a Spec, asset: &CatalogAsset) -> Vec<&'a str> {
+    [&spec.embodiment, &spec.background]
+        .into_iter()
+        .chain(&spec.objects)
+        .filter(|node| asset.is_named_by(node))
+        .map(|node| node.id.as_str())
+        .collect()
 }
 
 /// Whether every whitespace-separated term appears in the name, a tag or the
@@ -263,6 +691,7 @@ fn unused(stem: &str, taken: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::tests::SENT;
     use crate::spec::Relation;
     use std::collections::HashMap;
 
@@ -411,5 +840,162 @@ mod tests {
     fn without_an_anchor_a_click_adds_the_object_alone() {
         let written = inserted(&additions(&spec(false), &banana(), None));
         assert_eq!(written.len(), 1, "{written:?}");
+    }
+
+    /// A registered object and a registered background, the SimReady prop
+    /// from the kitchen, and a scene with the background anchored.
+    fn catalogue() -> Form {
+        let mut form = Form::default();
+        let registered = |name: &str, role: &str| CatalogAsset {
+            registry_name: name.into(),
+            name: name.into(),
+            role: role.into(),
+            ..Default::default()
+        };
+        form.vocabulary.assets =
+            vec![registered("maple_table_robolab", "background"), registered("banana_ycb_robolab", "object")];
+        let mut basket = prop("Plastic_Basket_A01", "https://bucket/Plastic_Basket_A01/basket.usd");
+        basket.role = "object".into();
+        basket.category = "Residential/Kitchen/Baskets".into();
+        form.remote = vec![basket];
+        form.spec = spec(true);
+        form
+    }
+
+    /// Objects come first, Arena's then SimReady's, and every asset is filed
+    /// where the tree shows it: Arena's by role, a prop by its bucket folders.
+    #[test]
+    fn the_tree_files_arena_by_role_and_simready_by_folder() {
+        let form = catalogue();
+        let listed = listed(&form);
+        let folders: Vec<&str> = listed.iter().map(|item| item.folder.as_str()).collect();
+        assert_eq!(folders, ["Arena/Objects", "SimReady/Residential/Kitchen/Baskets", "Arena/Backgrounds"]);
+
+        // A search for the basket leaves every folder in the tree, at nought.
+        let matching = [false, true, false];
+        let tally = tally(&listed, &matching);
+        assert_eq!(children(&tally, ""), ["Arena", "SimReady"]);
+        assert_eq!(children(&tally, "Arena"), ["Arena/Backgrounds", "Arena/Objects"]);
+        assert_eq!(children(&tally, "SimReady/Residential"), ["SimReady/Residential/Kitchen"]);
+        assert_eq!((tally["Arena"], tally["SimReady"], tally["SimReady/Residential/Kitchen/Baskets"]), (0, 1, 1));
+
+        assert!(within("SimReady/Residential/Kitchen", "SimReady/Residential"));
+        assert!(within("SimReady/Residential", "SimReady/Residential"));
+        assert!(!within("SimReady/ResidentialExtra", "SimReady/Residential"), "a name sharing a prefix");
+        assert!(within("Arena/Objects", ""), "everything is under all");
+    }
+
+    /// The grid alone, a frame at a time, with the input a person would give
+    /// it, as `controls`' tests drive their controls.
+    struct Grid {
+        ctx: egui::Context,
+        state: Browser,
+        form: Form,
+        time: f64,
+    }
+
+    impl Grid {
+        fn new() -> Self {
+            SENT.with_borrow_mut(Vec::clear);
+            Self { ctx: egui::Context::default(), state: Browser::default(), form: catalogue(), time: 0.0 }
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 1.0;
+            let input = egui::RawInput {
+                events,
+                time: Some(self.time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0))),
+                ..Default::default()
+            };
+            let (form, state) = (&self.form, &mut self.state);
+            self.ctx
+                .run_ui(input, |ui| {
+                    let listed = listed(form);
+                    let shown: Vec<&Listed> = listed.iter().collect();
+                    grid(ui, form, state, &shown, &mut |_| None);
+                })
+                .drop_without_applying_deltas();
+        }
+
+        /// The middle of the `n`th tile's picture, counted along the first row.
+        fn tile(&self, n: usize) -> egui::Pos2 {
+            let step = self.state.tile + egui::Style::default().spacing.item_spacing.x;
+            egui::pos2(self.state.tile / 2.0 + n as f32 * step, self.state.tile / 2.0)
+        }
+
+        fn carried(&self) -> Option<String> {
+            egui::DragAndDrop::payload::<CatalogAsset>(&self.ctx).map(|asset| asset.name.clone())
+        }
+    }
+
+    /// `clicks` presses and lets go of the primary button at `at`, all in one
+    /// frame, which is as quick as two clicks can be.
+    fn clicks(at: egui::Pos2, clicks: usize) -> Vec<egui::Event> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut events = vec![egui::Event::PointerMoved(at)];
+        for _ in 0..clicks {
+            events.extend([button(true), button(false)]);
+        }
+        events
+    }
+
+    /// A click only picks. A double click on an object adds it, onto the
+    /// anchor; on a background it picks and nothing more, since replacing the
+    /// scene's background is the details' button's to do.
+    #[test]
+    fn a_click_picks_and_a_double_click_adds_an_object() {
+        let mut grid = Grid::new();
+        grid.frame(vec![]);
+        let (object, background) = (grid.tile(0), grid.tile(2));
+
+        grid.frame(clicks(object, 1));
+        assert_eq!(grid.state.picked, Some(key(&banana())));
+        assert_eq!(SENT.with_borrow(Vec::len), 0, "a click sent something");
+
+        grid.frame(clicks(object, 2));
+        let sent = SENT.with_borrow(Clone::clone);
+        let written = inserted(&sent);
+        assert_eq!(written.len(), 2, "{sent:?}");
+        assert_eq!(written[1].1["reference"], Value::text("table"), "onto the anchor");
+
+        grid.frame(clicks(background, 2));
+        assert_eq!(grid.state.picked.as_ref().map(|(name, _)| name.as_str()), Some("maple_table_robolab"));
+        assert_eq!(SENT.with_borrow(Vec::len), 2, "a double click replaced the background");
+    }
+
+    /// An object is picked up by dragging its tile; a background, which
+    /// nothing in the layout can stand on, is not.
+    #[test]
+    fn only_an_object_can_be_dragged_out() {
+        let press = |at: egui::Pos2| {
+            let button = egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            };
+            vec![egui::Event::PointerMoved(at), button]
+        };
+        let away = |at: egui::Pos2| vec![egui::Event::PointerMoved(at + egui::vec2(0.0, 150.0))];
+
+        let mut grid = Grid::new();
+        grid.frame(vec![]);
+        let background = grid.tile(2);
+        grid.frame(press(background));
+        grid.frame(away(background));
+        assert_eq!(grid.carried(), None);
+
+        let mut grid = Grid::new();
+        grid.frame(vec![]);
+        let object = grid.tile(0);
+        grid.frame(press(object));
+        grid.frame(away(object));
+        assert_eq!(grid.carried().as_deref(), Some("banana_ycb_robolab"));
     }
 }

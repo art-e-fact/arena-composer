@@ -18,7 +18,7 @@ USDs it names. The MCP server and a viewer read the same file, and either may re
 | a layer's picture URL, `.thumbs/256x256/<layer>.png` | `simready.thumbnail_url` |
 | fetch pictures in bulk, skipping what is on disk | `simready.fetch_thumbnails` |
 | why props ride `remote` and not the vocabulary | [payload.py](../python/arena_composer/payload.py) module docs |
-| an asset's entry: `usd_path` beside an empty `params`; a local picture path or empty | `payload._asset`, `payload._thumbnail` |
+| an asset's entry: `usd_path` beside an empty `params`; a local picture path or empty; a prop's `category`, its folder in the browser's tree | `payload._asset`, `payload._thumbnail` |
 | the reindex button: crawl, write the index, fetch every prop's picture | `view._serve_assets` |
 | `indexing` goes true as soon as the request is read | `view._serve_requests` |
 | an asset answer is retried, since it is the request's only reply | `view._answer` |

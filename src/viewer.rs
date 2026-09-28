@@ -226,6 +226,9 @@ fn spawn_camera(world: &mut World, scene: &Scene) {
     ));
 }
 
+/// The status line, in the window's top-left corner: the asset browser docks
+/// along the foot of the view, and the spinner saying a layout is being solved
+/// takes the top-right.
 fn spawn_hud(world: &mut World, scene: &Scene) {
     world.spawn((
         Hud,
@@ -235,13 +238,14 @@ fn spawn_hud(world: &mut World, scene: &Scene) {
         Node {
             position_type: PositionType::Absolute,
             left: px(10),
-            bottom: px(8),
+            top: px(8),
             ..default()
         },
     ));
 }
 
-/// What the status line says about a scene.
+/// What the status line says about a scene. ASCII only: it is drawn in Bevy's
+/// bundled font, which draws anything past that as a box.
 fn hud_line(scene: &Scene) -> String {
     let drawn = scene
         .assets()
@@ -249,7 +253,7 @@ fn hud_line(scene: &Scene) -> String {
         .filter(|asset| !scene.geometry_of(asset).is_empty())
         .count();
     format!(
-        "{}  ·  {drawn}/{} assets drawn  ·  drag orbit · right-drag pan · wheel zoom",
+        "{}  |  {drawn}/{} assets drawn  |  drag orbit, right-drag pan, wheel zoom",
         scene.env_name,
         scene.assets().len(),
     )

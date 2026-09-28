@@ -1,4 +1,5 @@
-//! The editor panel: the authored spec as a form, docked on the right.
+//! The editor panel: the authored spec as a form, docked on the right, with
+//! the asset browser docked under the 3D view beside it.
 //!
 //! Drawn in immediate mode, so the panel *is* the last spec Python sent — there
 //! is no widget tree to keep in step with it, and nothing to rebuild when a new
@@ -45,6 +46,9 @@ mod thumbnails;
 use std::collections::HashMap;
 
 use bevy::camera::SubCameraView;
+use bevy::camera::primitives::Frustum;
+use bevy::camera::visibility::VisibilitySystems;
+use bevy::math::primitives::ViewFrustum;
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass, egui};
@@ -69,14 +73,22 @@ pub fn plugin(app: &mut App) {
         // `Update` both of those are still a frame away.
         .add_systems(
             PostUpdate,
-            keep_the_camera_off_the_panel
-                .after(EguiPostUpdateSet::ProcessOutput)
-                .before(PanOrbitCameraSystemSet),
+            (
+                keep_the_camera_off_the_panel
+                    .after(EguiPostUpdateSet::ProcessOutput)
+                    .before(PanOrbitCameraSystemSet),
+                // After Bevy has built the frustum it would cull with, and
+                // before anything is culled against it.
+                cull_to_the_picture
+                    .after(VisibilitySystems::UpdateFrusta)
+                    .before(VisibilitySystems::CheckVisibility),
+            ),
         );
     relations::configure(&mut app.world_mut().resource_mut::<GizmoConfigStore>());
 }
 
-/// Whether the pointer was over the panel when it was last drawn.
+/// Whether the pointer was over the panel or the asset browser's dock when
+/// they were last drawn.
 ///
 /// egui will not answer this for us. `bevy_egui` builds a root `Ui` and throws
 /// it away — the Bevy schedule runs in its place — so a panel has to be docked
@@ -187,21 +199,46 @@ fn send(request: Request) {
     tests::SENT.with_borrow_mut(|sent| sent.push(request));
 }
 
-/// The layout camera's picture, off-centre so that its middle is the middle of
-/// what a `panel` on the right leaves of the `window`, both in one unit.
+/// The layout camera's picture, drawn as though the window were only `view`:
+/// what the panels leave of it. Both are rects in one unit, and only their
+/// ratios count, so egui points serve as well as pixels.
 ///
-/// The window shows the right-hand part of a picture one panel wider, whose
-/// centre sits half a panel left of the window's. Only the ratios count, so egui
-/// points serve as well as pixels. Bevy culls against the projection without
-/// this offset, which leaves out only the right half of the strip under the
-/// panel.
-fn beside_the_panel(window: egui::Vec2, panel: f32) -> SubCameraView {
-    let (width, height, panel) = (window.x.round() as u32, window.y.round() as u32, panel.round() as u32);
-    SubCameraView {
-        full_size: UVec2::new(width + panel, height),
-        offset: Vec2::new(panel as f32, 0.0),
-        size: UVec2::new(width, height),
+/// The picture's full size is the view's, so its centre is the view's centre
+/// and its vertical field of view spans the view's height: the framing a window
+/// that size would give, zooming out as the dock grows over it. The window
+/// shows that picture carried on past the view's edges, under the panels.
+fn in_the_view(window: egui::Rect, view: egui::Rect) -> SubCameraView {
+    // Never nought: a picture with no height has no aspect ratio.
+    let size = |size: egui::Vec2| UVec2::new(size.x.round().max(1.0) as u32, size.y.round().max(1.0) as u32);
+    let offset = window.min - view.min;
+    SubCameraView { full_size: size(view.size()), offset: Vec2::new(offset.x, offset.y), size: size(window.size()) }
+}
+
+/// Cull against the picture the camera draws.
+///
+/// Bevy builds a camera's [`Frustum`] from its projection alone and never from
+/// `sub_camera_view`, so it culls against a picture the window's own shape.
+/// [`in_the_view`] draws a wider one wherever what the panels leave is wider
+/// for its height than the window, and anything past the old frustum's edge,
+/// though inside the view, would not be drawn.
+fn cull_to_the_picture(mut cameras: Query<(&Camera, &GlobalTransform, &Projection, &mut Frustum)>) {
+    for (camera, transform, projection, mut frustum) in &mut cameras {
+        if camera.sub_camera_view.is_some() {
+            *frustum = picture_frustum(camera.clip_from_view(), transform, projection.far());
+        }
     }
+}
+
+/// The frustum of the picture `clip_from_view` draws, as Bevy builds one from a
+/// projection's own matrix.
+fn picture_frustum(clip_from_view: Mat4, transform: &GlobalTransform, far: f32) -> Frustum {
+    let clip_from_world = clip_from_view * transform.affine().inverse();
+    Frustum(ViewFrustum::from_clip_from_world_custom_far(
+        &clip_from_world,
+        &transform.translation(),
+        &transform.back(),
+        far,
+    ))
 }
 
 /// Keep the orbit camera off the panel.
@@ -250,26 +287,85 @@ mod tests {
     use std::cell::RefCell;
 
     use bevy::camera::CameraProjection;
-    use bevy::prelude::{PerspectiveProjection, Vec3};
+    use bevy::camera::primitives::Aabb;
+    use bevy::prelude::{GlobalTransform, PerspectiveProjection, Transform, Vec3};
     use bevy_egui::egui;
 
-    use super::{Form, Payload, Request, beside_the_panel, camera_takes_input};
+    use super::{Form, Payload, Request, camera_takes_input, in_the_view, picture_frustum};
 
     thread_local! {
         /// Every request a test's panel has sent; see `super::send`.
         pub static SENT: RefCell<Vec<Request>> = const { RefCell::new(Vec::new()) };
     }
 
+    /// A window 1280 by 720, with the spec panel down its right and the asset
+    /// browser along the foot of what that leaves.
+    fn docked() -> (egui::Rect, egui::Rect) {
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+        let view = egui::Rect::from_min_max(window.min, egui::pos2(920.0, 440.0));
+        (window, view)
+    }
+
+    /// Where a point in front of the camera is drawn in the window.
+    fn drawn_at(clip: bevy::math::Mat4, window: egui::Rect, point: Vec3) -> egui::Pos2 {
+        let ndc = clip.project_point3(point);
+        egui::pos2((ndc.x + 1.0) / 2.0 * window.width(), (1.0 - ndc.y) / 2.0 * window.height())
+    }
+
     /// What the camera looks at, straight ahead of it, is drawn in the middle
-    /// of what the panel leaves.
+    /// of what the panels leave, and the field of view spans that height: the
+    /// picture a window the size of the view would draw.
     #[test]
-    fn the_focus_is_drawn_mid_view() {
-        let (width, panel) = (1280.0, 360.0);
-        let sub_view = beside_the_panel(egui::vec2(width, 720.0), panel);
-        let clip = PerspectiveProjection::default().get_clip_from_view_for_sub(&sub_view);
-        let ndc = clip.project_point3(Vec3::NEG_Z);
-        let drawn_at = (ndc.x + 1.0) / 2.0 * width;
-        assert!((drawn_at - (width - panel) / 2.0).abs() < 0.5, "{drawn_at}");
+    fn the_view_is_framed_as_a_window_of_its_own() {
+        let (window, view) = docked();
+        let projection = PerspectiveProjection::default();
+        let clip = projection.get_clip_from_view_for_sub(&in_the_view(window, view));
+
+        let centre = drawn_at(clip, window, Vec3::NEG_Z);
+        assert!((centre - view.center()).length() < 0.5, "{centre:?}");
+        let top = drawn_at(clip, window, Vec3::new(0.0, (projection.fov / 2.0).tan(), -1.0));
+        assert!((top.y - view.top()).abs() < 0.5, "{top:?}");
+    }
+
+    /// A panel down the side alone keeps the view's height, and so the zoom a
+    /// window without panels would have.
+    #[test]
+    fn a_side_panel_alone_moves_the_picture_without_zooming_it() {
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+        let view = egui::Rect::from_min_max(window.min, egui::pos2(920.0, 720.0));
+        let mut projection = PerspectiveProjection::default();
+        projection.update(window.width(), window.height());
+        let clip = projection.get_clip_from_view_for_sub(&in_the_view(window, view));
+        let bare = projection.get_clip_from_view();
+
+        let point = Vec3::new(0.3, 0.2, -1.0);
+        let (docked, alone) = (drawn_at(clip, window, point), drawn_at(bare, window, point));
+        assert!((docked.y - alone.y).abs() < 0.5, "{docked:?} against {alone:?}");
+        assert!((alone.x - docked.x - 180.0).abs() < 0.5, "moved by half the panel: {docked:?}");
+    }
+
+    /// Something at the view's left edge is drawn, though Bevy's own frustum —
+    /// the window's shape, not the view's — leaves it out.
+    #[test]
+    fn what_the_view_shows_is_not_culled() {
+        let (window, view) = docked();
+        let mut projection = PerspectiveProjection::default();
+        projection.update(window.width(), window.height());
+        let clip = projection.get_clip_from_view_for_sub(&in_the_view(window, view));
+        let camera = GlobalTransform::from(Transform::default());
+
+        // Ten points in from the view's left edge, 2 m ahead of the camera.
+        let at = egui::pos2(view.left() + 10.0, view.center().y);
+        let ndc = bevy::math::Vec3::new(at.x / window.width() * 2.0 - 1.0, 1.0 - at.y / window.height() * 2.0, 0.5);
+        let ahead = clip.inverse().project_point3(ndc);
+        let point = ahead * (2.0 / -ahead.z);
+        let speck = Aabb::from_min_max(point - 0.01, point + 0.01);
+        let whole = bevy::math::Affine3A::IDENTITY;
+
+        let bevys = projection.compute_frustum(&camera);
+        assert!(!bevys.intersects_obb(&speck, &whole, true, true), "the case this guards is gone");
+        let ours = picture_frustum(clip, &camera, projection.far());
+        assert!(ours.intersects_obb(&speck, &whole, true, true));
     }
 
     /// Only a new spec or a refusal ends a half-made edit. Anything else —

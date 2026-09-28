@@ -1,7 +1,8 @@
 # The editor panel
 
 The window's right-hand panel draws the authored spec as a form and edits it over the pipe
-([architecture.md](architecture.md#the-pipe)). Start with the module docs of
+([architecture.md](architecture.md#the-pipe)). The asset browser docks under the 3D view beside it,
+the way Isaac Sim docks its content browser. Start with the module docs of
 [src/editor/mod.rs](../src/editor/mod.rs): immediate mode, no local copy of the spec, every add
 picked from the vocabulary.
 
@@ -11,8 +12,8 @@ picked from the vocabulary.
 | [form.rs](../src/editor/form.rs) | the panel: a section per top-level key, what each entry's card holds; `PanelState` |
 | [card.rs](../src/editor/card.rs) | the card every entry is drawn as |
 | [controls.rs](../src/editor/controls.rs) | the controls inside a card, each turning an edit into a `Request` |
-| [browser.rs](../src/editor/browser.rs) | the asset browser and its cards; what an add writes |
-| [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's cards and the objects' |
+| [browser.rs](../src/editor/browser.rs) | the asset browser's dock: its tree, tiles and details; what an add writes |
+| [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's tiles and the objects' cards |
 | [drop.rs](../src/editor/drop.rs) | dragging an asset onto the layout |
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
@@ -49,16 +50,28 @@ to `panel`. Three rules keep it working like the others:
   Check a new one against `Ubuntu-Light`, `NotoEmoji-Regular` and `emoji-icon-font` in
   `epaint_default_fonts`, or look at a screenshot.
 
-The asset browser draws its assets as cards too, but painted: each is one widget sensing clicks and
-drags, so it can be picked up anywhere, and a label laid over it would take the pointer. A card
-there is a fixed height because the list draws only the cards on screen.
+## The asset browser
 
-## Keeping the camera off the panel
+The browser is a dock of its own along the foot of what the spec panel leaves: a folder tree, a grid
+of tiles and the details of the tile picked, each a panel docked inside it. It is drawn after the
+spec panel, which is what keeps that panel the window's full height. Folded, it is its header alone.
 
-`PanOrbitCamera` claims any drag inside its viewport and knows nothing of the panel over it, so
+The tree is built each frame from the assets themselves: Arena's under `Arena/` by role, and each
+SimReady prop under `SimReady/` by the `category` the index recorded for it. A folder whose assets
+a search filters out stays in the tree at nought, so the tree does not reshape as someone types.
+
+A tile is painted rather than laid out: it is one widget sensing clicks, and drags where it is an
+object, so it can be picked up anywhere, and a label laid over it would take the pointer. Tiles are
+a fixed size because the grid draws only the rows on screen. The browser takes its pictures through
+a closure rather than [thumbnails.rs](../src/editor/thumbnails.rs) itself, which is what lets the
+tests in [browser.rs](../src/editor/browser.rs) drive the grid in a headless `egui::Context`.
+
+## Keeping the camera off the panels
+
+`PanOrbitCamera` claims any drag inside its viewport and knows nothing of the panels over it, so
 `keep_the_camera_off_the_panel` turns it off while the pointer belongs to egui. The gate is the union
-of `PointerOverPanel` — measured in `form::draw`, because egui reports nothing over a docked panel —
-and `EguiWantsInput`, for popups, menus and mid-drag widgets above it. It is latched while a button
+of `PointerOverPanel` — measured in `form::draw` over the spec panel and the browser's dock both,
+because egui reports nothing over a docked panel — and `EguiWantsInput`, for popups, menus and mid-drag widgets above it. It is latched while a button
 is held, and runs in `PostUpdate` between `EguiPostUpdateSet::ProcessOutput` and
 `PanOrbitCameraSystemSet`. Each of those reasons is a doc comment in [mod.rs](../src/editor/mod.rs).
 
@@ -71,12 +84,19 @@ camera on an `EguiContext` nothing draws into: a duplicate dependency tree that 
 only two behaviours are the ones we do not want either — ignoring hover lets a press on the panel
 orbit, and `EguiFocusIncludesHover` stops a drag the moment it crosses onto the panel.
 
-## Framing beside the panel
+## Framing in what the panels leave
 
-`form::draw` sets the camera's `sub_camera_view` every frame from the panel's width
-(`beside_the_panel` in [mod.rs](../src/editor/mod.rs)), so the camera's focus lands mid-way across
-what the panel leaves. Picking needs nothing extra: `Camera::viewport_to_world` reads the same
-matrix.
+`form::draw` sets the camera's `sub_camera_view` every frame from the rect the two panels leave
+(`in_the_view` in [mod.rs](../src/editor/mod.rs)). The picture is drawn as though the window were
+that rect alone: centred in it, with the vertical field of view spanning its height, so a taller
+dock zooms the layout out rather than covering it, and a side panel alone moves the picture without
+zooming it. Picking needs nothing extra: `Camera::viewport_to_world` reads the same matrix.
+
+Culling does. Bevy builds a camera's `Frustum` from its projection and never from
+`sub_camera_view`, so it culls against a picture the window's shape. Wherever the view is wider for
+its height than the window, that frustum is narrower than the picture, and what stands at the
+view's edges goes undrawn. `cull_to_the_picture` rebuilds the frustum from `Camera::clip_from_view`
+between Bevy's `UpdateFrusta` and `CheckVisibility`.
 
 Keep it one camera. Narrowing it with `Camera::viewport` instead needs a second camera for egui,
 because `bevy_egui` sizes a context to its camera's viewport and the panel would dock inside the
@@ -116,9 +136,14 @@ when the drag ends.
 
 ## Adding an object
 
-A click on a browser card adds the asset onto the anchor. A drag drops it onto whatever it is let go
-over. Either way the add is two inserts — the object, then an `on` naming it — which
+A click on a tile picks it. The details' add button, or a double click, adds it onto the node named
+in the menu beside the button: the anchor, unless another is picked. A drag drops it onto whatever
+it is let go over. Either way the add is two inserts — the object, then an `on` naming it — which
 `view._serve_requests` applies in order. Why every add carries an `on`, and which `on` params it
 gets, is in `additions` and `on_params` in [browser.rs](../src/editor/browser.rs). The drag, and how
 the target under the cursor is picked, is in [drop.rs](../src/editor/drop.rs) (module docs and
 `target`).
+
+A background or a robot is set from the details alone, with the `Set` of the registry name its card's
+menu sends: its tile senses no drag, and a double click only picks it. Either replaces a whole part
+of the scene, which a stray click should not do.

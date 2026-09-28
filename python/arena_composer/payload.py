@@ -172,8 +172,9 @@ def _asset(asset: Any) -> dict[str, Any]:
     `params` is what an entry naming it has to carry beyond the registry name —
     empty for a registered asset, the URL for a SimReady prop — so the panel
     writes an entry that builds without knowing which kind it picked. The URL
-    is given again as `usd_path` whether `params` carries it or not, because a
-    row is searched and hovered by it.
+    is given again as `usd_path` whether `params` carries it or not, because an
+    asset is searched by it and the browser shows it. `category` is a prop's
+    folder under the SimReady root, where the browser's tree files it.
     """
     return {
         "registry_name": asset.registry_name,
@@ -184,6 +185,7 @@ def _asset(asset: Any) -> dict[str, Any]:
         "usd_path": asset.usd_path or "",
         "thumbnail": _thumbnail(asset.usd_path),
         "params": asset.params,
+        "category": asset.category,
     }
 
 

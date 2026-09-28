@@ -51,6 +51,10 @@ class Asset:
     #: What a spec entry has to carry in `params` beyond the registry name:
     #: the URL, for a remote asset.
     params: dict[str, Any] = field(default_factory=dict)
+    #: A remote asset's folders under the SimReady root, e.g.
+    #: ``Residential/Kitchen/Baskets``: where the viewer's browser files it.
+    #: Empty for a registered asset.
+    category: str = ""
 
     def matches(self, terms: list[str]) -> bool:
         """Whether every term appears in the name, a tag or the USD's file name."""
@@ -124,6 +128,7 @@ def _remote(stamp: int | None) -> tuple[Asset, ...]:
             name=asset.name,
             usd_path=asset.usd_path,
             params={"usd_path": asset.usd_path},
+            category=asset.category,
         )
         for asset in simready.load()
     )

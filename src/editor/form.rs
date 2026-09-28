@@ -1,5 +1,6 @@
 //! What the panel shows: a section per part of the spec, each entry in it a
-//! [`Card`], and the asset browser docked under them.
+//! [`Card`]. The asset browser docks under the 3D view beside it; see
+//! [`super::browser`].
 //!
 //! A section says what an entry's card holds — its icon, its title, its body —
 //! and the card and the controls in it do the rest; see [`super::card`] and
@@ -9,12 +10,14 @@ use std::collections::{BTreeSet, HashMap};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
+use bevy_panorbit_camera::PanOrbitCamera;
 
+use super::browser::{self, Browser};
 use super::card::{Card, Icon};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
 use super::relations::{self, RelationGizmos};
 use super::thumbnails::{Files, Images, Thumbnails};
-use super::{Form, PointerOverPanel, beside_the_panel, send};
+use super::{Form, PointerOverPanel, in_the_view, send};
 use crate::layout::Placed;
 use crate::spec::{Kind, Relation, Request, Step, Value};
 
@@ -23,9 +26,9 @@ const WIDTH: f32 = 360.0;
 
 /// Everything the panel remembers that is not in the spec.
 pub struct PanelState {
-    /// What the asset browser is filtered to.
-    pub(super) search: String,
-    /// The pictures on hand, for the browser's cards and the objects'.
+    /// The asset browser's search, folder and pick.
+    pub(super) browser: Browser,
+    /// The pictures on hand, for the browser's tiles and the objects' cards.
     pub(super) thumbnails: Thumbnails,
     /// The number being dragged or typed into. One, because only one control
     /// can be under the pointer at a time.
@@ -64,14 +67,12 @@ pub struct Editing {
 
 /// `ARENA_VIEWER_SHOW_RELATIONS=all`, or `=2,5` for those positions in the
 /// list, starts with those relations drawn: the way to see them in a
-/// screenshot, where there is nothing to hover. `ARENA_VIEWER_SEARCH=basket`
-/// opens the asset browser filtered, for the same reason — a screenshot has
-/// nobody to type for it.
+/// screenshot, where there is nothing to hover.
 impl Default for PanelState {
     fn default() -> Self {
         let shown = std::env::var("ARENA_VIEWER_SHOW_RELATIONS").unwrap_or_default();
         Self {
-            search: std::env::var("ARENA_VIEWER_SEARCH").unwrap_or_default(),
+            browser: Browser::default(),
             thumbnails: Thumbnails::default(),
             editing: None,
             typing: HashMap::new(),
@@ -92,7 +93,7 @@ pub fn draw(
     mut gizmos: Gizmos<RelationGizmos>,
     mut state: Local<PanelState>,
     mut over_panel: ResMut<PointerOverPanel>,
-    camera: Option<Single<&mut Camera>>,
+    camera: Option<Single<(&mut Camera, &mut PanOrbitCamera)>>,
 ) -> Result {
     // Cloned, so `contexts` is free to be handed on to the pictures — which
     // need it for egui's texture table. An `egui::Context` is a handle.
@@ -111,16 +112,30 @@ pub fn draw(
         .default_size(WIDTH)
         .min_size(240.0)
         .show(&mut window, |ui| panel(ui, &form, &mut state, &mut images));
+    // After the panel, so the dock spans the view alone and the panel keeps
+    // the window's full height, as Isaac Sim lays out its stage and content
+    // browser.
+    let PanelState { browser, thumbnails, .. } = &mut *state;
+    let dock = browser::dock(&mut window, &form, browser, &mut |path| thumbnails.get(path, &mut images));
     state.thumbnails.evict(&mut images);
-    // Measured here because this is the only place the panel's rect exists;
+    // Measured here because this is the only place the panels' rects exist;
     // see [`PointerOverPanel`] for why egui cannot be asked instead.
     over_panel.0 = ctx
         .pointer_interact_pos()
-        .is_some_and(|pointer| shown.response.rect.contains(pointer));
-    // Framed in what the panel leaves rather than behind it, and following its
-    // edge as it is dragged.
+        .is_some_and(|pointer| shown.response.rect.contains(pointer) || dock.contains(pointer));
+    // What the two leave of the window, which the layout is framed in rather
+    // than behind them, following their edges as they are dragged.
+    let view = window.available_rect_before_wrap();
     if let Some(mut camera) = camera {
-        camera.sub_camera_view = Some(beside_the_panel(ctx.viewport_rect().size(), shown.response.rect.width()));
+        let (camera, orbit) = &mut *camera;
+        camera.sub_camera_view = Some(in_the_view(ctx.viewport_rect(), view));
+        // The orbit camera pans a window's height of field of view per window
+        // height dragged, and the view now spreads that field over its own
+        // height: scaled back up, the layout keeps pace with the pointer.
+        let pace = ctx.viewport_rect().height() / view.height().max(1.0);
+        if orbit.pan_sensitivity != pace {
+            orbit.pan_sensitivity = pace;
+        }
     }
 
     // The relations the panel wants seen, drawn over the layout. From here
@@ -136,11 +151,10 @@ pub fn draw(
         }
     }
 
-    // Over the 3D view, in the corner of what the panel left of it. The view is
-    // the half that is behind: an accepted edit reaches the form at once and
+    // Over the 3D view, in the corner of what the panels left of it. The view
+    // is the half that is behind: an accepted edit reaches the form at once and
     // the layout only once the solver has caught up.
     if form.solving {
-        let view = window.available_rect_before_wrap();
         let spot = egui::Rect::from_min_size(view.right_top() + egui::vec2(-232.0, 12.0), egui::vec2(220.0, 20.0));
         // Right to left, so the spinner keeps the corner and the words run
         // inward from it however long they are.
@@ -174,13 +188,6 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Im
     for error in &form.errors {
         ui.colored_label(egui::Color32::from_rgb(240, 130, 115), error);
     }
-
-    // The browser keeps the foot of the panel rather than the end of the form:
-    // adding an object *is* picking one, so it is not somewhere to scroll to.
-    egui::Panel::bottom("assets")
-        .resizable(true)
-        .default_size(260.0)
-        .show(ui, |ui| super::browser::show(ui, form, &mut state.search, &mut state.thumbnails, images));
 
     let shown = egui::ScrollArea::vertical()
         .auto_shrink(false)
@@ -269,9 +276,9 @@ fn registry_options(form: &Form, role: &str) -> Vec<(String, Value)> {
 fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Images) {
     section(ui, "objects", Some(form.spec.objects.len()), form.owner("objects"), |ui| {
         // No add button: an object is an asset somebody offers, and the
-        // browser below is where those are. Picking there is what makes "add"
-        // a decision rather than a surprise.
-        ui.weak("add from the asset list below, or drag one onto the layout");
+        // browser under the view is where those are. Picking there is what
+        // makes "add" a decision rather than a surprise.
+        ui.weak("add from the asset browser under the view");
         for (index, node) in form.spec.objects.iter().enumerate() {
             let path = vec![Step::from("objects"), Step::from(index)];
             // The most particular asset the entry names: a prop's own, over
@@ -294,7 +301,7 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut 
                     row(ui, "asset", None, |ui| {
                         let label = ui.add(egui::Label::new(name).truncate());
                         if let Some(asset) = asset {
-                            label.on_hover_text(super::browser::hover(asset));
+                            label.on_hover_text(browser::hover(asset));
                         }
                     });
                 },
@@ -530,7 +537,9 @@ fn task(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
 /// The nodes a subtask's parameters name, in the order its kind declares them:
 /// what it is done to, for the header of a folded card.
 fn nodes_named(kind: Option<&Kind>, params: &crate::spec::Params) -> String {
-    let Some(kind) = kind else { return String::new() };
+    let Some(kind) = kind else {
+        return String::new();
+    };
     let named = kind.fields.iter().filter(|field| field.kind == "node_ref");
     let ids: Vec<&str> = named.filter_map(|field| params.get(&field.name)?.as_text()).collect();
     ids.join(", ")
