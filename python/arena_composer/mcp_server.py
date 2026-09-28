@@ -1,6 +1,6 @@
 """An MCP server for authoring Arena environment specs.
 
-Six tools, chosen against the question "what can the agent not already do with
+Seven tools, chosen against the question "what can the agent not already do with
 Read and Edit?" — listing a spec's objects did not survive that test, since the
 YAML is short and reading it is exact and free. What survived either touches
 live state (the asset registry, the SimReady index, the solver, a GPU) or knows
@@ -49,8 +49,9 @@ How the tools fit together:
    the only place these names exist. NVIDIA's SimReady props — ~1,500 objects
    beyond the registry — are searched too once `reindex_assets` has built the
    local index; a hit among them carries the `params` to add it with.
-2. `add_object` / `remove_object` to edit. Editing the YAML directly is fine
-   too, and is the way to do anything these two do not cover.
+2. `add_object` / `remove_object` to edit the objects, `set_embodiment` to
+   change the robot. Editing the YAML directly is fine too, and is the way to
+   do anything these do not cover.
 3. `describe_scene` for where the solver actually put things, and whether the
    layout passed its checks.
 4. `render_views` to look at it.
@@ -263,6 +264,32 @@ def remove_object(spec: str, id: str) -> dict[str, Any]:
     """
     with _quiet():
         return vars(spec_edit.remove_object(_spec_path(spec), id))
+
+
+@mcp.tool()
+def set_embodiment(spec: str, registry_name: str) -> dict[str, Any]:
+    """Change the robot a spec is built around.
+
+    Variants of one robot differ in how it is commanded — `droid_abs_joint_pos`
+    against `droid_differential_ik` — and that is what a policy's action space
+    has to match. `search_assets(role="embodiment")` lists them all.
+
+    The embodiment keeps its `id`, which relations, task params and CLI
+    overrides name it by. Its `params` keep what the new robot also takes and
+    lose the rest: `enable_cameras` survives any switch, a DROID's
+    `stand_height_m` does not survive a switch to a Franka. `changed` lists
+    what was dropped.
+
+    The first `describe_scene` or `render_views` after switching to a robot not
+    yet on this machine downloads its USD.
+
+    Args:
+        spec: Path to the task YAML.
+        registry_name: An embodiment's name from `search_assets`. Any other
+            asset is refused.
+    """
+    with _quiet():
+        return vars(spec_edit.apply(_spec_path(spec), "set", ["embodiment", "registry_name"], registry_name))
 
 
 @mcp.tool()
