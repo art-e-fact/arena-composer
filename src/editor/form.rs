@@ -13,7 +13,7 @@ use bevy_egui::{EguiContexts, egui};
 use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::browser::{self, Browser};
-use super::card::{Card, Icon};
+use super::card::{Card, Icon, cross};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
 use super::relations::{self, RelationGizmos};
 use super::thumbnails::{Files, Images, Thumbnails};
@@ -87,7 +87,7 @@ impl Default for PanelState {
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
-    form: Res<Form>,
+    mut form: ResMut<Form>,
     placed: Res<Placed>,
     files: Files,
     mut gizmos: Gizmos<RelationGizmos>,
@@ -166,7 +166,61 @@ pub fn draw(
         status.add(spinner());
         status.weak("Resolving layout…");
     }
+    // The view's other corner, above the dock and beside the panel.
+    if let Some(closed) = toasts(&ctx, view, &form.errors) {
+        form.errors.remove(closed);
+    }
     Ok(())
+}
+
+/// How wide an error toast is, where the view has the room.
+const TOAST_WIDTH: f32 = 340.0;
+
+/// How tall an error's text grows before it scrolls: a Python exception can
+/// run to a page.
+const TOAST_TEXT_HEIGHT: f32 = 160.0;
+
+/// The errors not yet closed, a toast each in the view's bottom-right corner,
+/// the newest nearest it. Returns the one whose × was clicked.
+///
+/// Closed by hand alone. A toast gone on a timer, or with the next message,
+/// could go unread — and the next message is often only the solve catching up.
+/// The text can be selected, and the copy button takes all of it.
+///
+/// An `Area` rather than a child of the window's `Ui`, as the spinner is: egui
+/// hit-tests what is above the background layer, so the camera gate gives it
+/// the pointer, and a drag across the text selects rather than orbits.
+fn toasts(ctx: &egui::Context, view: egui::Rect, errors: &[String]) -> Option<usize> {
+    let margin = 12.0;
+    let width = TOAST_WIDTH.min(view.width() - 4.0 * margin).max(80.0);
+    let mut closed = None;
+    egui::Area::new(egui::Id::new("toasts"))
+        .order(egui::Order::Foreground)
+        .pivot(egui::Align2::RIGHT_BOTTOM)
+        .fixed_pos(view.right_bottom() - egui::vec2(margin, margin))
+        .show(ctx, |ui| {
+            for (index, error) in errors.iter().enumerate() {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.horizontal(|ui| {
+                        ui.colored_label(egui::Color32::from_rgb(240, 130, 115), "⚠ error");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if cross(ui, "close").clicked() {
+                                closed = Some(index);
+                            }
+                            if ui.small_button("🗐").on_hover_text("copy").clicked() {
+                                ui.ctx().copy_text(error.clone());
+                            }
+                        });
+                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt(error)
+                        .max_height(TOAST_TEXT_HEIGHT)
+                        .show(ui, |ui| ui.label(error));
+                });
+            }
+        });
+    closed
 }
 
 /// What says a layout is still being solved. Sized down from the default, which
@@ -182,11 +236,6 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Im
         state.revision = form.revision;
         state.editing = None;
         state.typing.clear();
-    }
-
-    ui.heading(&form.spec.env_name);
-    for error in &form.errors {
-        ui.colored_label(egui::Color32::from_rgb(240, 130, 115), error);
     }
 
     let shown = egui::ScrollArea::vertical()

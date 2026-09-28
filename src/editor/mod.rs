@@ -100,6 +100,9 @@ pub fn plugin(app: &mut App) {
 #[derive(Resource, Default)]
 struct PointerOverPanel(bool);
 
+/// How many error toasts stay open at once.
+const MAX_TOASTS: usize = 5;
+
 /// The spec the panel draws.
 #[derive(Resource, Default)]
 pub struct Form {
@@ -109,6 +112,9 @@ pub struct Form {
     /// Most carry none — see [`crate::scene::Scene::remote`].
     pub remote: Vec<CatalogAsset>,
     pub owners: HashMap<String, String>,
+    /// The errors not yet closed, oldest first, each a toast over the view:
+    /// refusals, failed solves and failed crawls alike. See
+    /// [`Form::take_errors`].
     pub errors: Vec<String>,
     /// Whether the layout under the panel is still catching up with this spec.
     pub solving: bool,
@@ -129,7 +135,8 @@ impl Form {
     /// accepted edit is answered with the spec as soon as it is written and
     /// again with the layout it solves to, and a refused one with the spec left
     /// untouched. So there is no half a message to guard against here. The prop
-    /// list is the one part that travels apart, and is [`Form::take_assets`]'s.
+    /// list travels apart, and is [`Form::take_assets`]'s; the errors are
+    /// [`Form::take_errors`]'s.
     pub fn take(&mut self, scene: &Payload) {
         // Many messages carry the spec unchanged — a crawl's answer, pictures
         // landing, a solve catching up — and one of those must not drop a name
@@ -143,9 +150,6 @@ impl Form {
         self.spec = scene.spec.clone();
         self.vocabulary = scene.vocabulary.clone();
         self.owners = scene.owners.clone();
-        if let Some(errors) = &scene.errors {
-            self.errors = errors.clone();
-        }
         if let Some(solving) = scene.solving {
             self.solving = solving;
         }
@@ -165,6 +169,28 @@ impl Form {
         if let Some(indexing) = scene.indexing {
             self.indexing = indexing;
         }
+    }
+
+    /// Keep the errors `scene` carries until they are closed: one toast per
+    /// message, since one refused edit is one event however many lines say why.
+    ///
+    /// Taken from every message, not only the one the panel is drawn from — a
+    /// refusal followed within the frame by any other message would otherwise
+    /// never be seen. And never cleared by a message carrying none: an edit
+    /// that lands says nothing of the one refused before it. The same text
+    /// twice is one toast, because a spec that will not build fails the same
+    /// way on every solve.
+    pub fn take_errors(&mut self, scene: &Payload) {
+        let Some(errors) = scene.errors.as_ref().filter(|errors| !errors.is_empty()) else {
+            return;
+        };
+        let error = errors.join("\n");
+        if !self.errors.contains(&error) {
+            self.errors.push(error);
+        }
+        // The oldest go first, so the stack stays shorter than the view.
+        let over = self.errors.len().saturating_sub(MAX_TOASTS);
+        self.errors.drain(..over);
     }
 
     /// Every asset a spec can name, registered and remote alike.
@@ -370,7 +396,7 @@ mod tests {
 
     /// Only a new spec or a refusal ends a half-made edit. Anything else —
     /// here, pictures landing — leaves it, along with what the panel was
-    /// saying about the last edit and the solve behind it.
+    /// saying about the solve behind it.
     #[test]
     fn a_message_about_assets_leaves_the_edit_in_hand() {
         let mut form = Form::default();
@@ -395,10 +421,33 @@ mod tests {
         };
         form.take(&refused);
         assert!(form.revision > revision, "a refused value would stay on screen");
-        assert_eq!(form.errors, ["objects.0: named by a task"]);
+    }
 
-        form.take(&pictures);
-        assert_eq!(form.errors, ["objects.0: named by a task"], "the refusal was wiped");
+    /// An error stays up until it is closed: an edit landing after it, or a
+    /// message about something else, leaves it. The same one again is one
+    /// toast, and a message's lines are one toast between them.
+    #[test]
+    fn an_error_stays_until_it_is_closed() {
+        let with_errors = |errors: &[&str]| Payload {
+            errors: Some(errors.iter().map(|error| error.to_string()).collect()),
+            ..Default::default()
+        };
+        let mut form = Form::default();
+
+        form.take_errors(&with_errors(&["objects.0: named by a task", "objects.0: no asset"]));
+        form.take_errors(&with_errors(&[]));
+        form.take_errors(&Payload::default());
+        assert_eq!(form.errors, ["objects.0: named by a task\nobjects.0: no asset"]);
+
+        form.take_errors(&with_errors(&["SpecError: no bowl"]));
+        form.take_errors(&with_errors(&["SpecError: no bowl"]));
+        assert_eq!(form.errors.len(), 2, "a repeated failure piled up: {:?}", form.errors);
+
+        for index in 0..super::MAX_TOASTS {
+            form.take_errors(&with_errors(&[&format!("error {index}")]));
+        }
+        assert_eq!(form.errors.len(), super::MAX_TOASTS);
+        assert_eq!(form.errors.last().unwrap(), &format!("error {}", super::MAX_TOASTS - 1), "the newest went");
     }
 
     /// Crossing the edge mid-drag settles nothing: an orbit that wanders over

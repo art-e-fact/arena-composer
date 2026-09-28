@@ -38,6 +38,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - The 3D view is framed in what the panels leave, as a window that size would be: a taller asset
   browser zooms the layout out rather than covering it.
 - The status line moved to the top-left corner, above the asset browser.
+- Errors — a refused edit, a spec that will not build, a failed reindex — pop up in the bottom-right
+  corner of the 3D view, where they were lines at the top of the panel. Each stays until its × is
+  clicked, and its text can be selected or taken whole with its copy button.
+- The panel no longer opens with the environment's name; the window's title carries it.
 
 ### Fixed
 

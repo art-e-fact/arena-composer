@@ -21,7 +21,8 @@ picked from the vocabulary.
 it knows which of the two files a key belongs in, keeps comments, and quotes what YAML 1.1 would read
 as a boolean. Rust's half is a form that cannot reach an invalid state — ids come from dropdowns, and
 a unary relation has no `reference` slot at all. What construction cannot prevent comes back in the
-payload's `errors` and is shown above the form.
+payload's `errors`, each shown as a toast in the corner of the 3D view until it is closed (`toasts` in
+[form.rs](../src/editor/form.rs)).
 
 ## Cards
 

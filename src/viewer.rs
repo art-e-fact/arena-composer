@@ -119,7 +119,7 @@ fn setup(world: &mut World) {
     spawn_camera(world, &scene);
     spawn_hud(world, &scene);
     show_in_form(world, &scene);
-    take_assets(world, std::slice::from_ref(&scene));
+    take_from_all(world, std::slice::from_ref(&scene));
 }
 
 /// Hand a scene to the editor panel, where there is one.
@@ -132,17 +132,20 @@ fn show_in_form(world: &mut World, scene: &Scene) {
     }
 }
 
-/// Keep whatever any of `scenes` says about the assets.
+/// Keep whatever any of `scenes` says about the assets, and every error any of
+/// them carries.
 ///
-/// Apart from [`show_in_form`] because the two answer different messages: a
+/// Apart from [`show_in_form`] because these answer different messages: a
 /// crawl that finishes while an edit is in flight lands on a message of its
-/// own, which need not be the one the panel is drawn from.
-fn take_assets(world: &mut World, scenes: &[Scene]) {
+/// own, which need not be the one the panel is drawn from, and so can a
+/// refusal.
+fn take_from_all(world: &mut World, scenes: &[Scene]) {
     let Some(mut form) = world.get_resource_mut::<crate::editor::Form>() else {
         return;
     };
     for scene in scenes {
         form.take_assets(scene);
+        form.take_errors(scene);
     }
 }
 
@@ -203,7 +206,7 @@ fn apply_updates(world: &mut World) {
     if let Some(scene) = received.iter().rev().find(|scene| scene.assets.is_none()) {
         show_in_form(world, scene);
     }
-    take_assets(world, &received);
+    take_from_all(world, &received);
 
     if ended {
         world.write_message(AppExit::Success);
