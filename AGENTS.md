@@ -21,6 +21,11 @@ time:
 uv pip install --python <Arena's venv>/bin/python -e .
 ```
 
+Python edits take effect at once; a Rust edit takes effect when that install runs again. In
+artefacts-arena-template, put `ARENA_COMPOSER_SRC=<this checkout>` in its `.env` instead: every
+`source setup.sh` there reinstalls this checkout, and `source setup.sh --pinned` switches to the
+pinned release.
+
 With that venv active, `cargo` and `pytest` run from this repo's root, and the `arena-*` commands
 from the project's, whose spec paths the examples below use. Arena exits on import unless the Isaac
 Sim EULA is accepted: export `OMNI_KIT_ACCEPT_EULA=YES`.
