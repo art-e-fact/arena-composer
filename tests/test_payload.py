@@ -53,6 +53,13 @@ def test_the_props_ride_only_the_message_that_changed_them(tmp_path: Path, monke
     assert all(asset["params"] == {} for asset in payload._vocabulary()["assets"])
 
 
+def test_the_vocabulary_carries_the_task_compositions(tmp_path: Path, monkeypatch):
+    """The panel offers these as a dropdown without hard-coding the names
+    Arena's `CompositeTaskSpec` accepts."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    assert payload._vocabulary()["compositions"] == ["atomic", "parallel", "sequential"]
+
+
 def test_a_registered_asset_is_offered_a_picture_too(tmp_path: Path, monkeypatch):
     """A picture is published beside a layer, whoever published it, so nothing
     about asking for one is the props'. What stays theirs is `params`: a pick on

@@ -9,9 +9,11 @@ not have is the two things this module adds:
   ``relations`` live in exactly one of the files. An edit goes to whichever file
   owns the key.
 * **What an edit drags with it.** Removing an object also has to remove the
-  relations that name it, and renaming one has to carry them across, or the spec
-  stops loading with a dangling reference. Switching the embodiment has to shed
-  the params the new one does not take, or the spec stops building.
+  relations that name it, and renaming one — an object's, the embodiment's, or
+  the background's — has to carry them across, or the spec stops loading with a
+  dangling reference. Switching the embodiment's or the background's
+  ``registry_name`` has to shed the params the new one does not take, or the
+  spec stops building.
 
 Every edit is checked against the merged spec before either file is written, so
 a rejected edit leaves the pair on disk exactly as it was.
@@ -277,12 +279,18 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     This is the editor's whole write surface. `steps` walks the spec the way it
     reads — ``["relations", 2, "params", "side"]`` — and `op` is one of:
 
-    * ``set`` — replace the leaf `steps` names. Setting an entry's ``id`` renames
-      it in the relations that name it too, and setting the embodiment's
-      ``registry_name`` drops the params the new one does not take.
-    * ``insert`` — append `value` to the list `steps` names.
+    * ``set`` — replace the leaf `steps` names. Setting an entry's ``id`` — an
+      object's, or the embodiment's or background's own — renames it in the
+      relations and task params that name it too, and setting the embodiment's
+      or background's ``registry_name`` drops the params the new one does not
+      take.
+    * ``insert`` — append `value` to the list `steps` names. Appending a second
+      subtask to an ``atomic`` task switches its composition to ``sequential``,
+      since ``atomic`` holds only one.
     * ``remove`` — drop what `steps` names: an entry, with any relation left
       dangling, or a parameter, which hands it back to the kind's default.
+      Dropping a task down to one subtask switches its composition back to
+      ``atomic``.
 
     One leaf at a time rather than whole sections, so a key the editor's form
     never shows is not dropped by a write that passes over it. Which file the
@@ -303,7 +311,10 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             # A single step names a top-level list, which may not exist yet.
             target = files.section(key) if len(steps) == 1 else _walk(document, steps)
             target.append(value)
-            return files.write([f"added an entry to {_label(steps)}"])
+            changed = [f"added an entry to {_label(steps)}"]
+            if steps == ["task", "subtasks"] and (bumped := _keep_composition_valid(files)):
+                changed.append(bumped)
+            return files.write(changed)
 
         parent, last = _walk(document, steps[:-1]), steps[-1]
         if op == "set":
@@ -311,12 +322,22 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             parent[last] = value
             changed = [f"set {_label(steps)} to {value!r}"]
             # An id is a name other entries hold, so renaming it has to carry
-            # them — the same reason removing it has to drop them.
-            if last == "id" and key in _ID_SECTIONS and previous and previous != value:
+            # them — the same reason removing it has to drop them. An object's
+            # id sits under a list entry (`objects.2.id`); the embodiment's and
+            # background's sit directly on the singleton mapping, so they are
+            # matched by their exact two-step path rather than by `last`, or a
+            # param happening to be called `id` would trigger this too.
+            renames_id = (last == "id" and key in _ID_SECTIONS) or steps in (
+                ["embodiment", "id"],
+                ["background", "id"],
+            )
+            if renames_id and previous and previous != value:
                 if renamed := _rename_node(files, previous, value):
                     changed.append(f"renamed {previous!r} in {renamed} place(s)")
-            if steps == ["embodiment", "registry_name"] and (dropped := _drop_params_not_taken(parent, value)):
-                changed.append(f"dropped embodiment.params {', '.join(dropped)}, which {value} does not take")
+            if steps in (["embodiment", "registry_name"], ["background", "registry_name"]) and (
+                dropped := _drop_params_not_taken(parent, value)
+            ):
+                changed.append(f"dropped {key}.params {', '.join(dropped)}, which {value} does not take")
             return files.write(changed)
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
@@ -332,6 +353,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
                 _walk(document, steps[:-2])[steps[-2]] = {}
             if node_id and (dropped := _drop_relations_naming(files, node_id)):
                 changed.append(f"removed {dropped} relation(s) naming {node_id!r}")
+            if steps[:2] == ["task", "subtasks"] and len(steps) == 3 and (bumped := _keep_composition_valid(files)):
+                changed.append(bumped)
             return files.write(changed)
     except (KeyError, IndexError, TypeError, AttributeError) as error:
         return Result.failed(f"{_label(steps)}: {type(error).__name__}: {error}")
@@ -427,14 +450,36 @@ def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
     return renamed
 
 
+def _keep_composition_valid(files: SpecFiles) -> str | None:
+    """Fit `task.composition` to its current subtask count, and say so — or
+    ``None`` if it already fits.
+
+    ``CompositeTaskSpec`` requires exactly one subtask for ``atomic`` and at
+    least two for ``sequential``/``parallel``. Edits are validated one at a
+    time, so without this a task could never grow past one subtask: inserting
+    a second is refused while still ``atomic``, and switching composition
+    first is refused while there is only one. Bumping the count and the
+    composition together in the same edit keeps every step on its own valid.
+    """
+    task = files.documents[files.owner("task")].get("task") or {}
+    subtasks = task.get("subtasks") or []
+    if task.get("composition") == "atomic" and len(subtasks) >= 2:
+        task["composition"] = "sequential"
+        return "set task.composition to 'sequential': 'atomic' holds exactly one subtask"
+    if task.get("composition") != "atomic" and len(subtasks) == 1:
+        task["composition"] = "atomic"
+        return "set task.composition to 'atomic': one subtask cannot be sequential or parallel"
+    return None
+
+
 def _drop_params_not_taken(entry: Any, registry_name: Any) -> list[str]:
     """Remove the params in `entry` that `registry_name`'s constructor does not
     take, and name them.
 
-    A robot's params belong to its constructor, and one passed to a constructor
-    that does not take it fails the build. What the new one also takes stays:
-    ``enable_cameras`` on any switch, a stand's height between two DROID
-    variants. A param is matched by name, not meaning, so an
+    An entry's params belong to its constructor, and one passed to a
+    constructor that does not take it fails the build. What the new one also
+    takes stays: ``enable_cameras`` on any switch, a stand's height between two
+    DROID variants. A param is matched by name, not meaning, so an
     ``initial_joint_pose`` carries over to a robot with other joints.
     """
     from isaaclab_arena.assets.registries import AssetRegistry

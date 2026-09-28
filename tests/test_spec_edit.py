@@ -309,6 +309,62 @@ def test_renaming_an_object_carries_the_task_params_naming_it(spec: Path):
     assert params["destination_location"] == "bowl", "an unrelated param was rewritten"
 
 
+def test_renaming_the_background_carries_the_relation_and_task_param_naming_it(spec: Path):
+    """The background's id is not in an `_ID_SECTIONS` list — it sits on the
+    singleton `background` mapping — but it is still a name the `is_anchor`
+    relation and a task param hold, so a rename still has to reach them."""
+    result = spec_edit.apply(spec, "set", ["background", "id"], "new_table")  # maple_table_robolab
+    assert result.ok, result.errors
+
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert scene["background"]["id"] == "new_table"
+    assert [r["subject"] for r in scene["relations"] if r["kind"] == "is_anchor"] == ["new_table"]
+
+    params = yaml.safe_load(spec.read_text())["task"]["subtasks"][0]["params"]
+    assert params["background_scene"] == "new_table"
+
+
+def test_a_param_called_id_does_not_trigger_a_rename(spec: Path):
+    """Only the embodiment's and background's own `id` renames — a param that
+    happens to be called `id` a step further down must not."""
+    result = spec_edit.apply(spec, "set", ["embodiment", "params", "id"], "droid")
+    assert result.ok, result.errors
+    assert not any("renamed" in line for line in result.changed), result.changed
+
+
+SECOND_SUBTASK = {
+    "kind": "PickAndPlaceTask",
+    "params": {"pick_up_object": "distractor", "destination_location": "bowl", "background_scene": TABLE},
+}
+
+
+def test_adding_a_second_subtask_switches_an_atomic_task_to_sequential(spec: Path):
+    """`CompositeTaskSpec` requires 'atomic' to hold exactly one subtask, so a
+    second one added while it is still atomic would fail validation on its
+    own — the edit switches the composition in the same step instead."""
+    result = spec_edit.apply(spec, "insert", ["task", "subtasks"], SECOND_SUBTASK)
+    assert result.ok, result.errors
+    assert any("sequential" in line for line in result.changed), result.changed
+
+    task = yaml.safe_load(spec.read_text())["task"]
+    assert task["composition"] == "sequential"
+    assert len(task["subtasks"]) == 2
+
+
+def test_removing_a_subtask_back_to_one_switches_to_atomic(spec: Path):
+    """The reverse: dropping back down to a single subtask while still
+    'sequential' would fail validation too."""
+    assert spec_edit.apply(spec, "insert", ["task", "subtasks"], SECOND_SUBTASK).ok
+
+    result = spec_edit.apply(spec, "remove", ["task", "subtasks", 1])
+    assert result.ok, result.errors
+    assert any("atomic" in line for line in result.changed), result.changed
+
+    task = yaml.safe_load(spec.read_text())["task"]
+    assert task["composition"] == "atomic"
+    assert len(task["subtasks"]) == 1
+
+
 SIMREADY_CAN = (
     "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady"
     "/Residential/Kitchen/Food/Canned_Goods/Can_M01/sm_food_beverage_can_m01_01.usd"
