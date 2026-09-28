@@ -1,0 +1,34 @@
+name: Changelog
+
+# A pull request that changes the package says what changed for the people using
+# it, under `## [Unreleased]` in CHANGELOG.md. One that changes nothing they can
+# see — a refactor, tests, docs, CI — carries the `no changelog` label instead.
+#
+# Apart from ci.yml so that labelling a pull request re-runs this check alone,
+# not the build. `edited` is what moving a pull request onto another base
+# fires, which changes what it merges; it fires on a new title too, and every
+# one of those runs in full, since a run skipped would count as a pass.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+jobs:
+  entry:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no changelog') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge commit a pull request is checked out as, and the base
+          # branch it sits on: its first parent.
+          fetch-depth: 2
+      - run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          # The code that ships, less the notes for agents that live beside it.
+          # No `grep -q` in the pipe: under pipefail its early exit can fail the
+          # pipeline, which would read as nothing having shipped.
+          shipped=$(grep -vE '\.md$' <<<"$changed" | grep -E '^(src/|python/|Cargo\.toml$|pyproject\.toml$)' || true)
+          [ -n "$shipped" ] || exit 0
+          grep -qx CHANGELOG.md <<<"$changed" && exit 0
+          echo "::error file=CHANGELOG.md::This pull request changes the package but not CHANGELOG.md. Add a line under '## [Unreleased]' saying what changed for someone using arena-composer, or label the pull request 'no changelog' if nothing they can see changed. Changed: $(echo $shipped)"
+          exit 1

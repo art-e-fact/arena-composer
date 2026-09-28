@@ -98,6 +98,19 @@ keep it installable:
 
 ## Releasing
 
-The version lives in `Cargo.toml` and is the wheel's version too. Push a tag `v<that version>` and
-CI attaches the wheel to that tag's GitHub Release. CI has no Arena, so run the whole suite locally,
-opt-in tests included, before tagging.
+The version lives in `Cargo.toml` and is the wheel's version too. Before 1.0, a release that adds or
+changes behaviour bumps the minor version and one that only fixes bumps the patch.
+
+1. In [CHANGELOG.md](../CHANGELOG.md), rename `## [Unreleased]` to `## [<version>] - <date>`, put a
+   fresh `## [Unreleased]` above it, and point the compare links at its foot at the new tag.
+2. Set the version in `Cargo.toml`, and in the README's install example.
+3. Run the whole suite locally, opt-in tests included: CI has no Arena.
+4. Merge, then push a tag `v<version>` on `main`.
+
+CI builds the wheel from the tag and attaches it to the tag's GitHub Release. The release notes are
+the version's section of the changelog, with GitHub's list of the merged pull requests under it,
+and a tag whose version has no section there is refused.
+
+Between releases, [changelog.yml](../.github/workflows/changelog.yml) keeps `## [Unreleased]`
+filled: a pull request that changes the package and not the changelog fails it, unless it is
+labelled `no changelog`.

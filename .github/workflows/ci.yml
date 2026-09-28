@@ -60,12 +60,22 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: wheel
           path: dist
       # The wheel is versioned from Cargo.toml, so the tag must name the same version.
       - run: test -f dist/arena_composer-"${GITHUB_REF_NAME#v}"-*.whl
-      - run: gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --generate-notes
+      # The notes are the version's section of CHANGELOG.md, less the link
+      # definitions at its foot. No section means `## [Unreleased]` was never
+      # renamed for this release, and the release waits until it is.
+      - run: |
+          awk -v heading="## [${GITHUB_REF_NAME#v}]" \
+            'index($0, "## [") == 1 { if (on) exit; on = index($0, heading) == 1; next } on && !/^\[[^]]*\]: /' \
+            CHANGELOG.md > notes.md
+          grep -q '[^[:space:]]' notes.md || { echo "::error file=CHANGELOG.md::no section for ${GITHUB_REF_NAME#v}"; exit 1; }
+      # GitHub appends its list of the merged pull requests below the notes.
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --notes-file notes.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

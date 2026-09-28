@@ -90,3 +90,10 @@ wheel and releasing are in [docs/development.md](docs/development.md).
   libpython and breaks `cargo run` and `cargo test`.
 - **CI has no Arena.** A test file that imports it goes in `collect_ignore` in
   [tests/conftest.py](tests/conftest.py), or CI fails.
+- **A change people using the package can see goes in [CHANGELOG.md](CHANGELOG.md)**, in the same
+  pull request: a line under `## [Unreleased]`, in `Added`, `Changed`, `Fixed` or `Removed`, saying
+  what changed for someone running the commands, the panel or the MCP tools, not what changed in
+  the code. CI fails a pull request that changes `src/`, `python/`, `Cargo.toml` or
+  `pyproject.toml` without one. Where nothing they can see changed — a refactor, a test — label
+  the pull request `no changelog` instead (`gh pr edit <n> --add-label "no changelog"`). A released
+  version's section is never edited.
