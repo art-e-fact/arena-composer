@@ -28,7 +28,7 @@ USDs it names. The MCP server and a viewer read the same file, and either may re
 
 The viewer never asks for a picture and never receives one over the pipe. It loads the local path
 the payload gives it off disk. An empty path means there is no picture, not that it hasn't arrived
-yet, so a blank row is final.
+yet, so a card with an empty square is final.
 
 ## Rules
 

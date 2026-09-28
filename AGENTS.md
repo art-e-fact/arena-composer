@@ -55,7 +55,7 @@ wheel and releasing are in [docs/development.md](docs/development.md).
 | [layout.rs](src/layout.rs) | putting a layout in a world and framing it; shared by the window and the renderer |
 | [spawn.rs](src/spawn.rs) | payload geometry → meshes and materials |
 | [viewer.rs](src/viewer.rs) | the windowed app: applies incoming messages, draws the status line (`hud_line`) |
-| [editor/](src/editor/) | the panel: form, asset browser, drag-and-drop, relation gizmos |
+| [editor/](src/editor/) | the panel: a card per spec entry, asset browser, drag-and-drop, relation gizmos |
 | [render.rs](src/render.rs) | headless renders, a PNG per view |
 | [python.rs](src/python.rs) | the PyO3 wrapper, behind the `python` feature |
 | [main.rs](src/main.rs), [bin/arena-render.rs](src/bin/arena-render.rs) | `arena-viewer` and `arena-render`, reading a packed payload off disk |

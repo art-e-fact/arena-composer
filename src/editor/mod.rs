@@ -3,8 +3,12 @@
 //! Drawn in immediate mode, so the panel *is* the last spec Python sent — there
 //! is no widget tree to keep in step with it, and nothing to rebuild when a new
 //! one arrives. What little state the panel keeps of its own is UI state and
-//! nothing else: a search string, the number currently under the pointer, and
-//! the pictures the asset browser has uploaded.
+//! nothing else: a search string, the number or name currently being edited,
+//! and the asset pictures it has uploaded.
+//!
+//! Every entry of the spec is drawn as a [`card`], after Blender's modifier
+//! stack: a header naming the entry — its id, typed into where it stands, or a
+//! relation's kind — and a body of [`controls`] that folds away under it.
 //!
 //! Nothing here edits the spec it draws. A control sends a [`Request`] up the
 //! pipe, Python writes the YAML and answers with it, and that answer is what
@@ -31,9 +35,12 @@
 //! each keeps it drawn; see [`relations`].
 
 mod browser;
+mod card;
+mod controls;
 mod drop;
 mod form;
 mod relations;
+mod thumbnails;
 
 use std::collections::HashMap;
 
@@ -46,7 +53,6 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 use crate::layout::Placed;
 use crate::scene::Scene as Payload;
 use crate::spec::{CatalogAsset, Request, Spec, Vocabulary};
-use crate::wire;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(EguiPlugin::default())
@@ -167,10 +173,18 @@ impl Form {
 /// write cannot block long enough to be worth getting off this thread.
 // ponytail: blocking write on the render thread; channel + thread if an intent
 // ever outruns Python.
+#[cfg(not(test))]
 fn send(request: Request) {
-    if let Err(error) = wire::write_request(&mut std::io::stdout().lock(), &request) {
+    if let Err(error) = crate::wire::write_request(&mut std::io::stdout().lock(), &request) {
         error!("request: {error:#}");
     }
+}
+
+/// What a test's panel sent, in order, instead of writing it down the test's
+/// own stdout.
+#[cfg(test)]
+fn send(request: Request) {
+    tests::SENT.with_borrow_mut(|sent| sent.push(request));
 }
 
 /// The layout camera's picture, off-centre so that its middle is the middle of
@@ -233,11 +247,18 @@ fn camera_takes_input(mid_drag: bool, pointer_taken: bool) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use bevy::camera::CameraProjection;
     use bevy::prelude::{PerspectiveProjection, Vec3};
     use bevy_egui::egui;
 
-    use super::{Form, Payload, beside_the_panel, camera_takes_input};
+    use super::{Form, Payload, Request, beside_the_panel, camera_takes_input};
+
+    thread_local! {
+        /// Every request a test's panel has sent; see `super::send`.
+        pub static SENT: RefCell<Vec<Request>> = const { RefCell::new(Vec::new()) };
+    }
 
     /// What the camera looks at, straight ahead of it, is drawn in the middle
     /// of what the panel leaves.

@@ -8,8 +8,11 @@ picked from the vocabulary.
 | File | What it is |
 | --- | --- |
 | [mod.rs](../src/editor/mod.rs) | `Form` (the last spec sent), the camera gate, the framing |
-| [form.rs](../src/editor/form.rs) | drawing the spec, turning a control into a `Request`; `PanelState` |
-| [browser.rs](../src/editor/browser.rs) | the asset browser; what an add writes |
+| [form.rs](../src/editor/form.rs) | the panel: a section per top-level key, what each entry's card holds; `PanelState` |
+| [card.rs](../src/editor/card.rs) | the card every entry is drawn as |
+| [controls.rs](../src/editor/controls.rs) | the controls inside a card, each turning an edit into a `Request` |
+| [browser.rs](../src/editor/browser.rs) | the asset browser and its cards; what an add writes |
+| [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's cards and the objects' |
 | [drop.rs](../src/editor/drop.rs) | dragging an asset onto the layout |
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
@@ -18,6 +21,37 @@ it knows which of the two files a key belongs in, keeps comments, and quotes wha
 as a boolean. Rust's half is a form that cannot reach an invalid state — ids come from dropdowns, and
 a unary relation has no `reference` slot at all. What construction cannot prevent comes back in the
 payload's `errors` and is shown above the form.
+
+## Cards
+
+Every entry of the spec — the robot, the background, each object, set, reference, relation, the task
+and each subtask — is a `Card`, after Blender's modifier stack. The header is the fold arrow, an
+icon, the title, and at the far edge the eye (relations only) and the × that removes the entry. The
+title is the entry's id, always a box to type in; a relation or subtask has no id, so its kind menu
+takes the title's place. An object's icon is its asset's picture, where the asset has one.
+
+A section only says what goes in an entry's title and body; the card draws the rest. To give a new
+part of the spec a panel, write a section function in [form.rs](../src/editor/form.rs) and add it
+to `panel`. Three rules keep it working like the others:
+
+- **A control is keyed by its spec path.** `Step` is hashable, and the path is the widget's id and
+  the key of `PanelState::editing` and `typing`. Build paths with `controls::with`; never key a
+  control by its label, which two cards can share.
+- **A removal waits for the end of the frame.** A card reports its × click, and the section puts
+  the path in `PanelState::removing`, which `panel` sends after everything else. A control that held
+  the focus sends its edit as the click takes it, naming its entry by position; a removal sent first
+  would hand that position, and the edit, to the next entry.
+- **A control's timing is tested in real frames.** egui reports a lost focus on two frames running,
+  so a control that sends on it can send twice or lose an edit, and only frames show it. The tests
+  in [controls.rs](../src/editor/controls.rs) drive a headless `egui::Context` with clicks and keys
+  and read what was sent (`send` collects instead of writing under `cfg(test)`).
+- **Only glyphs egui bundles.** An icon or label glyph missing from egui's fonts draws as a box.
+  Check a new one against `Ubuntu-Light`, `NotoEmoji-Regular` and `emoji-icon-font` in
+  `epaint_default_fonts`, or look at a screenshot.
+
+The asset browser draws its assets as cards too, but painted: each is one widget sensing clicks and
+drags, so it can be picked up anywhere, and a label laid over it would take the pointer. A card
+there is a fixed height because the list draws only the cards on screen.
 
 ## Keeping the camera off the panel
 
@@ -82,7 +116,7 @@ when the drag ends.
 
 ## Adding an object
 
-A click on a browser row adds the asset onto the anchor. A drag drops it onto whatever it is let go
+A click on a browser card adds the asset onto the anchor. A drag drops it onto whatever it is let go
 over. Either way the add is two inserts — the object, then an `on` naming it — which
 `view._serve_requests` applies in order. Why every add carries an `on`, and which `on` params it
 gets, is in `additions` and `on_params` in [browser.rs](../src/editor/browser.rs). The drag, and how

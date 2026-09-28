@@ -1,84 +1,29 @@
-//! The asset browser: everything a spec can name, searchable. A click adds an
-//! object on the anchor; a drag drops it onto something in the layout (see
-//! [`super::drop`]).
+//! The asset browser: everything a spec can name, searchable, each asset a
+//! card. A click on one adds an object on the anchor; a drag drops it onto
+//! something in the layout (see [`super::drop`]).
 //!
 //! Two kinds of asset are listed together. Arena's registered ones ride in the
 //! vocabulary and are always there. NVIDIA's SimReady props ride in
 //! [`Form::remote`] and are there once the index has been built, which is what
 //! the reindex button asks for. A pick writes the same kind of entry either
 //! way: the asset carries the `params` its own entry needs, so nothing here
-//! has to know which kind it picked.
-//!
-//! An asset's picture is a file Python mirrored, drawn from disk through
-//! Bevy's asset server — this side opens no socket and asks for nothing. Every
-//! picture there is to have is fetched before a list is sent, so a row with no
-//! `thumbnail` is a row the bucket publishes no picture for. What scrolling
-//! costs is the reading: only the visible rows are uploaded, and [`RESIDENT`]
-//! bounds how many stay.
+//! has to know which kind it picked. The card says which it is all the same,
+//! since a prop is fetched from the network on its first solve.
 
-use std::collections::{HashMap, HashSet};
+use bevy_egui::egui;
 
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
-
-use super::{Form, send};
+use super::thumbnails::{Images, Thumbnails};
+use super::{Form, card, send};
 use crate::spec::{CatalogAsset, Params, Request, Spec, Step, Value};
 
-/// How big a picture is drawn, and so how tall every row is — the space is
-/// taken whether the row has one or not, so the names line up down the list.
-const THUMBNAIL: f32 = 32.0;
+/// How tall a card is. Fixed, because the list draws only the cards on screen
+/// and has to know where each one falls without drawing the ones before it.
+const CARD: f32 = 52.0;
 
-/// How many pictures stay uploaded. Several screenfuls, so scrolling back is
-/// free, and bounded: a sidecar is 256 px square whatever size it is drawn at,
-/// so each one holds a quarter of a megabyte of texture and the list is long
-/// enough to scroll past a thousand.
-const RESIDENT: usize = 64;
+/// The space between a card's border and what is on it.
+const PAD: f32 = 5.0;
 
-/// What the browser keeps that is not in the spec.
-#[derive(Default)]
-pub struct Browser {
-    /// What the list is filtered to.
-    search: String,
-    /// The pictures on hand, by the path Python sent.
-    thumbnails: HashMap<String, Thumbnail>,
-}
-
-struct Thumbnail {
-    handle: Handle<Image>,
-    /// None until the file has finished loading. egui draws whatever texture
-    /// id it is handed and has no way to wait for one.
-    texture: Option<egui::TextureId>,
-}
-
-/// Where a picture is read from: the server that reads the file, and the
-/// collection it lands in once it has been read.
-#[derive(SystemParam)]
-pub struct Files<'w> {
-    server: Res<'w, AssetServer>,
-    loaded: Res<'w, Assets<Image>>,
-}
-
-/// What puts a picture on screen: the files above, and egui's texture table.
-///
-/// That table is reached through [`EguiContexts`] rather than as a resource of
-/// its own, because `EguiContexts` already holds it — asking for both would be
-/// two mutable borrows of one resource in a single system.
-pub struct Images<'a, 'w, 's> {
-    server: &'a AssetServer,
-    loaded: &'a Assets<Image>,
-    egui: &'a mut EguiContexts<'w, 's>,
-}
-
-impl<'a, 'w, 's> Images<'a, 'w, 's> {
-    /// The resources behind `files` are taken as plain references, so how long
-    /// the system holds them is not tied to how long egui's table is borrowed.
-    pub fn new(files: &'a Files<'_>, egui: &'a mut EguiContexts<'w, 's>) -> Self {
-        Self { server: &files.server, loaded: &files.loaded, egui }
-    }
-}
-
-pub fn show(ui: &mut egui::Ui, form: &Form, browser: &mut Browser, images: &mut Images) {
+pub fn show(ui: &mut egui::Ui, form: &Form, search: &mut String, thumbnails: &mut Thumbnails, images: &mut Images) {
     ui.horizontal(|ui| {
         ui.label("assets");
         // Python says whether a crawl is running, the way it says whether a
@@ -95,121 +40,118 @@ pub fn show(ui: &mut egui::Ui, form: &Form, browser: &mut Browser, images: &mut 
             send(Request::Reindex);
         }
         ui.add(
-            egui::TextEdit::singleline(&mut browser.search)
+            egui::TextEdit::singleline(search)
                 .hint_text("search name and tags")
                 .desired_width(f32::INFINITY),
         );
     });
 
-    let terms: Vec<String> = browser.search.split_whitespace().map(str::to_lowercase).collect();
-    let found: Vec<&CatalogAsset> = form
-        .assets()
-        .filter(|asset| asset.role == "object" && matches(asset, &terms))
+    let terms: Vec<String> = search.split_whitespace().map(str::to_lowercase).collect();
+    let found: Vec<(&CatalogAsset, &str)> = form
+        .vocabulary
+        .assets
+        .iter()
+        .map(|asset| (asset, "Arena"))
+        .chain(form.remote.iter().map(|asset| (asset, "SimReady")))
+        .filter(|(asset, _)| asset.role == "object" && matches(asset, &terms))
         .collect();
 
-    // What this frame put on screen, so the rest can be dropped.
-    let mut drawn = HashSet::new();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
-        // Only the visible rows are drawn, which is what makes listing the
+        // Only the visible cards are drawn, which is what makes listing the
         // whole catalogue — a few hundred assets and a thousand props — cost
-        // nothing, and what keeps the uploaded textures down to a screenful.
-        // The height given is a row's own; the spacing between rows is added
-        // to it here, and adding it twice leaves a list longer than its rows.
-        .show_rows(ui, THUMBNAIL, found.len(), |ui, visible| {
-            for asset in &found[visible] {
-                ui.horizontal(|ui| {
-                    thumbnail(ui, asset, browser, images, &mut drawn);
-                    // A click adds the asset onto the anchor; a drag carries it
-                    // out onto the layout, where `super::drop` takes it. One
-                    // widget senses both: egui hands a click on a drag-only
-                    // widget laid over a button to neither of them.
-                    let button = egui::Button::new(&asset.name).sense(egui::Sense::click_and_drag());
-                    let response = ui.add(button).on_hover_text(hover(asset));
-                    if response.clicked() {
-                        add(&form.spec, asset, None);
-                    }
-                    if response.drag_started() {
-                        egui::DragAndDrop::set_payload(ui.ctx(), (*asset).clone());
-                    }
-                });
+        // nothing, and what keeps the uploaded pictures down to a screenful.
+        // The height given is a card's own; the spacing between cards is added
+        // to it here, and adding it twice leaves a list longer than its cards.
+        .show_rows(ui, CARD, found.len(), |ui, visible| {
+            for &(asset, source) in &found[visible] {
+                let in_scene = form.spec.objects.iter().filter(|node| asset.is_named_by(node)).count();
+                let picture = thumbnails.get(&asset.thumbnail, images);
+                let response = asset_card(ui, asset, &details(asset, source), in_scene, picture);
+                // A click adds the asset onto the anchor; a drag carries it
+                // out onto the layout, where `super::drop` takes it.
+                if response.drag_started() {
+                    egui::DragAndDrop::set_payload(ui.ctx(), asset.clone());
+                }
+                if response.on_hover_text(hover(asset)).clicked() {
+                    add(&form.spec, asset, None);
+                }
             }
         });
-
-    browser.evict(&drawn, images);
 }
 
-/// Draw the asset's picture, or leave the space it would take.
-fn thumbnail(
+/// One asset as a card: its picture, its name, and what else is worth knowing
+/// before picking it — where it comes from, how it simulates, what it is
+/// tagged, and how many of it the scene holds already.
+///
+/// The whole card is one widget sensing both clicks and drags, so it can be
+/// picked up anywhere on it. Everything on it is painted rather than laid out
+/// as widgets of its own, which would take the pointer from the card under
+/// them.
+fn asset_card(
     ui: &mut egui::Ui,
     asset: &CatalogAsset,
-    browser: &mut Browser,
-    images: &mut Images,
-    drawn: &mut HashSet<String>,
-) {
-    let size = egui::vec2(THUMBNAIL, THUMBNAIL);
-    let blank = |ui: &mut egui::Ui| {
-        let _ = ui.allocate_exact_size(size, egui::Sense::hover());
+    details: &str,
+    in_scene: usize,
+    picture: Option<egui::TextureId>,
+) -> egui::Response {
+    let size = egui::vec2(ui.available_width(), CARD);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let visuals = ui.visuals();
+    let (fill, stroke) = match response.hovered() || response.dragged() {
+        true => (visuals.widgets.hovered.weak_bg_fill, visuals.widgets.hovered.bg_stroke),
+        false => (card::fill(visuals), visuals.widgets.noninteractive.bg_stroke),
     };
+    let radius = visuals.widgets.noninteractive.corner_radius;
+    ui.painter().rect(rect, radius, fill, stroke, egui::StrokeKind::Inside);
 
-    // Nothing to draw and nothing to wait for: the bucket publishes no picture
-    // beside this layer, or the asset composes its USD and has no layer.
-    if asset.thumbnail.is_empty() {
-        return blank(ui);
-    }
-
-    drawn.insert(asset.thumbnail.clone());
-    match browser.texture(&asset.thumbnail, images) {
-        Some(texture) => {
-            ui.add(egui::Image::new(egui::load::SizedTexture::new(texture, size)));
+    // The picture's square keeps its place whether or not there is a picture,
+    // so the names line up down the list.
+    let inner = rect.shrink(PAD);
+    let square = egui::Rect::from_min_size(inner.min, egui::Vec2::splat(inner.height()));
+    match picture {
+        Some(texture) => egui::Image::new(egui::load::SizedTexture::new(texture, square.size()))
+            .corner_radius(radius)
+            .paint_at(ui, square),
+        None => {
+            ui.painter().rect_filled(square, radius, visuals.extreme_bg_color);
         }
-        // Still reading off the disk. One frame of blank, not a missing row.
-        None => blank(ui),
     }
+
+    let text = egui::Rect::from_min_max(egui::pos2(square.right() + PAD * 1.5, inner.top()), inner.max);
+    let line = |text: egui::RichText, width: f32| {
+        egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Truncate), width, egui::TextStyle::Body)
+    };
+    let mut name_width = text.width();
+    if in_scene > 0 {
+        let badge = egui::RichText::new(format!("{in_scene} in scene")).small();
+        let badge = line(badge.color(visuals.selection.stroke.color), text.width());
+        name_width -= badge.size().x + PAD;
+        ui.painter().galley(egui::pos2(text.right() - badge.size().x, text.top()), badge, visuals.text_color());
+    }
+    let tags = asset.tags.join(" · ");
+    let lines = [
+        line(egui::RichText::new(&asset.name).strong(), name_width),
+        line(egui::RichText::new(details).small().weak(), text.width()),
+        line(egui::RichText::new(tags).small().weak(), text.width()),
+    ];
+    let mut top = text.top();
+    for galley in lines {
+        let height = galley.size().y;
+        ui.painter().galley(egui::pos2(text.left(), top), galley, visuals.text_color());
+        top += height;
+    }
+    response
 }
 
-impl Browser {
-    /// Opened with the list already filtered. `ARENA_VIEWER_SEARCH` is what
-    /// gives a screenshot a search, since there is nobody to type one.
-    pub fn filtered(search: String) -> Self {
-        Self { search, ..Self::default() }
-    }
-
-    /// The picture at `path` as egui draws it, or None while it is still being
-    /// read. Starting that read is this call's own doing, so a path that has
-    /// just arrived is on its way after a frame.
-    fn texture(&mut self, path: &str, images: &mut Images) -> Option<egui::TextureId> {
-        let thumbnail = self.thumbnails.entry(path.to_owned()).or_insert_with(|| Thumbnail {
-            handle: images.server.load(path.to_owned()),
-            texture: None,
-        });
-        if thumbnail.texture.is_none() && images.loaded.contains(&thumbnail.handle) {
-            let handle = EguiTextureHandle::Strong(thumbnail.handle.clone());
-            thumbnail.texture = Some(images.egui.add_image(handle));
-        }
-        thumbnail.texture
-    }
-
-    /// Drop the pictures that are not on screen, once there are more than
-    /// [`RESIDENT`] of them.
-    ///
-    /// Kept until then rather than freed every frame, so scrolling a little way
-    /// back does not read the same files again. A dropped one is loaded afresh
-    /// when it is scrolled to, which is the trade for not holding a texture per
-    /// prop in the index.
-    fn evict(&mut self, drawn: &HashSet<String>, images: &mut Images) {
-        if self.thumbnails.len() <= RESIDENT {
-            return;
-        }
-        self.thumbnails.retain(|path, thumbnail| {
-            if drawn.contains(path) {
-                return true;
-            }
-            // Dropping the handle alone would leave egui an id pointing at an
-            // image that is no longer loaded.
-            images.egui.remove_image(&thumbnail.handle);
-            false
-        });
+/// Where an asset comes from, and the physics it simulates with where it says.
+fn details(asset: &CatalogAsset, source: &str) -> String {
+    match &asset.object_type {
+        Some(object_type) => format!("{source} · {object_type}"),
+        None => source.to_owned(),
     }
 }
 
@@ -226,7 +168,7 @@ fn matches(asset: &CatalogAsset, terms: &[String]) -> bool {
 /// What a row says when hovered: the registry name it writes, and for a prop
 /// the URL that makes it — every prop writes the same registry name, so the
 /// name alone would not say which one this is.
-fn hover(asset: &CatalogAsset) -> String {
+pub(super) fn hover(asset: &CatalogAsset) -> String {
     match asset.usd_path.as_str() {
         "" => asset.registry_name.clone(),
         url => format!("{}\n{url}", asset.registry_name),
@@ -322,6 +264,7 @@ fn unused(stem: &str, taken: &[&str]) -> String {
 mod tests {
     use super::*;
     use crate::spec::Relation;
+    use std::collections::HashMap;
 
     /// A SimReady prop as the payload carries one: one registry name for all
     /// of them, and the URL that says which.
