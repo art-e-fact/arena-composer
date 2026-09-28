@@ -229,7 +229,7 @@ class Kind:
 @cache
 def relations() -> tuple[Kind, ...]:
     """Every registered relation kind. Not just the ``agent_ready`` ones —
-    those are five of the twelve, and the specs in this repo use eleven."""
+    those are five of the twelve."""
     from isaaclab_arena.assets.registries import ObjectRelationLibraryRegistry
 
     registry = ObjectRelationLibraryRegistry()

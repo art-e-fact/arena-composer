@@ -4,12 +4,14 @@ build-backend = "maturin"
 
 [project]
 name = "arena-composer"
-description = "Custom IsaacLab-Arena environments for this project, plus a Bevy viewer for them"
+description = "A live editor, headless renderer and MCP server for IsaacLab-Arena environment specs"
 # abi3-py312: the extension module is built against the 3.12 stable ABI.
 requires-python = ">=3.12"
 dynamic = ["version"]
 dependencies = [
-    "isaaclab_arena",
+    # Not on PyPI: installed into the venv Arena already built. Bounded to the
+    # minor this was tested against, since some of what it imports is private.
+    "isaaclab_arena>=0.3,<0.4",
     "msgpack>=1.1",
     "numpy",
     # The MCP server (arena_composer.mcp_server).
@@ -23,11 +25,14 @@ dependencies = [
 arena-resolve-layout = "arena_composer.resolve_layout:main"
 arena-view = "arena_composer.view:main"
 arena-mcp = "arena_composer.mcp_server:main"
+arena-composer = "arena_composer.cli:main"
 
 [tool.maturin]
 features = ["extension-module"]
 module-name = "arena_composer._core"
 python-source = "python"
+# Bytecode left by a local test run is not part of the package.
+exclude = ["**/__pycache__/**"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

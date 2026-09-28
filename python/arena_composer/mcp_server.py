@@ -35,9 +35,9 @@ from arena_composer.resolve_layout import DEFAULT_SEED, SpecError
 #: Per-tool detail lives in the tool docstrings; this is what ties them into an
 #: order of work and says what each step costs.
 INSTRUCTIONS = """\
-Authoring tools for IsaacLab-Arena environment specs: the YAML under
-`environments/` that names a scene's robot, background and objects, and the
-spatial relations a solver turns into a layout.
+Authoring tools for IsaacLab-Arena environment specs: the YAML that names a
+scene's robot, background and objects, and the spatial relations a solver turns
+into a layout.
 
 A spec is usually two files — a task YAML including a scene YAML through
 `external_yaml` — which validate as one document. Address the tools at the task;
