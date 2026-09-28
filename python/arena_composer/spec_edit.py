@@ -10,7 +10,8 @@ not have is the two things this module adds:
   owns the key.
 * **What an edit drags with it.** Removing an object also has to remove the
   relations that name it, and renaming one has to carry them across, or the spec
-  stops loading with a dangling reference.
+  stops loading with a dangling reference. Switching the embodiment has to shed
+  the params the new one does not take, or the spec stops building.
 
 Every edit is checked against the merged spec before either file is written, so
 a rejected edit leaves the pair on disk exactly as it was.
@@ -179,13 +180,21 @@ class SpecFiles:
         # Arena checks that a registry name exists, not what the asset behind
         # it takes; an entry short of a required parameter fails only when the
         # spec is built.
+        from isaaclab_arena.assets.registries import AssetRegistry
+        from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
+
         from arena_composer import catalog
 
-        return [
+        errors = [
             f"objects.{index}.params: {obj.registry_name} needs {', '.join(missing)}"
             for index, obj in enumerate(spec.objects)
             if (missing := catalog.missing_params(obj.registry_name, obj.params))
         ]
+        # Nor that the asset is the kind its slot holds: a banana validates as
+        # the embodiment, and fails when the scene is built.
+        if not issubclass(AssetRegistry().get_asset_by_name(spec.embodiment.registry_name), EmbodimentBase):
+            errors.append(f"embodiment.registry_name: {spec.embodiment.registry_name} is not an embodiment")
+        return errors
 
     def write(self, changed: list[str]) -> Result:
         """Validate the text an edit produced, then write the files it changes."""
@@ -269,7 +278,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     reads — ``["relations", 2, "params", "side"]`` — and `op` is one of:
 
     * ``set`` — replace the leaf `steps` names. Setting an entry's ``id`` renames
-      it in the relations that name it too.
+      it in the relations that name it too, and setting the embodiment's
+      ``registry_name`` drops the params the new one does not take.
     * ``insert`` — append `value` to the list `steps` names.
     * ``remove`` — drop what `steps` names: an entry, with any relation left
       dangling, or a parameter, which hands it back to the kind's default.
@@ -305,6 +315,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             if last == "id" and key in _ID_SECTIONS and previous and previous != value:
                 if renamed := _rename_node(files, previous, value):
                     changed.append(f"renamed {previous!r} in {renamed} place(s)")
+            if steps == ["embodiment", "registry_name"] and (dropped := _drop_params_not_taken(parent, value)):
+                changed.append(f"dropped embodiment.params {', '.join(dropped)}, which {value} does not take")
             return files.write(changed)
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
@@ -413,6 +425,33 @@ def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
             params[name] = node_id
             renamed += 1
     return renamed
+
+
+def _drop_params_not_taken(entry: Any, registry_name: Any) -> list[str]:
+    """Remove the params in `entry` that `registry_name`'s constructor does not
+    take, and name them.
+
+    A robot's params belong to its constructor, and one passed to a constructor
+    that does not take it fails the build. What the new one also takes stays:
+    ``enable_cameras`` on any switch, a stand's height between two DROID
+    variants. A param is matched by name, not meaning, so an
+    ``initial_joint_pose`` carries over to a robot with other joints.
+    """
+    from isaaclab_arena.assets.registries import AssetRegistry
+
+    from arena_composer import catalog
+
+    params = entry.get("params")
+    # An unregistered name is left to validation, which refuses it by name.
+    if not params or not isinstance(registry_name, str) or not AssetRegistry().is_registered(registry_name):
+        return []
+    dropped = catalog.unexpected_params(registry_name, params)
+    for name in dropped:
+        del params[name]
+    # As in `apply`'s remove: an emptied commented mapping does not parse.
+    if not params:
+        entry["params"] = {}
+    return dropped
 
 
 def remove_object(path: Path, node_id: str) -> Result:

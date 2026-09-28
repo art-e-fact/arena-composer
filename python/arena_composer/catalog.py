@@ -173,6 +173,18 @@ def missing_params(registry_name: str, params: dict[str, Any]) -> list[str]:
     ]
 
 
+def unexpected_params(registry_name: str, params: dict[str, Any]) -> list[str]:
+    """Keys of `params` the asset's constructor does not take — what an entry
+    carries over from the asset it named before, and what fails the build with
+    a TypeError. None for a constructor that takes ``**kwargs``."""
+    from isaaclab_arena.assets.registries import AssetRegistry
+
+    taken = inspect.signature(AssetRegistry().get_asset_by_name(registry_name).__init__).parameters
+    if any(param.kind is param.VAR_KEYWORD for param in taken.values()):
+        return []
+    return [name for name in params if name not in taken]
+
+
 #: Modules whose classes name a node in the graph rather than a value. A
 #: parameter annotated with one holds an id — ``pick_up_object: apple`` — so it
 #: is edited by picking from the spec's ids, not by typing.
