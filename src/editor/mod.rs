@@ -199,7 +199,7 @@ fn beside_the_panel(window: egui::Vec2, panel: f32) -> SubCameraView {
 /// Not `bevy_panorbit_camera`'s own `bevy_egui` feature, which exists to do
 /// exactly this: it is built against a different `bevy_egui` than the one we
 /// draw with, so turning it on compiles a second egui and gates the camera on a
-/// context nothing ever draws into. See the note in `AGENTS.md`.
+/// context nothing ever draws into. See `docs/editor.md`.
 fn keep_the_camera_off_the_panel(
     mouse: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,
