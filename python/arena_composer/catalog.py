@@ -93,8 +93,10 @@ def catalog() -> tuple[Asset, ...]:
 def _class_usd_path(cls: type) -> str | None:
     """The USD a registered class spawns, where that is a plain attribute. Not
     every class has one: some compose their USD at construction, some spawn
-    procedurally."""
-    usd_path = getattr(cls, "usd_path", None)
+    procedurally, and Lightwheel's resolve theirs on first read — a descriptor
+    that asks api.lightwheel.net every time, cached or not. Read statically, so
+    listing assets never touches the network and those six have no path."""
+    usd_path = inspect.getattr_static(cls, "usd_path", None)
     return usd_path if isinstance(usd_path, str) and usd_path else None
 
 

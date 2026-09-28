@@ -48,6 +48,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - A number typed into the editor panel was saved even when escaped from, and saved twice when
   entered.
 - The status line drew its separators as boxes.
+- `arena-view` no longer exits at startup when api.lightwheel.net cannot be reached, and starts
+  about seven seconds sooner when it can; `arena-mcp`'s first `search_assets` gets the same. A spec
+  that places one of Arena's Lightwheel assets still needs the network to build.
 
 ## [0.2.0] - 2026-09-28
 

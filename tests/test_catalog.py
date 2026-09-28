@@ -4,6 +4,7 @@ that stubs it tests the uninteresting half."""
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 from arena_composer import catalog, simready
@@ -33,6 +34,17 @@ def test_without_an_index_search_is_the_registry(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(simready, "index_path", lambda: tmp_path / "none.json")
     assert catalog.remote() == ()
     assert catalog.search("banana")[0].registry_name == "banana_ycb_robolab"
+
+
+def test_listing_assets_stays_off_the_network(monkeypatch):
+    # Lightwheel's assets resolve their USD by asking its server when read.
+    def offline(*args, **kwargs):
+        raise OSError("no network in this test")
+
+    monkeypatch.setattr(socket, "getaddrinfo", offline)
+    catalog.catalog.cache_clear()
+    microwave = next(asset for asset in catalog.catalog() if asset.registry_name == "microwave")
+    assert microwave.usd_path is None
 
 
 def test_only_the_generic_simready_object_needs_a_param():
