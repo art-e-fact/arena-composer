@@ -1,15 +1,15 @@
 //! Dragging an asset out of the browser and onto the layout.
 //!
-//! The drag is egui's from end to end. A browser row's button hands egui the
-//! asset when a drag starts on it, and that payload can be read by any system
-//! in egui's pass — so the 3D view is a drop target without egui knowing there
-//! is one. The orbit camera stays off throughout, because the drag began on the
-//! panel.
+//! The drag is egui's from end to end. An object's tile in the browser hands
+//! egui the asset when a drag starts on it, and that payload can be read by any
+//! system in egui's pass — so the 3D view is a drop target without egui knowing
+//! there is one. The orbit camera stays off throughout, because the drag began
+//! on the browser's dock.
 //!
 //! While an asset is held over the view, the surface an `on` would stand it on
 //! is drawn, and letting go adds the object with that `on`. Over nothing that
-//! can hold it — the backdrop, the robot — the target is the anchor, as for a
-//! click. Let go over the panel, or press Escape, and nothing is added.
+//! can hold it — the backdrop, the robot — the target is the anchor. Let go
+//! over a panel, or press Escape, and nothing is added.
 
 use bevy::picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings};
 use bevy::prelude::*;
@@ -54,7 +54,7 @@ pub fn drop_onto_the_layout(
             .interactable(false)
             .show(ctx, |ui| egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(&asset.name)));
     }
-    // Back over the panel is a change of mind. egui drops the payload itself
+    // Back over a panel is a change of mind. egui drops the payload itself
     // at the end of the pass the button comes up in.
     if over_panel.0 {
         return Ok(());

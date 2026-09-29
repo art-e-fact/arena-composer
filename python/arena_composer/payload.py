@@ -126,8 +126,9 @@ def _owners(spec_path: str | None) -> dict[str, str]:
 
 
 def _vocabulary() -> dict[str, Any]:
-    """Everything registered with Arena that a spec may name: the assets, and
-    the relation and task kinds with the form that edits each.
+    """Everything registered with Arena that a spec may name: the assets, the
+    relation and task kinds with the form that edits each, and the task
+    compositions a root task may pick.
 
     Sent whole rather than searched. It is ~30 kB against megabytes of
     geometry, and a form filters faster than a round trip.
@@ -139,18 +140,22 @@ def _vocabulary() -> dict[str, Any]:
 
 @cache
 def _kinds() -> dict[str, Any]:
-    """The relation and task kinds, each with the form that edits it. Cached:
-    a form is inferred by introspecting a constructor, and no registry changes
+    """The relation and task kinds, each with the form that edits it, and the
+    task composition names Arena's ``CompositeTaskSpec`` accepts. Cached: a
+    form is inferred by introspecting a constructor, and no registry changes
     while the process runs.
 
     The assets are not cached with them, because an asset's picture arrives
     after the asset does — see :func:`_thumbnail`.
     """
+    from isaaclab_arena.environment_spec.arena_env_graph_types import TaskCompositionType
+
     from arena_composer import catalog
 
     return {
         "relations": [asdict(kind) for kind in catalog.relations()],
         "tasks": [asdict(kind) for kind in catalog.tasks()],
+        "compositions": [value.value for value in TaskCompositionType],
     }
 
 
@@ -167,8 +172,9 @@ def _asset(asset: Any) -> dict[str, Any]:
     `params` is what an entry naming it has to carry beyond the registry name —
     empty for a registered asset, the URL for a SimReady prop — so the panel
     writes an entry that builds without knowing which kind it picked. The URL
-    is given again as `usd_path` whether `params` carries it or not, because a
-    row is searched and hovered by it.
+    is given again as `usd_path` whether `params` carries it or not, because an
+    asset is searched by it and the browser shows it. `category` is a prop's
+    folder under the SimReady root, where the browser's tree files it.
     """
     return {
         "registry_name": asset.registry_name,
@@ -179,6 +185,7 @@ def _asset(asset: Any) -> dict[str, Any]:
         "usd_path": asset.usd_path or "",
         "thumbnail": _thumbnail(asset.usd_path),
         "params": asset.params,
+        "category": asset.category,
     }
 
 

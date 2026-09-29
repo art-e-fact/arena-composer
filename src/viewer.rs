@@ -119,7 +119,7 @@ fn setup(world: &mut World) {
     spawn_camera(world, &scene);
     spawn_hud(world, &scene);
     show_in_form(world, &scene);
-    take_assets(world, std::slice::from_ref(&scene));
+    take_from_all(world, std::slice::from_ref(&scene));
 }
 
 /// Hand a scene to the editor panel, where there is one.
@@ -132,17 +132,20 @@ fn show_in_form(world: &mut World, scene: &Scene) {
     }
 }
 
-/// Keep whatever any of `scenes` says about the assets.
+/// Keep whatever any of `scenes` says about the assets, and every error any of
+/// them carries.
 ///
-/// Apart from [`show_in_form`] because the two answer different messages: a
+/// Apart from [`show_in_form`] because these answer different messages: a
 /// crawl that finishes while an edit is in flight lands on a message of its
-/// own, which need not be the one the panel is drawn from.
-fn take_assets(world: &mut World, scenes: &[Scene]) {
+/// own, which need not be the one the panel is drawn from, and so can a
+/// refusal.
+fn take_from_all(world: &mut World, scenes: &[Scene]) {
     let Some(mut form) = world.get_resource_mut::<crate::editor::Form>() else {
         return;
     };
     for scene in scenes {
         form.take_assets(scene);
+        form.take_errors(scene);
     }
 }
 
@@ -203,7 +206,7 @@ fn apply_updates(world: &mut World) {
     if let Some(scene) = received.iter().rev().find(|scene| scene.assets.is_none()) {
         show_in_form(world, scene);
     }
-    take_assets(world, &received);
+    take_from_all(world, &received);
 
     if ended {
         world.write_message(AppExit::Success);
@@ -226,6 +229,9 @@ fn spawn_camera(world: &mut World, scene: &Scene) {
     ));
 }
 
+/// The status line, in the window's top-left corner: the asset browser docks
+/// along the foot of the view, and the spinner saying a layout is being solved
+/// takes the top-right.
 fn spawn_hud(world: &mut World, scene: &Scene) {
     world.spawn((
         Hud,
@@ -235,13 +241,14 @@ fn spawn_hud(world: &mut World, scene: &Scene) {
         Node {
             position_type: PositionType::Absolute,
             left: px(10),
-            bottom: px(8),
+            top: px(8),
             ..default()
         },
     ));
 }
 
-/// What the status line says about a scene.
+/// What the status line says about a scene. ASCII only: it is drawn in Bevy's
+/// bundled font, which draws anything past that as a box.
 fn hud_line(scene: &Scene) -> String {
     let drawn = scene
         .assets()
@@ -249,7 +256,7 @@ fn hud_line(scene: &Scene) -> String {
         .filter(|asset| !scene.geometry_of(asset).is_empty())
         .count();
     format!(
-        "{}  ·  {drawn}/{} assets drawn  ·  drag orbit · right-drag pan · wheel zoom",
+        "{}  |  {drawn}/{} assets drawn  |  drag orbit, right-drag pan, wheel zoom",
         scene.env_name,
         scene.assets().len(),
     )

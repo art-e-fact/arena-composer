@@ -28,6 +28,7 @@ def test_a_prop_carries_its_picture_once_that_is_on_disk(tmp_path: Path, monkeyp
     assert prop["name"] == "Plastic_Basket_A01"
     assert prop["registry_name"] == "simready_usd_object"
     assert prop["params"] == {"usd_path": f"{simready.BUCKET}/{layer}"}
+    assert prop["category"] == "Residential/Kitchen/Baskets", "where the browser's tree files it"
     assert prop["thumbnail"] == "", "a picture nobody has fetched is not a path"
 
     # Where `view._thumbnails` would have put it. Taken from Isaac Lab's own
@@ -51,6 +52,13 @@ def test_the_props_ride_only_the_message_that_changed_them(tmp_path: Path, monke
     # The registered half carries no parameters, which is what tells the panel
     # an entry naming one needs nothing beyond the registry name.
     assert all(asset["params"] == {} for asset in payload._vocabulary()["assets"])
+
+
+def test_the_vocabulary_carries_the_task_compositions(tmp_path: Path, monkeypatch):
+    """The panel offers these as a dropdown without hard-coding the names
+    Arena's `CompositeTaskSpec` accepts."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    assert payload._vocabulary()["compositions"] == ["atomic", "parallel", "sequential"]
 
 
 def test_a_registered_asset_is_offered_a_picture_too(tmp_path: Path, monkeypatch):

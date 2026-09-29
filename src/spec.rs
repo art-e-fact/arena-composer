@@ -158,6 +158,8 @@ pub struct Vocabulary {
     pub assets: Vec<CatalogAsset>,
     pub relations: Vec<Kind>,
     pub tasks: Vec<Kind>,
+    /// How a task's subtasks combine: `atomic`, `sequential` or `parallel`.
+    pub compositions: Vec<String>,
 }
 
 impl Vocabulary {
@@ -198,6 +200,21 @@ pub struct CatalogAsset {
     /// or there is none to have: this is empty where the bucket publishes
     /// none beside the layer.
     pub thumbnail: String,
+    /// A SimReady prop's folders under the bucket's SimReady root, e.g.
+    /// `Residential/Kitchen/Baskets`: where the browser's tree files it.
+    /// Empty for a registered asset.
+    pub category: String,
+}
+
+impl CatalogAsset {
+    /// Whether `node` is an entry naming this asset: the same registry name,
+    /// carrying the params that pick this asset out. That is all of it for a
+    /// registered asset, and the URL as well for a prop, since every prop
+    /// shares one registry name.
+    pub fn is_named_by(&self, node: &Node) -> bool {
+        self.registry_name == node.registry_name
+            && self.params.iter().all(|(key, value)| node.params.get(key) == Some(value))
+    }
 }
 
 /// A registered relation or task kind, and the form that edits it.
@@ -260,7 +277,10 @@ pub enum Request {
 }
 
 /// One step into the merged spec: `["relations", 2, "params", "side"]`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+///
+/// Hashable, so a whole path can name the widget that edits it: every leaf is
+/// drawn once, and its path is what a half-made edit is kept against.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(untagged)]
 pub enum Step {
     Key(String),
@@ -365,6 +385,30 @@ mod tests {
             );
             assert!(ids.contains(&relation.subject.as_str()), "{:?} names an unknown subject", relation.kind);
         }
+    }
+
+    /// An entry names a prop by its URL as well as the registry name every
+    /// prop shares, and a registered asset by the registry name alone.
+    #[test]
+    fn an_entry_names_the_asset_its_params_pick_out() {
+        let url = |name: &str| Value::text(format!("https://bucket/{name}.usd"));
+        let prop = |name: &str| CatalogAsset {
+            registry_name: "simready_usd_object".into(),
+            params: Params::from([("usd_path".to_owned(), url(name))]),
+            ..Default::default()
+        };
+        let node = Node {
+            id: "basket".into(),
+            registry_name: "simready_usd_object".into(),
+            params: Params::from([("usd_path".to_owned(), url("basket")), ("scale".to_owned(), Value::Number(2.0))]),
+        };
+        assert!(prop("basket").is_named_by(&node), "extra params on the entry hide its asset");
+        assert!(!prop("bucket").is_named_by(&node), "another prop's entry");
+
+        let banana = CatalogAsset { registry_name: "banana_ycb_robolab".into(), ..Default::default() };
+        let named = Node { registry_name: "banana_ycb_robolab".into(), ..Default::default() };
+        assert!(banana.is_named_by(&named));
+        assert!(!banana.is_named_by(&node));
     }
 
     /// The dropdowns offer exactly the ids Arena will accept, in the order the

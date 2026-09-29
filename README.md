@@ -15,7 +15,7 @@ Into the venv Arena is installed in, from a release's wheel. `isaaclab_arena` is
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
 
 ```bash
-gh release download v0.1.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
+gh release download v0.2.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
 uv pip install --python <Arena's venv>/bin/python /tmp/arena-composer/*.whl
 ```
 
@@ -28,4 +28,4 @@ configs Claude Code, VS Code and Cursor read, keeping any that already exist:
 
 ## Developing
 
-See [AGENTS.md](AGENTS.md).
+See [AGENTS.md](AGENTS.md) and [docs/](docs/).

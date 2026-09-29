@@ -51,6 +51,10 @@ class Asset:
     #: What a spec entry has to carry in `params` beyond the registry name:
     #: the URL, for a remote asset.
     params: dict[str, Any] = field(default_factory=dict)
+    #: A remote asset's folders under the SimReady root, e.g.
+    #: ``Residential/Kitchen/Baskets``: where the viewer's browser files it.
+    #: Empty for a registered asset.
+    category: str = ""
 
     def matches(self, terms: list[str]) -> bool:
         """Whether every term appears in the name, a tag or the USD's file name."""
@@ -89,8 +93,10 @@ def catalog() -> tuple[Asset, ...]:
 def _class_usd_path(cls: type) -> str | None:
     """The USD a registered class spawns, where that is a plain attribute. Not
     every class has one: some compose their USD at construction, some spawn
-    procedurally."""
-    usd_path = getattr(cls, "usd_path", None)
+    procedurally, and Lightwheel's resolve theirs on first read — a descriptor
+    that asks api.lightwheel.net every time, cached or not. Read statically, so
+    listing assets never touches the network and those six have no path."""
+    usd_path = inspect.getattr_static(cls, "usd_path", None)
     return usd_path if isinstance(usd_path, str) and usd_path else None
 
 
@@ -124,6 +130,7 @@ def _remote(stamp: int | None) -> tuple[Asset, ...]:
             name=asset.name,
             usd_path=asset.usd_path,
             params={"usd_path": asset.usd_path},
+            category=asset.category,
         )
         for asset in simready.load()
     )

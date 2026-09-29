@@ -33,8 +33,9 @@ pub fn configure(store: &mut GizmoConfigStore) {
     config.line.width = 2.0;
 }
 
-/// The relation's subject: its bounds, its heading.
-const SUBJECT: Srgba = css::ORANGE;
+/// The relation's subject: its bounds, its heading. The graph lights what the
+/// view is drawing in it too.
+pub const SUBJECT: Srgba = css::ORANGE;
 /// Where the relation wants the subject: a surface, a target, a region.
 const REGION: Srgba = css::AQUA;
 /// Where it forbids it.
@@ -123,6 +124,13 @@ pub fn draw_surface(parent: &Asset, params: &Params, kind: Option<&Kind>, gizmos
         Some(surface) => draw.face(surface, 2, surface.0.z, REGION),
         None => draw.face(bounds, 2, bounds.1.z, FORBIDDEN),
     }
+}
+
+/// The box `asset` takes up, in the subject's colour: what hovering its node
+/// in the graph shows.
+pub fn outline(asset: &Asset, gizmos: &mut Gizmos<RelationGizmos>) {
+    let mut draw = Draw { gizmos, to_bevy: arena_to_bevy() };
+    draw.cuboid(world_aabb(asset), SUBJECT);
 }
 
 pub fn find<'a>(placed: &'a Placed, id: &str) -> Option<&'a Asset> {
