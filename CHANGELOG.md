@@ -24,6 +24,7 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   an edge per relation from its subject to what it names, and a chip for each relation that names
   no other node. A click on a node, chip or edge opens its card in the panel and scrolls to it, and
   hovering one shows it in the 3D view. Drag to pan, scroll to zoom, double-click to fit.
+- arena-composer is licensed under MIT OR Apache-2.0, at your option, and the wheel says so.
 
 ### Changed
 
