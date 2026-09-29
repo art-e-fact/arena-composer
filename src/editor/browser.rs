@@ -1,6 +1,6 @@
-//! The asset browser, docked under the 3D view the way Isaac Sim docks its
-//! content browser: a folder tree, a grid of tiles, and the details of the
-//! tile picked.
+//! The asset browser, a tab of the dock under the 3D view (see [`super::dock`])
+//! after Isaac Sim's content browser: a folder tree, a grid of tiles, and the
+//! details of the tile picked.
 //!
 //! A click picks a tile, and the details beside the grid say what it is and
 //! offer what can be done with it: add an object onto the anchor or onto any
@@ -23,12 +23,9 @@ use std::collections::BTreeMap;
 use bevy_egui::egui;
 
 use super::controls::row;
+use super::thumbnails::Pictures;
 use super::{Form, card, send};
 use crate::spec::{CatalogAsset, Params, Request, Spec, Step, Value};
-
-/// How tall the dock opens. Draggable from there, and folded away by its
-/// header or by dragging its edge down to the window's foot.
-const HEIGHT: f32 = 280.0;
 
 /// How wide the tree and the details open.
 const TREE: f32 = 190.0;
@@ -42,8 +39,6 @@ const PICTURE: f32 = 96.0;
 
 /// What the browser remembers between frames. None of it is in the spec.
 pub struct Browser {
-    /// Whether the dock is open, or folded down to its header.
-    open: bool,
     /// What the grid is filtered to.
     search: String,
     /// The folder the grid shows, with everything under it; empty for all.
@@ -65,7 +60,6 @@ impl Default for Browser {
     fn default() -> Self {
         let search = std::env::var("ARENA_VIEWER_SEARCH").unwrap_or_default();
         Self {
-            open: true,
             pick_first: !search.is_empty(),
             search,
             folder: String::new(),
@@ -77,7 +71,7 @@ impl Default for Browser {
 }
 
 /// One asset as the browser lists it.
-struct Listed<'a> {
+pub struct Listed<'a> {
     asset: &'a CatalogAsset,
     /// Where it comes from: `Arena` or `SimReady`.
     source: &'static str,
@@ -85,75 +79,37 @@ struct Listed<'a> {
     folder: String,
 }
 
-/// An asset's picture by the path the payload gave, or None while there is
-/// none to draw: [`super::thumbnails::Thumbnails::get`], outside a test.
-pub type Pictures<'a> = dyn FnMut(&str) -> Option<egui::TextureId> + 'a;
-
-/// Draw the browser docked along the foot of `ui`, and say where it landed.
-pub fn dock(ui: &mut egui::Ui, form: &Form, state: &mut Browser, pictures: &mut Pictures) -> egui::Rect {
-    let listed = listed(form);
-    // Folded, the dock is its header alone. The two are separate panels, so
-    // each keeps its own size. The open one stops at its least height, and
-    // folds only once its edge is dragged on down to the folded one's.
-    let folded = egui::Panel::bottom("assets folded").resizable(false);
-    let open = egui::Panel::bottom("assets").resizable(true).default_size(HEIGHT).min_size(140.0);
-    let mut is_open = state.open;
-    let shown = egui::Panel::show_switched(ui, &mut is_open, folded, open, |ui, open| {
-        let toggled = header(ui, form, state, open, listed.len());
-        if open {
-            ui.separator();
-            body(ui, form, state, &listed, pictures);
-        }
-        toggled
+/// The rest of the dock's header while the browser is its tab: how many
+/// assets there are, the reindex button, the search and the tile size.
+pub fn header(ui: &mut egui::Ui, form: &Form, state: &mut Browser, total: usize) {
+    ui.weak(total.to_string());
+    // Python says whether a crawl is running, the way it says whether a
+    // solve is. A prop list would be the wrong thing to read it from: one
+    // arrives whenever a picture lands or another process rebuilds the
+    // index, neither of which ends the crawl this button started.
+    if form.indexing {
+        ui.spinner().on_hover_text("listing NVIDIA's SimReady props…");
+    } else if ui
+        .button("⟳")
+        .on_hover_text("list NVIDIA's SimReady props and fetch their pictures — a couple of minutes and ~170 MB")
+        .clicked()
+    {
+        send(Request::Reindex);
+    }
+    // Right to left, so the slider keeps the far edge and the search takes
+    // what is left between.
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add(egui::Slider::new(&mut state.tile, 64.0..=192.0).show_value(false)).on_hover_text("tile size");
+        ui.add(
+            egui::TextEdit::singleline(&mut state.search)
+                .hint_text("search name and tags")
+                .desired_width(f32::INFINITY),
+        );
     });
-    state.open = is_open != shown.inner;
-    shown.response.rect
-}
-
-/// The dock's top line: its fold, and while open the reindex button, the
-/// search and the tile size. Says whether the fold was clicked.
-fn header(ui: &mut egui::Ui, form: &Form, state: &mut Browser, open: bool, total: usize) -> bool {
-    ui.horizontal(|ui| {
-        let (glyph, hover) = match open {
-            true => ("⏷", "fold the browser away"),
-            false => ("⏵", "open the asset browser"),
-        };
-        let fold = egui::Button::new(egui::RichText::new(format!("{glyph} assets")).strong()).frame(false);
-        let toggled = ui.add(fold).on_hover_text(hover).clicked();
-        ui.weak(total.to_string());
-        if !open {
-            return toggled;
-        }
-        // Python says whether a crawl is running, the way it says whether a
-        // solve is. A prop list would be the wrong thing to read it from: one
-        // arrives whenever a picture lands or another process rebuilds the
-        // index, neither of which ends the crawl this button started.
-        if form.indexing {
-            ui.spinner().on_hover_text("listing NVIDIA's SimReady props…");
-        } else if ui
-            .button("⟳")
-            .on_hover_text("list NVIDIA's SimReady props and fetch their pictures — a couple of minutes and ~170 MB")
-            .clicked()
-        {
-            send(Request::Reindex);
-        }
-        // Right to left, so the slider keeps the far edge and the search takes
-        // what is left between.
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(egui::Slider::new(&mut state.tile, 64.0..=192.0).show_value(false)).on_hover_text("tile size");
-            ui.add(
-                egui::TextEdit::singleline(&mut state.search)
-                    .hint_text("search name and tags")
-                    .desired_width(f32::INFINITY),
-            );
-        });
-        toggled
-    })
-    .inner
 }
 
 /// The tree on the left, the details on the right, and the grid between.
-fn body(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed], pictures: &mut Pictures) {
+pub fn body(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed], pictures: &mut Pictures) {
     let terms: Vec<String> = state.search.split_whitespace().map(str::to_lowercase).collect();
     let matching: Vec<bool> = listed.iter().map(|item| matches(item.asset, &terms)).collect();
     let tally = tally(listed, &matching);
@@ -187,7 +143,7 @@ fn body(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed], 
 /// Every asset the browser offers, filed where the tree shows it. Objects
 /// first, since adding one is what the browser is mostly for: Arena's, then
 /// SimReady's, then the backgrounds and the robots.
-fn listed(form: &Form) -> Vec<Listed<'_>> {
+pub fn listed(form: &Form) -> Vec<Listed<'_>> {
     let arena = |role: &'static str, folder: &'static str| {
         form.vocabulary.assets.iter().filter(move |asset| asset.role == role).map(move |asset| Listed {
             asset,
@@ -423,9 +379,9 @@ fn picture_or_glyph(ui: &egui::Ui, asset: &CatalogAsset, picture: Option<egui::T
         None => {
             ui.painter().rect_filled(square, radius, ui.visuals().extreme_bg_color);
             let glyph = match asset.role.as_str() {
-                "embodiment" => "🕹",
-                "background" => "🏠",
-                _ => "📦",
+                "embodiment" => card::EMBODIMENT,
+                "background" => card::BACKGROUND,
+                _ => card::OBJECT,
             };
             let font = egui::FontId::proportional(square.height() / 3.0);
             let color = ui.visuals().weak_text_color();

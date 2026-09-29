@@ -11,6 +11,14 @@
 use bevy_egui::egui;
 use egui::collapsing_header::{CollapsingState, paint_default_icon};
 
+/// The glyph each kind of node wears: on its card, on its tile in the asset
+/// browser where it has no picture, and on its node in the graph.
+pub const EMBODIMENT: &str = "🕹";
+pub const BACKGROUND: &str = "🏠";
+pub const OBJECT: &str = "📦";
+pub const OBJECT_SET: &str = "🎲";
+pub const OBJECT_REFERENCE: &str = "📍";
+
 /// What sort of entry a card holds, drawn left of its title.
 pub enum Icon {
     /// A glyph from egui's bundled fonts, and only those: a glyph they lack
@@ -28,6 +36,8 @@ pub struct Card<'a> {
     open: bool,
     pin: Option<&'a mut bool>,
     removable: bool,
+    picked: bool,
+    reveal: bool,
 }
 
 /// What a card reports once it is drawn.
@@ -45,7 +55,16 @@ impl<'a> Card<'a> {
     /// A card with `id` unique in the panel: it keeps the card's fold, and
     /// scopes the ids of what is drawn inside it.
     pub fn new(id: impl egui::AsId, icon: Icon) -> Self {
-        Self { id: egui::Id::new(id), icon, summary: String::new(), open: true, pin: None, removable: false }
+        Self {
+            id: egui::Id::new(id),
+            icon,
+            summary: String::new(),
+            open: true,
+            pin: None,
+            removable: false,
+            picked: false,
+            reveal: false,
+        }
     }
 
     /// What the header says after the title while the body is folded away, so
@@ -73,6 +92,22 @@ impl<'a> Card<'a> {
         self
     }
 
+    /// Outline the card in the selection's colour: its entry is the one picked
+    /// in the graph.
+    pub fn picked(mut self, picked: bool) -> Self {
+        self.picked = picked;
+        self
+    }
+
+    /// Open the card and scroll it into view, as far as it needs to go and no
+    /// further: what picking its entry in the graph does. Asked for on every
+    /// frame until the card has finished unfolding, since until then its
+    /// height, and so how far to scroll, is still changing.
+    pub fn reveal(mut self, reveal: bool) -> Self {
+        self.reveal = reveal;
+        self
+    }
+
     /// Draw the card: `title` in the header, taking whatever width is left to
     /// it, and `body` under it while the card is open.
     ///
@@ -85,9 +120,12 @@ impl<'a> Card<'a> {
         title: impl FnOnce(&mut egui::Ui, &mut C),
         body: impl FnOnce(&mut egui::Ui, &mut C),
     ) -> Shown {
-        let Card { id, icon, summary, open, pin, removable } = self;
+        let Card { id, icon, summary, open, pin, removable, picked, reveal } = self;
         ui.push_id(id, |ui| {
             let mut fold = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id("fold"), open);
+            if reveal {
+                fold.set_open(true);
+            }
             // Begun rather than shown, so the border can be settled after the
             // contents: it lights up while the pointer is over the card.
             let mut card = egui::Frame::group(ui.style()).fill(fill(ui.visuals())).begin(ui);
@@ -116,7 +154,12 @@ impl<'a> Card<'a> {
             fold.show_body_unindented(inner, |ui| body(ui, cx));
 
             let response = card.allocate_space(ui);
-            if response.contains_pointer() {
+            if reveal {
+                response.scroll_to_me(None);
+            }
+            if picked {
+                card.frame.stroke = ui.visuals().selection.stroke;
+            } else if response.contains_pointer() {
                 card.frame.stroke = ui.visuals().widgets.hovered.bg_stroke;
             }
             card.paint(ui);

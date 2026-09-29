@@ -20,6 +20,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   and which of the scene's nodes use it.
 - Backgrounds and robots are in the asset browser, and the details' button makes one the scene's.
 - The details' add button stands the new object on the anchor or on any node picked beside it.
+- A graph tab beside the asset browser draws the spec as Arena's review GUI does: a node per id,
+  an edge per relation from its subject to what it names, and a chip for each relation that names
+  no other node. A click on a node, chip or edge opens its card in the panel and scrolls to it, and
+  hovering one shows it in the 3D view. Drag to pan, scroll to zoom, double-click to fit.
 
 ### Changed
 

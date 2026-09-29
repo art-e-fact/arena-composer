@@ -1,10 +1,10 @@
 # The editor panel
 
 The window's right-hand panel draws the authored spec as a form and edits it over the pipe
-([architecture.md](architecture.md#the-pipe)). The asset browser docks under the 3D view beside it,
-the way Isaac Sim docks its content browser. Start with the module docs of
-[src/editor/mod.rs](../src/editor/mod.rs): immediate mode, no local copy of the spec, every add
-picked from the vocabulary.
+([architecture.md](architecture.md#the-pipe)). A dock under the 3D view beside it holds the asset
+browser and the spatial graph, a tab each, the way Isaac Sim docks its content browser. Start with
+the module docs of [src/editor/mod.rs](../src/editor/mod.rs): immediate mode, no local copy of the
+spec, every add picked from the vocabulary.
 
 | File | What it is |
 | --- | --- |
@@ -12,8 +12,10 @@ picked from the vocabulary.
 | [form.rs](../src/editor/form.rs) | the panel: a section per top-level key, what each entry's card holds; `PanelState` |
 | [card.rs](../src/editor/card.rs) | the card every entry is drawn as |
 | [controls.rs](../src/editor/controls.rs) | the controls inside a card, each turning an edit into a `Request` |
-| [browser.rs](../src/editor/browser.rs) | the asset browser's dock: its tree, tiles and details; what an add writes |
-| [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's tiles and the objects' cards |
+| [dock.rs](../src/editor/dock.rs) | the dock under the view: its fold, and a tab each for the browser and the graph |
+| [browser.rs](../src/editor/browser.rs) | the asset browser: its tree, tiles and details; what an add writes |
+| [graph.rs](../src/editor/graph.rs) | the spatial graph: its layout, and a pick that opens a card |
+| [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's tiles, the objects' cards and their nodes |
 | [drop.rs](../src/editor/drop.rs) | dragging an asset onto the layout |
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
@@ -51,11 +53,17 @@ to `panel`. Three rules keep it working like the others:
   Check a new one against `Ubuntu-Light`, `NotoEmoji-Regular` and `emoji-icon-font` in
   `epaint_default_fonts`, or look at a screenshot.
 
+## The dock
+
+The dock runs along the foot of what the spec panel leaves, and is drawn after it, which is what
+keeps that panel the window's full height. Its header is the fold, a tab each for the asset browser
+and the graph, and the open tab's own controls. Folded, it is its header alone, and a tab clicked
+there opens it on that tab ([dock.rs](../src/editor/dock.rs)).
+
 ## The asset browser
 
-The browser is a dock of its own along the foot of what the spec panel leaves: a folder tree, a grid
-of tiles and the details of the tile picked, each a panel docked inside it. It is drawn after the
-spec panel, which is what keeps that panel the window's full height. Folded, it is its header alone.
+The browser is the dock's first tab: a folder tree, a grid of tiles and the details of the tile
+picked, each a panel docked inside it.
 
 The tree is built each frame from the assets themselves: Arena's under `Arena/` by role, and each
 SimReady prop under `SimReady/` by the `category` the index recorded for it. A folder whose assets
@@ -66,6 +74,39 @@ object, so it can be picked up anywhere, and a label laid over it would take the
 a fixed size because the grid draws only the rows on screen. The browser takes its pictures through
 a closure rather than [thumbnails.rs](../src/editor/thumbnails.rs) itself, which is what lets the
 tests in [browser.rs](../src/editor/browser.rs) drive the grid in a headless `egui::Context`.
+
+## The spatial graph
+
+The dock's second tab draws the spec as Arena's review GUI draws it with Mermaid: a node per id, an
+edge per relation naming a reference, from its subject to it and labelled with its kind, and a
+dashed edge from each object reference to its parent. A relation naming no other node — a unary
+one, or one naming its own subject — is a chip on its subject's node. Nothing in it knows a relation
+kind's name.
+
+It reads down the way the scene stands: what a node is placed against is drawn below it, so the
+anchor, the background and whatever nothing names end up along the foot. The layout is Sugiyama's
+layered one, dagre's, the one Mermaid draws with, built afresh every frame from the spec; `layout`
+in [graph.rs](../src/editor/graph.rs) lists its steps. A label takes a place in a row of its own
+between two rows of nodes, so no label is drawn over a node or another label.
+
+A click on a node, chip or label picks that entry, and the panel opens its card. The pick travels
+as an `Item` — a node by its id, a relation by its position, as pins keep one — and the panel
+turns it into the card's spec path at the start of every frame (`PanelState::pick`), so it follows
+an entry that an edit moves along its list. For `REVEAL` seconds after the click, the card's section
+and the card itself are unfolded and `Response::scroll_to_me(None)` is asked for on every frame:
+the card grows as it unfolds, so how far to scroll changes until it is open, and `None` scrolls no
+further than the card needs. After that the card is only outlined, until the background is
+clicked. The pick reaches the panel a frame late, since the dock is drawn after it.
+
+Hovering one shows it in the view as hovering its card does: a relation's shape, or a node's box
+(`relations::outline`). Whatever the view is drawing is orange in the graph too, the colour of a
+relation's subject there, and a relation hovered or pinned in the panel lights its edge.
+
+The pan and zoom are the graph's own, a `TSTransform` from its points to the pane's. Keep it off
+`egui::Scene`: a scene draws text at the graph's size and scales the mesh, so at any zoom but 1:1
+thin strokes go first, and an id like `table_top` reads as `table top`. Here text is laid out at the
+size it is drawn. The wheel zooms about the pointer, as it zooms the view above; a scene would pan
+with it.
 
 ## Keeping the camera off the panels
 

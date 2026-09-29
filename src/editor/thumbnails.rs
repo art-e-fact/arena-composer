@@ -14,6 +14,12 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 
+/// An asset's picture by the path the payload gave, or None while there is
+/// none to draw: [`Thumbnails::get`], outside a test. What draws a picture
+/// takes one of these rather than [`Thumbnails`] itself, which is what lets a
+/// test draw it in a headless `egui::Context`.
+pub type Pictures<'a> = dyn FnMut(&str) -> Option<egui::TextureId> + 'a;
+
 /// How many pictures stay uploaded. Several screenfuls, so scrolling back is
 /// free, and bounded: a sidecar is 256 px square whatever size it is drawn at,
 /// so each one holds a quarter of a megabyte of texture and the browser is long

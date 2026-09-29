@@ -1,5 +1,6 @@
-//! The editor panel: the authored spec as a form, docked on the right, with
-//! the asset browser docked under the 3D view beside it.
+//! The editor panel: the authored spec as a form, docked on the right, with a
+//! dock under the 3D view beside it holding the asset browser and the spatial
+//! graph.
 //!
 //! Drawn in immediate mode, so the panel *is* the last spec Python sent — there
 //! is no widget tree to keep in step with it, and nothing to rebuild when a new
@@ -33,13 +34,16 @@
 //! already accepts.
 //!
 //! Hovering a relation draws what it asks for over the layout, and a toggle on
-//! each keeps it drawn; see [`relations`].
+//! each keeps it drawn; see [`relations`]. The [`graph`] draws the spec's
+//! nodes and relations as a graph, and a click on one opens its card.
 
 mod browser;
 mod card;
 mod controls;
+mod dock;
 mod drop;
 mod form;
+mod graph;
 mod relations;
 mod thumbnails;
 
@@ -56,7 +60,7 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
 use crate::layout::Placed;
 use crate::scene::Scene as Payload;
-use crate::spec::{CatalogAsset, Request, Spec, Vocabulary};
+use crate::spec::{CatalogAsset, Node, Request, Spec, Vocabulary};
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(EguiPlugin::default())
@@ -196,6 +200,12 @@ impl Form {
     /// Every asset a spec can name, registered and remote alike.
     pub fn assets(&self) -> impl Iterator<Item = &CatalogAsset> {
         self.vocabulary.assets.iter().chain(&self.remote)
+    }
+
+    /// The asset an object names: the most particular one, so a prop's own
+    /// over any registered asset that shares its registry name.
+    fn asset(&self, node: &Node) -> Option<&CatalogAsset> {
+        self.assets().filter(|asset| asset.is_named_by(node)).max_by_key(|asset| asset.params.len())
     }
 
     /// Which file a top-level key lives in, for the badge beside its group.

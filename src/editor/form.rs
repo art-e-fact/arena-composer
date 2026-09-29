@@ -1,6 +1,6 @@
 //! What the panel shows: a section per part of the spec, each entry in it a
-//! [`Card`]. The asset browser docks under the 3D view beside it; see
-//! [`super::browser`].
+//! [`Card`]. The dock under the 3D view beside it holds the asset browser and
+//! the spatial graph; see [`super::dock`].
 //!
 //! A section says what an entry's card holds — its icon, its title, its body —
 //! and the card and the controls in it do the rest; see [`super::card`] and
@@ -12,11 +12,13 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use bevy_panorbit_camera::PanOrbitCamera;
 
-use super::browser::{self, Browser};
-use super::card::{Card, Icon, cross};
+use super::browser;
+use super::card::{self, Card, Icon, cross};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
+use super::dock::{self, Dock};
+use super::graph::Item;
 use super::relations::{self, RelationGizmos};
-use super::thumbnails::{Files, Images, Thumbnails};
+use super::thumbnails::{Files, Images, Pictures, Thumbnails};
 use super::{Form, PointerOverPanel, in_the_view, send};
 use crate::layout::Placed;
 use crate::spec::{Kind, Relation, Request, Step, Value};
@@ -24,12 +26,21 @@ use crate::spec::{Kind, Relation, Request, Step, Value};
 /// How wide the panel opens. Draggable from there.
 const WIDTH: f32 = 360.0;
 
+/// How long after a pick in the graph the panel goes on scrolling its card
+/// into view: long enough for the section and the card to finish unfolding,
+/// and short enough that a scroll of one's own soon wins.
+const REVEAL: f64 = 0.5;
+
 /// Everything the panel remembers that is not in the spec.
 pub struct PanelState {
-    /// The asset browser's search, folder and pick.
-    pub(super) browser: Browser,
-    /// The pictures on hand, for the browser's tiles and the objects' cards.
-    pub(super) thumbnails: Thumbnails,
+    /// The dock under the view: which tab is open, the asset browser's search,
+    /// folder and pick, and the graph's view and pick.
+    pub(super) dock: Dock,
+    /// The entry picked in the graph, by its path in this frame's spec, and
+    /// whether it is still being scrolled into view. Taken from the graph's
+    /// pick as each frame's panel begins; see [`PanelState::picked`].
+    pick: Option<Vec<Step>>,
+    revealing: bool,
     /// The number being dragged or typed into. One, because only one control
     /// can be under the pointer at a time.
     pub(super) editing: Option<Editing>,
@@ -53,6 +64,20 @@ pub struct PanelState {
     show_all: bool,
 }
 
+impl PanelState {
+    /// Whether the entry at `path` is the one picked in the graph.
+    fn picked(&self, path: &[Step]) -> bool {
+        self.pick.as_deref() == Some(path)
+    }
+
+    /// Whether the entry at `path` is the one picked in the graph, or holds
+    /// it, while it is still being brought into view: a section or card to
+    /// unfold, and the card to scroll to.
+    fn revealing(&self, path: &[Step]) -> bool {
+        self.revealing && self.pick.as_ref().is_some_and(|pick| pick.starts_with(path))
+    }
+}
+
 /// A number being edited, before the spec carries it.
 pub struct Editing {
     /// Where in the spec it belongs, so the view can draw the value before the
@@ -72,8 +97,9 @@ impl Default for PanelState {
     fn default() -> Self {
         let shown = std::env::var("ARENA_VIEWER_SHOW_RELATIONS").unwrap_or_default();
         Self {
-            browser: Browser::default(),
-            thumbnails: Thumbnails::default(),
+            dock: Dock::default(),
+            pick: None,
+            revealing: false,
             editing: None,
             typing: HashMap::new(),
             removing: None,
@@ -92,6 +118,9 @@ pub fn draw(
     files: Files,
     mut gizmos: Gizmos<RelationGizmos>,
     mut state: Local<PanelState>,
+    // The pictures on hand, for the browser's tiles, the objects' cards and
+    // their nodes in the graph.
+    mut thumbnails: Local<Thumbnails>,
     mut over_panel: ResMut<PointerOverPanel>,
     camera: Option<Single<(&mut Camera, &mut PanOrbitCamera)>>,
 ) -> Result {
@@ -111,18 +140,18 @@ pub fn draw(
     let shown = egui::Panel::right("spec")
         .default_size(WIDTH)
         .min_size(240.0)
-        .show(&mut window, |ui| panel(ui, &form, &mut state, &mut images));
+        .show(&mut window, |ui| panel(ui, &form, &mut state, &mut |path| thumbnails.get(path, &mut images)));
     // After the panel, so the dock spans the view alone and the panel keeps
     // the window's full height, as Isaac Sim lays out its stage and content
-    // browser.
-    let PanelState { browser, thumbnails, .. } = &mut *state;
-    let dock = browser::dock(&mut window, &form, browser, &mut |path| thumbnails.get(path, &mut images));
-    state.thumbnails.evict(&mut images);
+    // browser. A pick in its graph reaches the panel on the next frame.
+    let pictures = &mut |path: &str| thumbnails.get(path, &mut images);
+    let docked = dock::dock(&mut window, &form, &mut state.dock, &shown.inner, pictures);
+    thumbnails.evict(&mut images);
     // Measured here because this is the only place the panels' rects exist;
     // see [`PointerOverPanel`] for why egui cannot be asked instead.
     over_panel.0 = ctx
         .pointer_interact_pos()
-        .is_some_and(|pointer| shown.response.rect.contains(pointer) || dock.contains(pointer));
+        .is_some_and(|pointer| shown.response.rect.contains(pointer) || docked.rect.contains(pointer));
     // What the two leave of the window, which the layout is framed in rather
     // than behind them, following their edges as they are dragged.
     let view = window.available_rect_before_wrap();
@@ -138,10 +167,23 @@ pub fn draw(
         }
     }
 
-    // The relations the panel wants seen, drawn over the layout. From here
-    // rather than a system of its own: the hover is this frame's, and a gizmo
-    // issued in egui's pass is collected with every other at the frame's end.
-    for &index in &shown.inner {
+    // The relations the panel and the graph want seen, drawn over the layout.
+    // From here rather than a system of its own: the hover is this frame's,
+    // and a gizmo issued in egui's pass is collected with every other at the
+    // frame's end.
+    let mut drawn = shown.inner;
+    match docked.hovered {
+        Some(Item::Relation(index)) => {
+            drawn.insert(index);
+        }
+        Some(Item::Node(id)) => {
+            if let Some(asset) = relations::find(&placed, &id) {
+                relations::outline(asset, &mut gizmos);
+            }
+        }
+        None => {}
+    }
+    for &index in &drawn {
         if let Some(relation) = form.spec.relations.get(index) {
             // Whatever is being dragged right now stands in for what the spec
             // says, so the view follows the number rather than the answer to it.
@@ -230,20 +272,25 @@ fn spinner() -> egui::Spinner {
 }
 
 /// Draw the panel, and say which relations it wants drawn in the view.
-fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Images) -> BTreeSet<usize> {
+fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, pictures: &mut Pictures) -> BTreeSet<usize> {
     // A half-made edit belongs to the spec it was made against.
     if state.revision != form.revision {
         state.revision = form.revision;
         state.editing = None;
         state.typing.clear();
     }
+    // By path, afresh every frame: the graph picks an entry by its id, and an
+    // edit can move it along its list.
+    let pick = state.dock.graph.picked.as_ref();
+    state.pick = pick.and_then(|pick| pick.item.path(&form.spec));
+    state.revealing = pick.is_some_and(|pick| ui.input(|input| input.time) - pick.at < REVEAL);
 
     let shown = egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
             embodiment(ui, form, state);
             background(ui, form, state);
-            objects(ui, form, state, images);
+            objects(ui, form, state, pictures);
             object_sets(ui, form, state);
             object_references(ui, form, state);
             let shown = relations(ui, form, state);
@@ -268,8 +315,9 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Im
 fn embodiment(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let node = &form.spec.embodiment;
     let path = [Step::from("embodiment")];
-    section(ui, "embodiment", None, form.owner("embodiment"), |ui| {
-        Card::new(&path, Icon::Glyph("🕹")).summary(&node.registry_name).folded().show(
+    section(ui, "embodiment", None, form.owner("embodiment"), state.revealing(&path), |ui| {
+        let card = Card::new(&path, Icon::Glyph(card::EMBODIMENT)).summary(&node.registry_name).folded();
+        card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
             ui,
             state,
             |ui, state| {
@@ -292,8 +340,9 @@ fn embodiment(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
 fn background(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let node = &form.spec.background;
     let path = [Step::from("background")];
-    section(ui, "background", None, form.owner("background"), |ui| {
-        Card::new(&path, Icon::Glyph("🏠")).summary(&node.registry_name).folded().show(
+    section(ui, "background", None, form.owner("background"), state.revealing(&path), |ui| {
+        let card = Card::new(&path, Icon::Glyph(card::BACKGROUND)).summary(&node.registry_name).folded();
+        card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
             ui,
             state,
             |ui, state| {
@@ -322,25 +371,22 @@ fn registry_options(form: &Form, role: &str) -> Vec<(String, Value)> {
 
 /// The objects, each titled by its id and pictured by its asset. Folded, since
 /// the header says what there is to say: the body holds only the asset.
-fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, images: &mut Images) {
-    section(ui, "objects", Some(form.spec.objects.len()), form.owner("objects"), |ui| {
+fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, pictures: &mut Pictures) {
+    let revealing = state.revealing(&[Step::from("objects")]);
+    section(ui, "objects", Some(form.spec.objects.len()), form.owner("objects"), revealing, |ui| {
         // No add button: an object is an asset somebody offers, and the
         // browser under the view is where those are. Picking there is what
         // makes "add" a decision rather than a surprise.
         ui.weak("add from the asset browser under the view");
         for (index, node) in form.spec.objects.iter().enumerate() {
             let path = vec![Step::from("objects"), Step::from(index)];
-            // The most particular asset the entry names: a prop's own, over
-            // any registered asset that shares its registry name.
-            let asset = form
-                .assets()
-                .filter(|asset| asset.is_named_by(node))
-                .max_by_key(|asset| asset.params.len());
+            let asset = form.asset(node);
             let name = asset.map_or(node.registry_name.as_str(), |asset| asset.name.as_str());
             let icon = asset
-                .and_then(|asset| state.thumbnails.get(&asset.thumbnail, images))
-                .map_or(Icon::Glyph("📦"), Icon::Picture);
-            let card = Card::new(&path, icon).summary(name).folded().removable().show(
+                .and_then(|asset| pictures(&asset.thumbnail))
+                .map_or(Icon::Glyph(card::OBJECT), Icon::Picture);
+            let card = Card::new(&path, icon).summary(name).folded().removable();
+            let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
                 |ui, state| {
@@ -369,11 +415,13 @@ fn object_sets(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     if sets.is_empty() {
         return;
     }
-    section(ui, "object sets", Some(sets.len()), form.owner("object_sets"), |ui| {
+    let revealing = state.revealing(&[Step::from("object_sets")]);
+    section(ui, "object sets", Some(sets.len()), form.owner("object_sets"), revealing, |ui| {
         for (index, entry) in sets.iter().enumerate() {
             let path = vec![Step::from("object_sets"), Step::from(index)];
             let members = entry.members.join(", ");
-            let card = Card::new(&path, Icon::Glyph("🎲")).summary(&members).removable().show(
+            let card = Card::new(&path, Icon::Glyph(card::OBJECT_SET)).summary(&members).removable();
+            let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
                 |ui, state| {
@@ -403,10 +451,13 @@ fn object_references(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
         return;
     }
     let ids = form.spec.node_ids();
-    section(ui, "object references", Some(references.len()), form.owner("object_references"), |ui| {
+    let revealing = state.revealing(&[Step::from("object_references")]);
+    let owner = form.owner("object_references");
+    section(ui, "object references", Some(references.len()), owner, revealing, |ui| {
         for (index, entry) in references.iter().enumerate() {
             let path = vec![Step::from("object_references"), Step::from(index)];
-            let card = Card::new(&path, Icon::Glyph("📍")).summary(&entry.parent_id).removable().show(
+            let card = Card::new(&path, Icon::Glyph(card::OBJECT_REFERENCE)).summary(&entry.parent_id).removable();
+            let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
                 |ui, state| {
@@ -438,7 +489,8 @@ fn object_references(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
 fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet<usize> {
     let ids = form.spec.node_ids();
     let mut shown = BTreeSet::new();
-    section(ui, "relations", Some(form.spec.relations.len()), form.owner("relations"), |ui| {
+    let revealing = state.revealing(&[Step::from("relations")]);
+    section(ui, "relations", Some(form.spec.relations.len()), form.owner("relations"), revealing, |ui| {
         let options = relation_options(form, subject_default(form), &form.spec.background.id, &ids);
         add_menu(ui, "+ relation", options, &[Step::from("relations")]);
 
@@ -457,7 +509,9 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
             };
 
             let mut pinned = state.pinned.contains(&index);
-            let card = Card::new(&path, Icon::Glyph("🔗")).summary(summary).pin(&mut pinned).removable().show(
+            let (picked, revealing) = (state.picked(&path), state.revealing(&path));
+            let card = Card::new(&path, Icon::Glyph("🔗")).summary(summary).pin(&mut pinned).removable();
+            let card = card.picked(picked).reveal(revealing).show(
                 ui,
                 state,
                 |ui, _| {
@@ -542,7 +596,7 @@ fn task(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let path = [Step::from("task")];
     let subtasks = with(&path, "subtasks");
     let ids = form.spec.node_ids();
-    section(ui, "task", None, form.owner("task"), |ui| {
+    section(ui, "task", None, form.owner("task"), state.revealing(&path), |ui| {
         Card::new(&path, Icon::Glyph("🎯")).summary(&task.composition).show(
             ui,
             state,
@@ -695,8 +749,16 @@ fn subject_default(form: &Form) -> &str {
 /// list; a section holding one entry has none.
 ///
 /// Unindented: the cards are bordered already, and the width an indent would
-/// take is what their controls need.
-fn section(ui: &mut egui::Ui, name: &str, count: Option<usize>, owner: &str, body: impl FnOnce(&mut egui::Ui)) {
+/// take is what their controls need. `reveal` unfolds it, for an entry in it
+/// being picked in the graph.
+fn section(
+    ui: &mut egui::Ui,
+    name: &str,
+    count: Option<usize>,
+    owner: &str,
+    reveal: bool,
+    body: impl FnOnce(&mut egui::Ui),
+) {
     let count = count.map_or(String::new(), |count| format!("  ({count})"));
     let owner = match owner {
         "" => String::new(),
@@ -705,12 +767,14 @@ fn section(ui: &mut egui::Ui, name: &str, count: Option<usize>, owner: &str, bod
     egui::CollapsingHeader::new(format!("{name}{count}{owner}"))
         .id_salt(name)
         .default_open(true)
+        .open(reveal.then_some(true))
         .show_unindented(ui, body);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::graph::Pick;
     use crate::spec::{Field, Params};
     use std::collections::HashMap;
 
@@ -835,6 +899,64 @@ mod tests {
             Step::from("clearance_m"),
         ];
         assert!(pending(&relation, 3, &dragging(subtask)).is_none(), "not a relation parameter");
+    }
+
+    /// The texts drawn where they can be seen: inside the clip of whatever
+    /// they were drawn in, which for a card is the panel's scrolled view.
+    fn visible(output: &egui::FullOutput) -> Vec<String> {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 400.0));
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    let drawn = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    let seen = clipped.clip_rect.intersect(screen);
+                    seen.intersects(drawn).then(|| text.galley.text().to_owned())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A pick in the graph unfolds the entry's card and scrolls the panel to
+    /// it, however far down its list it is: the card's id comes into view,
+    /// and it is the one card open.
+    #[test]
+    fn a_pick_in_the_graph_opens_its_card_in_view() {
+        let mut form = Form::default();
+        form.spec.objects = (0..40)
+            .map(|at| crate::spec::Node { id: format!("obj{at}"), registry_name: format!("thing{at}"), ..Default::default() })
+            .collect();
+        let ctx = egui::Context::default();
+        let mut state = PanelState::default();
+        let mut time = 0.0;
+        let mut frame = |state: &mut PanelState| {
+            // Sixty a second, as the panel unfolds and scrolls in real time.
+            time += 1.0 / 60.0;
+            let input = egui::RawInput {
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 400.0))),
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                panel(ui, &form, state, &mut |_| None);
+            });
+            let seen = visible(&output);
+            output.drop_without_applying_deltas();
+            (seen, time)
+        };
+
+        let (seen, now) = frame(&mut state);
+        assert!(!seen.iter().any(|text| text == "obj35"), "already in view: {seen:?}");
+        state.dock.graph.picked = Some(Pick { item: Item::Node("obj35".into()), at: now });
+        let mut seen = Vec::new();
+        for _ in 0..40 {
+            seen = frame(&mut state).0;
+        }
+        assert!(seen.iter().any(|text| text == "obj35"), "not scrolled to: {seen:?}");
+        let open = seen.iter().filter(|text| *text == "asset").count();
+        assert_eq!(open, 1, "the picked card is not the one open: {seen:?}");
     }
 
     /// A folded subtask says what it is done to, in the order its kind lists
