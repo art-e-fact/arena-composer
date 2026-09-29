@@ -90,13 +90,13 @@ in [graph.rs](../src/editor/graph.rs) lists its steps. A label takes a place in 
 between two rows of nodes, so no label is drawn over a node or another label.
 
 A click on a node, chip or label picks that entry, and the panel opens its card. The pick travels
-as an `Item` — a node by its id, a relation by its position, as pins keep one — and the panel
-turns it into the card's spec path at the start of every frame (`PanelState::pick`), so it follows
-an entry that an edit moves along its list. For `REVEAL` seconds after the click, the card's section
+as an `Item` — a node by its id, a relation by its position, as pins keep one — which the panel
+turns into the card's spec path at the start of every frame (`PanelState::pick`). A change to the
+spec drops the pick: a rename or a removal can hand its id or position to another entry. For `REVEAL` seconds after the click, the card's section
 and the card itself are unfolded and `Response::scroll_to_me(None)` is asked for on every frame:
 the card grows as it unfolds, so how far to scroll changes until it is open, and `None` scrolls no
 further than the card needs. After that the card is only outlined, until the background is
-clicked. The pick reaches the panel a frame late, since the dock is drawn after it.
+clicked or the spec changes. The pick reaches the panel a frame late, since the dock is drawn after it.
 
 Hovering one shows it in the view as hovering its card does: a relation's shape, or a node's box
 (`relations::outline`). Whatever the view is drawing is orange in the graph too, the colour of a

@@ -13,7 +13,7 @@
 //! A click on a node, a chip or an edge's label picks that entry, and the
 //! panel opens its card and scrolls to it (`PanelState` in [`super::form`]).
 //! The card stays outlined while the pick stands; a click on the background
-//! drops it. Hovering one shows it in the view the way hovering its card does:
+//! drops it, and so does any change to the spec. Hovering one shows it in the view the way hovering its card does:
 //! a relation's shape, or a node's box. What the view is drawing is orange here
 //! too, the colour it draws a relation's subject in.
 //!
@@ -104,7 +104,8 @@ pub struct Graph {
     /// zoomed by hand. Until then, None: the whole graph fitted to the pane,
     /// following the graph and the pane as either changes.
     view: Option<TSTransform>,
-    /// The entry last picked, until the background is clicked.
+    /// The entry last picked, until the background is clicked or the spec
+    /// changes, which drops it in `form::panel`.
     pub picked: Option<Pick>,
 }
 

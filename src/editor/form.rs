@@ -273,14 +273,15 @@ fn spinner() -> egui::Spinner {
 
 /// Draw the panel, and say which relations it wants drawn in the view.
 fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, pictures: &mut Pictures) -> BTreeSet<usize> {
-    // A half-made edit belongs to the spec it was made against.
+    // A half-made edit belongs to the spec it was made against, and so does a
+    // pick in the graph: it names a relation by position and a node by id, and
+    // an edit can hand either to another entry.
     if state.revision != form.revision {
         state.revision = form.revision;
         state.editing = None;
         state.typing.clear();
+        state.dock.graph.picked = None;
     }
-    // By path, afresh every frame: the graph picks an entry by its id, and an
-    // edit can move it along its list.
     let pick = state.dock.graph.picked.as_ref();
     state.pick = pick.and_then(|pick| pick.item.path(&form.spec));
     state.revealing = pick.is_some_and(|pick| ui.input(|input| input.time) - pick.at < REVEAL);
@@ -931,7 +932,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = PanelState::default();
         let mut time = 0.0;
-        let mut frame = |state: &mut PanelState| {
+        let mut frame = |form: &Form, state: &mut PanelState| {
             // Sixty a second, as the panel unfolds and scrolls in real time.
             time += 1.0 / 60.0;
             let input = egui::RawInput {
@@ -940,23 +941,28 @@ mod tests {
                 ..Default::default()
             };
             let output = ctx.run_ui(input, |ui| {
-                panel(ui, &form, state, &mut |_| None);
+                panel(ui, form, state, &mut |_| None);
             });
             let seen = visible(&output);
             output.drop_without_applying_deltas();
             (seen, time)
         };
 
-        let (seen, now) = frame(&mut state);
+        let (seen, now) = frame(&form, &mut state);
         assert!(!seen.iter().any(|text| text == "obj35"), "already in view: {seen:?}");
         state.dock.graph.picked = Some(Pick { item: Item::Node("obj35".into()), at: now });
         let mut seen = Vec::new();
         for _ in 0..40 {
-            seen = frame(&mut state).0;
+            seen = frame(&form, &mut state).0;
         }
         assert!(seen.iter().any(|text| text == "obj35"), "not scrolled to: {seen:?}");
         let open = seen.iter().filter(|text| *text == "asset").count();
         assert_eq!(open, 1, "the picked card is not the one open: {seen:?}");
+
+        // Only until the spec changes: the entry it named may be elsewhere.
+        form.revision += 1;
+        frame(&form, &mut state);
+        assert!(state.dock.graph.picked.is_none(), "a pick outlived the spec it was made on");
     }
 
     /// A folded subtask says what it is done to, in the order its kind lists
