@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2024"
 description = "Bevy viewer for dry-resolved IsaacLab-Arena layouts."
 authors = ["Andras Polgar <azazdeaz@gmail.com>"]
+license = "MIT OR Apache-2.0"
 
 [lib]
 name = "arena_composer"
