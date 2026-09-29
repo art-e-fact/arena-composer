@@ -44,7 +44,7 @@ const MARGIN: f32 = 12.0;
 /// The space between a node's border and what is on it.
 const PAD: Vec2 = vec2(7.0, 5.0);
 /// The same for a chip, and an edge's label.
-const CHIP_PAD: Vec2 = vec2(5.0, 1.0);
+const CHIP_PAD: Vec2 = vec2(5.0, 2.0);
 /// How far apart the edges leaving or reaching one side of a node are spread.
 const PORT: f32 = 14.0;
 /// How long an arrowhead is.
@@ -429,7 +429,8 @@ impl<'a> Drawn<'a> {
                     false => card::fill(&visuals),
                 };
                 painter.rect(rect, radius, fill, stroke, egui::StrokeKind::Inside);
-                painter.galley(rect.min + CHIP_PAD * scale, write(kind(relation), small, visuals.text_color()), color);
+                let text = write(kind(relation), small, visuals.text_color());
+                painter.galley(centered(rect, &text), text, color);
                 report(response, Item::Relation(relation), summary(relation));
             }
         }
@@ -481,11 +482,8 @@ impl<'a> Drawn<'a> {
                     (false, false) => Stroke::NONE,
                 };
                 painter.rect(view * chip, radius, Color32::from_black_alpha(90), stroke, egui::StrokeKind::Inside);
-                painter.galley(
-                    view * (chip.min + CHIP_PAD),
-                    write(kind(relation), small, Color32::WHITE),
-                    Color32::WHITE,
-                );
+                let text = write(kind(relation), small, Color32::WHITE);
+                painter.galley(centered(view * chip, &text), text, Color32::WHITE);
                 report(response, item, summary(relation));
             }
         }
@@ -507,6 +505,14 @@ fn node_size(title: &Galley, chips: &[Arc<Galley>]) -> Vec2 {
     vec2(header.x.max(row), header.y + PAD.y + height) + 2.0 * PAD
 }
 
+/// Where to put `text` for its letters to sit in the middle of `rect`. Text
+/// is laid out afresh at each zoom, where its metrics round differently from
+/// the size it was measured at, so it is centred on what it draws rather than
+/// set in by a padding.
+fn centered(rect: Rect, text: &Galley) -> Pos2 {
+    pos2(rect.center().x - text.size().x / 2.0, rect.center().y - text.mesh_bounds.center().y)
+}
+
 /// The colour the view draws a relation's subject in, which is what the graph
 /// lights whatever the view is drawing with.
 fn shown_color() -> Color32 {
@@ -515,8 +521,14 @@ fn shown_color() -> Color32 {
 }
 
 /// Paint an edge along its route: a curve down each gap between rows, and a
-/// straight run through each row it passes. The arrowhead goes where it ends.
+/// straight run through each row it passes. The arrowhead goes where it ends,
+/// and the line stops at its base, so it meets the head square on.
 fn paint_route(painter: &egui::Painter, points: &[Pos2], stroke: Stroke, arrow: f32, dashed: bool) {
+    let [.., before, tip] = *points else { return };
+    let down = if tip.y >= before.y { 1.0 } else { -1.0 };
+    let base = tip - vec2(0.0, down * arrow);
+    let mut points = points.to_vec();
+    *points.last_mut().unwrap() = base;
     for (at, pair) in points.windows(2).enumerate() {
         let (from, to) = (pair[0], pair[1]);
         let line = match at % 2 {
@@ -535,12 +547,8 @@ fn paint_route(painter: &egui::Painter, points: &[Pos2], stroke: Stroke, arrow: 
             }
         }
     }
-    if let [.., before, end] = points {
-        let down = if end.y >= before.y { 1.0 } else { -1.0 };
-        let base = *end - vec2(0.0, down * arrow);
-        let head = vec![*end, base + vec2(arrow / 2.0, 0.0), base - vec2(arrow / 2.0, 0.0)];
-        painter.add(egui::Shape::convex_polygon(head, stroke.color, Stroke::NONE));
-    }
+    let head = vec![tip, base + vec2(arrow / 2.0, 0.0), base - vec2(arrow / 2.0, 0.0)];
+    painter.add(egui::Shape::convex_polygon(head, stroke.color, Stroke::NONE));
 }
 
 /// Where everything is drawn, in points, the graph's top-left at the origin.
