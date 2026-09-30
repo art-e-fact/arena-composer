@@ -42,6 +42,8 @@ What currently doesn't draw. Check here before treating a render bug as new.
   only `project_uvw` and `world_or_object` has nothing to read.
 - Prims that bind no material at all (~13% of the galileo backgrounds).
 - Lights authored inside an asset.
+- Mirroring transforms (a negative determinant). `_place` does not reverse their winding, so a mesh
+  under one is culled from outside unless its material is double-sided. No cached asset authors one.
 - Deformable objects (`deformable_cube`, `deformable_surface`, `deformable_teddy_bear`). They spawn
   from a spawner config rather than a `usd_path`, and `payload.build_payload` draws their bounding box
   in flat blue instead. The teddy bear's spawner does load a USD, but that USD is authored in

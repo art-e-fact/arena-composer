@@ -191,9 +191,14 @@ def _place(surface: Surface, matrix: np.ndarray) -> Surface:
         surface.positions @ linear + matrix[3, :3], dtype=np.float32
     )
     if surface.normals is not None:
-        # Normals follow the inverse transpose, or non-uniform scale shears them
-        # off the surface. Row vectors put the transpose on the other side.
-        normals = surface.normals @ np.linalg.inv(linear).T
+        # Normals follow the cofactor matrix, or non-uniform scale shears them
+        # off the surface. It is the inverse transpose times the determinant,
+        # but needs no inverse: Lightwheel's kitchens author a panel as a `Cube`
+        # scaled to zero thickness, and its two faces still need their normals.
+        # It also keeps each normal on the side its triangle's winding faces,
+        # which is what culling goes by; under a mirroring transform the
+        # inverse transpose points the other way.
+        normals = surface.normals @ np.cross(linear[[1, 2, 0]], linear[[2, 0, 1]])
         length = np.linalg.norm(normals, axis=1, keepdims=True)
         surface.normals = np.ascontiguousarray(
             normals / np.where(length > 0, length, 1.0), dtype=np.float32
