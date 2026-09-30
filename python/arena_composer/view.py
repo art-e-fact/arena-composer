@@ -63,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     use_local_asset_cache(args.asset_cache)
+    # Stamped before the first solve, so a change made during those seconds is
+    # noticed for what it is rather than taken for the file that was solved.
+    stamps = _watched(args.spec)
     # The opening payload is the only one that carries the SimReady props: the
     # window keeps the list it is given, and a payload written to a file has
     # nothing else to fill its browser from.
@@ -71,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.payload:
         args.payload.write_bytes(payload)
 
-    return asyncio.run(_view(args.spec, args.seed, payload))
+    return asyncio.run(_view(args.spec, args.seed, payload, stamps))
 
 
 def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
@@ -82,8 +85,9 @@ def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
         return encode(resolve_layout_from_yaml(spec, seed=seed), remote=remote)
 
 
-async def _view(spec: Path, seed: int, payload: bytes) -> int:
-    """Draw `payload`, reloading it from `spec` until the window closes."""
+async def _view(spec: Path, seed: int, payload: bytes, stamps: dict[Path, int | None]) -> int:
+    """Draw `payload`, reloading it from `spec` until the window closes.
+    `stamps` is the files as they stood when `payload` was solved from them."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
@@ -111,9 +115,9 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
     await _send(proc, payload)
     # One solver, asked by the panel's edits and by changes on disk alike: two
     # solves at once could land out of order and leave the older layout drawn.
-    # The files are stamped as the watcher last saw them, and the panel stamps
-    # its own writes, so the watcher does not ask for those a second time.
-    stamps = _watched(spec)
+    # The files are stamped as `payload` was solved from them, and the panel
+    # stamps its own writes, so the watcher does not ask for those a second
+    # time.
     asked = asyncio.Event()
     running = [
         asyncio.create_task(_solve_when_asked(spec, seed, proc, asked)),

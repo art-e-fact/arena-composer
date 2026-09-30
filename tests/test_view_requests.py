@@ -1,4 +1,4 @@
-"""How `arena-view` answers what the editor sends.
+"""How `arena-view` answers what the editor sends, and what changes on disk.
 
 An edit is answered twice: the spec at once, the layout once solved. The solve
 is seconds and the write that precedes it is milliseconds, so the two answers
@@ -10,6 +10,11 @@ NVIDIA's bucket, so it is served beside the edits, and it is answered by the
 prop list — the only thing it changes. The pass that catches the registered
 assets up on their pictures is answered the same way, and runs beside both.
 Neither says anything about the last edit or its solve.
+
+A change on disk — a hand edit, or an agent's — goes to the same solver, in
+turn with the edits, and is answered the way an edit is: with the reason where
+it will not build. The panel's own writes are changes on disk too, and the
+watcher is kept from asking for those a second time.
 """
 
 from __future__ import annotations

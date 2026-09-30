@@ -71,6 +71,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - An edit from the editor panel is solved once, where `arena-view` solved it again when it noticed
   the write on disk. Solves no longer overlap either, so one from an older version of the file can
   no longer land last and stay drawn.
+- A change to the spec made while `arena-view` was still solving its first layout is solved once
+  the window is up, where it used to go unnoticed until the next change.
 
 ## [0.2.0] - 2026-09-28
 
