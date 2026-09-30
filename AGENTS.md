@@ -16,8 +16,8 @@ cargo test
 pytest
 ```
 
-Run these from this repo with Arena's venv active, and with `OMNI_KIT_ACCEPT_EULA=YES` exported or
-Arena exits on import. The `arena-*` commands run from an Arena project, which owns the specs.
+Run these from this repo with Arena's venv active. The `arena-*` commands run from an Arena project,
+which owns the specs.
 Python edits take effect at once; a Rust edit takes effect when that install runs again.
 
 To change the Rust side without paying for Arena on every run, pack a payload once and run
@@ -78,6 +78,10 @@ wheel and releasing are in [docs/development.md](docs/development.md).
 - **stdout is a protocol, in two places.** The viewer child's stdout carries framed requests up to
   Python: Bevy logs to stderr, and one `println!` desynchronises the reader. `arena-mcp`'s stdout is
   the MCP stream: tools work inside `_quiet()`, because Arena and the solver `print`.
+- **Nothing imports Isaac Sim.** Importing `isaacsim` runs Kit's EULA check, which asks on stdout
+  and exits where there is no terminal to answer, and nothing here accepts the EULA for the user.
+  Arena's registries, its solver and `pxr` need none of it. [tests/conftest.py](tests/conftest.py)
+  fails the run when something pulls it in.
 - **Rust never writes YAML.** [spec_edit.py](python/arena_composer/spec_edit.py) is the only writer.
   It validates by reading the text back with PyYAML, the YAML 1.1 reader Arena uses, where a bare
   `on` is `true`.

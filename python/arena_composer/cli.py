@@ -41,11 +41,6 @@ if [[ ! -x "${SERVER}" ]]; then
   exit 1
 fi
 
-# Isaac Sim exits when its EULA is not accepted and there is no terminal to
-# accept it at, and a client starts a server with a stripped environment.
-export OMNI_KIT_ACCEPT_EULA=YES
-export ACCEPT_EULA=Y
-
 exec "${SERVER}" "$@"
 """
 

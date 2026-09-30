@@ -48,6 +48,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   clicked, and its text can be selected or taken whole with its copy button.
 - The panel no longer opens with the environment's name; the window's title carries it.
 
+### Removed
+
+- The `bin/arena-mcp` that `arena-composer init` writes no longer accepts the Isaac Sim EULA for
+  you by exporting `OMNI_KIT_ACCEPT_EULA`: none of the `arena-*` commands start Isaac Sim, so none
+  need it. A launcher written before keeps the lines until it is deleted and `init` runs again.
+
 ### Fixed
 
 - A number typed into the editor panel was saved even when escaped from, and saved twice when

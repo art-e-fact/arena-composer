@@ -2,6 +2,9 @@
 new test that needs Arena fails there until it is listed."""
 
 import importlib.util
+import sys
+
+import pytest
 
 if importlib.util.find_spec("isaaclab_arena") is None:
     collect_ignore = [
@@ -15,3 +18,11 @@ if importlib.util.find_spec("isaaclab_arena") is None:
         "test_view_requests.py",
         "test_view_watch.py",
     ]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def no_isaac_sim():
+    """Importing `isaacsim` runs Kit's EULA check, which a user of the `arena-*` commands never
+    accepted, so nothing the tests reach may import it."""
+    yield
+    assert "isaacsim" not in sys.modules, "something imported isaacsim"
