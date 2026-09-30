@@ -1,6 +1,21 @@
 # arena-composer
 
+> [!WARNING]
+> Under heavy development. Expect the commands, the visual editor and the MCP tools to change
+> between releases, and things to break.
+
 A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/assets.png"><img src="docs/screenshots/assets.png" alt="The visual editor with the asset browser searched"></a></td>
+    <td width="50%"><a href="docs/screenshots/graph.png"><img src="docs/screenshots/graph.png" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+  </tr>
+  <tr>
+    <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
+    <td>The spatial graph: a node per object, an edge per relation. A click opens its card, and the view draws the relation's shape over the layout.</td>
+  </tr>
+</table>
 
 ## Highlights
 

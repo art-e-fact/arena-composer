@@ -42,9 +42,16 @@ To see the window without a person at the keyboard:
 | Variable | Effect | Defined in |
 | --- | --- | --- |
 | `ARENA_VIEWER_SCREENSHOT=shot.png` | draw a moment, write the window (only) to the file, quit | [viewer.rs](../src/viewer.rs) |
+| `ARENA_VIEWER_SIZE=1440x900` | open the window that size, in logical pixels | [viewer.rs](../src/viewer.rs) `resolution` |
 | `ARENA_VIEWER_SEARCH=basket` | open the asset browser filtered, with the first match picked | [browser.rs](../src/editor/browser.rs) `Browser` |
 | `ARENA_VIEWER_DOCK=graph` | open the dock on the spatial graph | [dock.rs](../src/editor/dock.rs) `Dock` |
+| `ARENA_VIEWER_DOCK_HEIGHT=420` | open the dock that tall | [dock.rs](../src/editor/dock.rs) `Dock` |
 | `ARENA_VIEWER_SHOW_RELATIONS=all` or `=2,5` | open with those relations' gizmos drawn | [form.rs](../src/editor/form.rs) `PanelState` |
+| `ARENA_VIEWER_PICK=bowl` or `=3` | open with that node, or the relation at that position, picked in the graph and its card open | [form.rs](../src/editor/form.rs) `PanelState` |
+
+The README's screenshots are taken this way, by [docs/screenshots/shoot.sh](screenshots/shoot.sh):
+run it after changing what they show. The
+[readme-screenshots](../.claude/skills/readme-screenshots/SKILL.md) skill says how to change a shot.
 
 ## Tests
 
