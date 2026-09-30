@@ -65,6 +65,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - 70 of the 100 Lightwheel kitchen backgrounds, `lightwheel_kitchen_l_shaped_coastal` among them,
   build: `arena-view`, `arena-resolve-layout --payload` and `arena-mcp`'s `render_views` failed on
   them with `Singular matrix`.
+- A change to the spec on disk that Arena cannot build — a hand edit, or an agent's — shows why as
+  a toast in `arena-view`, as a refused edit from the panel does, where the window used to keep the
+  last layout without a word. The form follows the file where it still reads.
+- An edit from the editor panel is solved once, where `arena-view` solved it again when it noticed
+  the write on disk. Solves no longer overlap either, so one from an older version of the file can
+  no longer land last and stay drawn.
 
 ## [0.2.0] - 2026-09-28
 

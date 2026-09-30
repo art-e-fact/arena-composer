@@ -48,7 +48,9 @@ Measured, JSON spent ~760 ms formatting the geometry as decimal text against ~2 
 
 The module docstrings above give the reasoning. The parent polls the spec and the scene its
 `external_yaml` includes, re-resolves on change, and sends the result down the child's stdin; the
-viewer swaps the layout without dropping the window or moving the camera.
+viewer swaps the layout without dropping the window or moving the camera. A change that will not
+build is answered as an edit from the panel that will not solve: the layout stays, and the reason
+comes with the spec (`view._reload_on_change`, `payload.encode_spec`).
 
 ### Headless renders
 
@@ -86,7 +88,8 @@ is documented where it happens:
 | Step | Where |
 | --- | --- |
 | answer the edit at once, or refuse it | `view._serve_requests`, `payload.encode_spec` |
-| one solve per burst of edits | `view._solve_when_asked` |
+| one solver for edits and changes on disk, and one solve per burst of them | `view._solve_when_asked` |
+| the edit's own write, kept from the watcher so it is not solved twice | `view._serve_requests` |
 | a fresh spec behind every layout, which ends the spinner | `view._draw` |
 | take the newest layout and the newest spec-only message separately | `viewer::apply_updates` |
 | open the panel from a layout's own spec, once | `viewer::setup` |
