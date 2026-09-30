@@ -45,6 +45,26 @@ def Xform "Asset"
 """
 
 
+# The fridge housing's `bottom` panel in Lightwheel's RoboCasa kitchens: a `Cube`
+# given its thickness by a scale, and 70 of the 100 author that as zero.
+FLAT_CUBE = """#usda 1.0
+(
+    defaultPrim = "Asset"
+    upAxis = "Z"
+    metersPerUnit = 1
+)
+
+def Xform "Asset"
+{
+    def Cube "bottom"
+    {
+        float3 xformOp:scale = (0.415, 0.38, 0)
+        uniform token[] xformOpOrder = ["xformOp:scale"]
+    }
+}
+"""
+
+
 def surface_of(tmp_path: Path, *, normals: str = "", extra: str = ""):
     """Extract the one surface from a QUAD stage filled in with these attributes."""
     usda = tmp_path / "asset.usda"
@@ -116,3 +136,17 @@ def test_non_finite_uvs_are_neutralised(tmp_path: Path) -> None:
     assert np.isfinite(surface.uvs).all()
     # The good corners still flip V normally; only the bad one is zeroed.
     assert surface.uvs.tolist() == [[0.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+
+
+def test_a_cube_scaled_flat_keeps_the_normals_of_its_two_faces(tmp_path: Path) -> None:
+    """A zero scale leaves no inverse to transform the normals by.
+
+    Inverting it raised, and took the whole kitchen with it. The panel is still
+    two faces, one down and one up; the four sides collapse to lines and carry
+    no normal, since nothing of them is drawn.
+    """
+    usda = tmp_path / "asset.usda"
+    usda.write_text(FLAT_CUBE, encoding="utf-8")
+    surface = extract(open_stage(str(usda)))[0].surface
+
+    assert surface.normals.tolist() == [[0, 0, -1]] * 4 + [[0, 0, 1]] * 4 + [[0, 0, 0]] * 16

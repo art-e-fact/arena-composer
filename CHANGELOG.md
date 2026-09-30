@@ -62,6 +62,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `arena-view` no longer exits at startup when api.lightwheel.net cannot be reached, and starts
   about seven seconds sooner when it can; `arena-mcp`'s first `search_assets` gets the same. A spec
   that places one of Arena's Lightwheel assets still needs the network to build.
+- 70 of the 100 Lightwheel kitchen backgrounds, `lightwheel_kitchen_l_shaped_coastal` among them,
+  build: `arena-view`, `arena-resolve-layout --payload` and `arena-mcp`'s `render_views` failed on
+  them with `Singular matrix`.
 
 ## [0.2.0] - 2026-09-28
 
