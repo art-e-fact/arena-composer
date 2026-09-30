@@ -422,21 +422,25 @@ fn details(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed
                 ui.label(object_type);
             });
         }
+        // Wrapped: a panel widens to fit what it cannot wrap, and a SimReady
+        // prop's folder is five or six steps, which took the grid's room.
         row(ui, "folder", None, |ui| {
-            // Each step is a way back up the tree.
-            let folder = item.folder.as_str();
-            let steps = folder.match_indices('/').map(|(end, _)| end).chain([folder.len()]);
-            let mut start = 0;
-            for end in steps {
-                if start > 0 {
-                    ui.weak("›");
+            ui.horizontal_wrapped(|ui| {
+                // Each step is a way back up the tree.
+                let folder = item.folder.as_str();
+                let steps = folder.match_indices('/').map(|(end, _)| end).chain([folder.len()]);
+                let mut start = 0;
+                for end in steps {
+                    if start > 0 {
+                        ui.weak("›");
+                    }
+                    let step = egui::Button::new(&folder[start..end]).frame(false).small();
+                    if ui.add(step).on_hover_text("show this folder").clicked() {
+                        state.folder = folder[..end].to_owned();
+                    }
+                    start = end + 1;
                 }
-                let step = egui::Button::new(&folder[start..end]).frame(false).small();
-                if ui.add(step).on_hover_text("show this folder").clicked() {
-                    state.folder = folder[..end].to_owned();
-                }
-                start = end + 1;
-            }
+            });
         });
         if !asset.usd_path.is_empty() {
             row(ui, "usd", None, |ui| {
@@ -839,6 +843,29 @@ mod tests {
         assert!(within("SimReady/Residential", "SimReady/Residential"));
         assert!(!within("SimReady/ResidentialExtra", "SimReady/Residential"), "a name sharing a prefix");
         assert!(within("Arena/Objects", ""), "everything is under all");
+    }
+
+    /// A prop's folder wraps in the details rather than widening them: a panel
+    /// grows to fit what it cannot wrap, and what it takes is the grid's.
+    #[test]
+    fn a_long_folder_does_not_widen_the_details() {
+        let width = |category: &str| {
+            let mut form = catalogue();
+            form.remote[0].category = category.into();
+            let mut state = Browser { picked: Some(key(&form.remote[0])), ..Browser::default() };
+            let ctx = egui::Context::default();
+            for time in 0..3 {
+                let input = egui::RawInput {
+                    time: Some(time.into()),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 400.0))),
+                    ..Default::default()
+                };
+                ctx.run_ui(input, |ui| body(ui, &form, &mut state, &listed(&form), &mut |_| None))
+                    .drop_without_applying_deltas();
+            }
+            egui::PanelState::load(&ctx, egui::Id::new("asset details")).expect("the details are drawn").size().x
+        };
+        assert_eq!(width("Residential/Furnishing/Kitchen/Kitchenware/Cleaning_Supplies"), width("Residential"));
     }
 
     /// The grid alone, a frame at a time, with the input a person would give

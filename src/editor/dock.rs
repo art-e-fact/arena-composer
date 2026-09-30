@@ -24,6 +24,8 @@ pub struct Dock {
     /// Whether the dock is open, or folded down to its header.
     open: bool,
     tab: Tab,
+    /// How tall it opens.
+    height: f32,
     pub browser: Browser,
     pub graph: Graph,
 }
@@ -34,14 +36,17 @@ enum Tab {
     Graph,
 }
 
-/// `ARENA_VIEWER_DOCK=graph` opens the dock on the graph, for a screenshot.
+/// `ARENA_VIEWER_DOCK=graph` opens the dock on the graph, and
+/// `ARENA_VIEWER_DOCK_HEIGHT=420` that tall, for a screenshot.
 impl Default for Dock {
     fn default() -> Self {
         let tab = match std::env::var("ARENA_VIEWER_DOCK").as_deref() {
             Ok("graph") => Tab::Graph,
             _ => Tab::Assets,
         };
-        Self { open: true, tab, browser: Browser::default(), graph: Graph::default() }
+        let height = std::env::var("ARENA_VIEWER_DOCK_HEIGHT").ok().and_then(|height| height.parse().ok());
+        let height = height.unwrap_or(HEIGHT);
+        Self { open: true, tab, height, browser: Browser::default(), graph: Graph::default() }
     }
 }
 
@@ -67,7 +72,7 @@ pub fn dock(
     // stops at its least height, and folds only once its edge is dragged on
     // down to the folded one's.
     let folded = egui::Panel::bottom("dock folded").resizable(false);
-    let open = egui::Panel::bottom("dock").resizable(true).default_size(HEIGHT).min_size(140.0);
+    let open = egui::Panel::bottom("dock").resizable(true).default_size(state.height).min_size(140.0);
     let mut is_open = state.open;
     let shown = egui::Panel::show_switched(ui, &mut is_open, folded, open, |ui, open| {
         let mut listed = Vec::new();
