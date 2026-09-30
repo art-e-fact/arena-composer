@@ -16,8 +16,7 @@ artefacts-arena-template, put `ARENA_COMPOSER_SRC=<this checkout>` in its `.env`
 pinned release.
 
 With that venv active, `cargo` and `pytest` run from this repo's root, and the `arena-*` commands
-run from the Arena project, whose spec paths the examples below use. Arena exits on import unless
-the Isaac Sim EULA is accepted, so export `OMNI_KIT_ACCEPT_EULA=YES`.
+run from the Arena project, whose spec paths the examples below use.
 
 ## Iterating on the Rust side
 
