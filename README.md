@@ -4,8 +4,7 @@
 > Under heavy development. Expect the commands, the visual editor and the MCP tools to change
 > between releases, and things to break.
 
-A live editor, headless renderer and MCP server for [IsaacLab-Arena](https://github.com/isaac-sim/IsaacLab-Arena)
-environment specs.
+A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
 
 <table>
   <tr>
@@ -18,15 +17,71 @@ environment specs.
   </tr>
 </table>
 
-- `arena-view <spec>.yaml` opens a window on the layout Arena solves for a spec, with a panel that
-  edits it. The file is re-solved and redrawn on every change, whoever made it.
+## Highlights
+
+- **Kit-less scene renderer.** Arena's solved layouts, drawn live and headless without Isaac Sim;
+  no GPU required.
+- **CAD-style visual editor for humans.** Drag assets in, set the relations between them, and watch
+  Arena's solver place them.
+- **MCP tools for agents.** Search assets, edit the spec, and check the solved layout by its
+  numbers or in pictures.
+
+## Commands
+
+- `arena-view <spec>.yaml` opens the visual editor, a window with the layout Arena solves for the
+  spec in 3D, beside a form that edits the spec.
 - `arena-mcp` is an MCP server whose tools search assets, add and remove objects, and describe and
   render the solved layout.
 - `arena-resolve-layout <spec>.yaml` prints the solved layout as JSON or text.
 
+## How it works
+
+- **The YAML is the source of truth.** The visual editor, the MCP tools and your text editor all
+  change the same files.
+- **Edits are checked.** The visual editor and the MCP tools write through one place, which:
+  - refuses an edit that would not load, leaving the files as they were
+  - keeps comments and key order
+  - takes an object's relations along when it is renamed or removed
+  - edits a task and the scene it includes as one spec
+- **The visual editor follows the file.** Every change is re-solved and redrawn, whoever made it.
+  One that does not solve leaves the last layout up.
+- **Arena places things.** The layout comes from Arena's own placement solver: one of the layouts
+  Arena draws at runtime, held still by a seed.
+- **Isaac Sim never loads.** A lightweight Rust renderer, [Bevy](https://bevy.org), draws the layout,
+  and renders need no display.
+- **The vocabulary is Arena's.** Assets, relations and tasks come from Arena's registries, plus
+  NVIDIA's SimReady props.
+
+## Compared with Arena's Agentic Environment Generation
+
+Arena's [Agentic Environment Generation](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/agentic_environment_generation/index.html)
+(experimental) works on the same specs, and a spec it generates opens here like any other.
+
+<table>
+  <tr><th></th><th>Agentic Environment Generation</th><th>arena-composer</th></tr>
+  <tr><th>Starts from</th><td>a natural-language prompt</td><td>a spec you already have</td></tr>
+  <tr><th>3D view</th>
+    <td>a sim preview in Isaac Sim: builds the environment and records a zero-action rollout</td>
+    <td>a lightweight Rust renderer, live as the spec changes, and headless PNG renders; no physics</td></tr>
+  <tr><th>Spatial graph</th><td colspan="2" align="center">objects as nodes with their pictures, relations as edges</td></tr>
+  <tr><th>Placement</th><td colspan="2" align="center">Arena's relation solver</td></tr>
+  <tr><th>Assets</th><td colspan="2" align="center">Arena's registry, plus NVIDIA's SimReady props</td></tr>
+  <tr><th>Editing</th><td>the YAML as text, validated as you type</td>
+    <td>the visual editor (a form, and drag-and-drop from an asset browser) and MCP tools</td></tr>
+  <tr><th>LLM</th><td>calls one itself, with an NVIDIA or OpenAI API key</td>
+    <td>none; MCP tools for the agent you use</td></tr>
+  <tr><th>The model sees</th><td>the catalogs and validation errors</td>
+    <td>also where the solver put things, and renders</td></tr>
+  <tr><th>An invalid spec</th><td>retried, then handed back with its errors</td>
+    <td>refused; the files stay as they were</td></tr>
+  <tr><th>Tasks and relations</th><td>those Arena marks as agent-ready</td><td>every registered one</td></tr>
+</table>
+
 ## Install
 
-Into the venv Arena is installed in, from a release's wheel. `isaaclab_arena` is not on PyPI, so
+> TODO: publish on PyPi and update the install steps
+
+Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/quickstart/installation.html) in, from a release's wheel. `isaaclab_arena` is not on PyPI, so
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
 
 ```bash
