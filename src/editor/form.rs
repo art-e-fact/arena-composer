@@ -16,7 +16,7 @@ use super::browser;
 use super::card::{self, Card, Icon, cross};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
 use super::dock::{self, Dock};
-use super::graph::Item;
+use super::graph::{Item, Pick};
 use super::relations::{self, RelationGizmos};
 use super::thumbnails::{Files, Images, Pictures, Thumbnails};
 use super::{Form, PointerOverPanel, in_the_view, send};
@@ -62,6 +62,9 @@ pub struct PanelState {
     pinned: BTreeSet<usize>,
     /// Draw every relation, pointer or not.
     show_all: bool,
+    /// An entry to pick in the graph as the first spec lands, as though it had
+    /// been clicked there. Not before: that spec's arrival drops any pick.
+    pick_on_open: Option<Item>,
 }
 
 impl PanelState {
@@ -92,10 +95,17 @@ pub struct Editing {
 
 /// `ARENA_VIEWER_SHOW_RELATIONS=all`, or `=2,5` for those positions in the
 /// list, starts with those relations drawn: the way to see them in a
-/// screenshot, where there is nothing to hover.
+/// screenshot, where there is nothing to hover. `ARENA_VIEWER_PICK=bowl`, or
+/// `=3` for the relation at that position, opens with that entry picked in the
+/// graph and its card open, where there is nothing to click.
 impl Default for PanelState {
     fn default() -> Self {
         let shown = std::env::var("ARENA_VIEWER_SHOW_RELATIONS").unwrap_or_default();
+        let pick = std::env::var("ARENA_VIEWER_PICK").unwrap_or_default();
+        let pick_on_open = match pick.trim() {
+            "" => None,
+            id => Some(id.parse().map_or_else(|_| Item::Node(id.to_owned()), Item::Relation)),
+        };
         Self {
             dock: Dock::default(),
             pick: None,
@@ -106,6 +116,7 @@ impl Default for PanelState {
             revision: 0,
             pinned: shown.split(',').filter_map(|index| index.trim().parse().ok()).collect(),
             show_all: matches!(shown.trim(), "1" | "all"),
+            pick_on_open,
         }
     }
 }
@@ -281,6 +292,12 @@ fn panel(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, pictures: &mut 
         state.editing = None;
         state.typing.clear();
         state.dock.graph.picked = None;
+    }
+    // Dated a second ahead, so it goes on revealing its card for that much
+    // longer: the window's first frames are slow while the scene uploads, and a
+    // reveal that ends within them leaves the panel scrolled to the wrong place.
+    if let Some(item) = state.pick_on_open.take() {
+        state.dock.graph.picked = Some(Pick { item, at: ui.input(|input| input.time) + 1.0 });
     }
     let pick = state.dock.graph.picked.as_ref();
     state.pick = pick.and_then(|pick| pick.item.path(&form.spec));

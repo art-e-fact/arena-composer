@@ -65,6 +65,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - 70 of the 100 Lightwheel kitchen backgrounds, `lightwheel_kitchen_l_shaped_coastal` among them,
   build: `arena-view`, `arena-resolve-layout --payload` and `arena-mcp`'s `render_views` failed on
   them with `Singular matrix`.
+- Picking a SimReady prop in the asset browser no longer squeezes the grid of tiles down to a
+  column: the details beside it widened to fit the prop's folder on one line, and now wrap it.
 
 ## [0.2.0] - 2026-09-28
 

@@ -24,6 +24,10 @@ To change the Rust side without paying for Arena on every run, pack a payload on
 `arena-viewer` or `arena-render` on it. That loop, the screenshot variables, the opt-in tests, the
 wheel and releasing are in [docs/development.md](docs/development.md).
 
+A change to what the window looks like retakes the README's screenshots:
+`docs/screenshots/shoot.sh`, and the [readme-screenshots](.claude/skills/readme-screenshots/SKILL.md)
+skill for changing what they show.
+
 ## Where things are
 
 ### Python, under `python/arena_composer/`

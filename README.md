@@ -1,7 +1,22 @@
 # arena-composer
 
+> [!WARNING]
+> Under heavy development. Expect the commands, the visual editor and the MCP tools to change
+> between releases, and things to break.
+
 A live editor, headless renderer and MCP server for [IsaacLab-Arena](https://github.com/isaac-sim/IsaacLab-Arena)
 environment specs.
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/assets.png"><img src="docs/screenshots/assets.png" alt="The visual editor with the asset browser searched"></a></td>
+    <td width="50%"><a href="docs/screenshots/graph.png"><img src="docs/screenshots/graph.png" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+  </tr>
+  <tr>
+    <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
+    <td>The spatial graph: a node per object, an edge per relation. A click opens its card, and the view draws the relation's shape over the layout.</td>
+  </tr>
+</table>
 
 - `arena-view <spec>.yaml` opens a window on the layout Arena solves for a spec, with a panel that
   edits it. The file is re-solved and redrawn on every change, whoever made it.

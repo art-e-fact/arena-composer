@@ -46,6 +46,7 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: format!("arena · {}", scene.env_name),
+                        resolution: resolution(),
                         ..default()
                     }),
                     ..default()
@@ -75,6 +76,15 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
     }
 
     app.run();
+}
+
+/// `ARENA_VIEWER_SIZE=1440x900` opens the window that size, for a screenshot
+/// of a known size. It is in logical pixels, so a display scaled 2× doubles the
+/// picture; `docs/screenshots/shoot.sh` draws on one at 1×.
+fn resolution() -> bevy::window::WindowResolution {
+    let size = std::env::var("ARENA_VIEWER_SIZE").unwrap_or_default();
+    let parsed = size.split_once('x').and_then(|(width, height)| Some((width.parse().ok()?, height.parse().ok()?)));
+    parsed.map_or_else(default, |(width, height)| bevy::window::WindowResolution::new(width, height))
 }
 
 /// Where [`screenshot`] writes, when the environment asked for one.

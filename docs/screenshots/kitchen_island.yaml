@@ -1,0 +1,136 @@
+# The scene the README's screenshots show (shoot.sh beside this file). Written to show the visual
+# editor off: a kitchen that fills the view from the background's own camera, objects nested on an
+# object reference, and relations of several kinds, unary ones among them for the graph's chips.
+# The position limits keep the objects inside that camera's frame. Relations are named by position
+# in shoot.sh: move one and update it there.
+env_name: kitchen_island
+embodiment:
+  id: droid
+  registry_name: droid_abs_joint_pos
+  params:
+    stand_height_m: 0.8
+    placement_bbox_stand_only: true
+background:
+  id: kitchen
+  registry_name: lightwheel_kitchen_l_shaped_with_island_industrial
+  params: {}
+objects:
+- id: plate
+  registry_name: plate_large_vomp_robolab
+  params: {}
+- id: apple
+  registry_name: apple_01_objaverse_robolab
+  params: {}
+- id: banana
+  registry_name: banana_ycb_robolab
+  params: {}
+- id: wooden_bowl
+  registry_name: wooden_bowl_hot3d_robolab
+  params: {}
+- id: mug
+  registry_name: mug_ycb_robolab
+  params: {}
+- id: milk
+  registry_name: milk_carton_hope_robolab
+  params: {}
+object_references:
+- id: floor
+  parent_id: kitchen
+  prim_path: floor_room/geometry
+  object_type: base
+  params: {}
+- id: island_top
+  parent_id: kitchen
+  prim_path: island_island_group/top_geometry
+  object_type: base
+  params: {}
+relations:
+- kind: is_anchor
+  subject: floor
+  params: {}
+- kind: is_anchor
+  subject: island_top
+  params: {}
+- kind: 'on'
+  subject: droid
+  reference: floor
+  params: {}
+- kind: next_to
+  subject: droid
+  reference: island_top
+  params:
+    side: positive_y
+- kind: rotate_around_solution
+  subject: droid
+  params:
+    yaw_rad: -1.57
+- kind: 'on'
+  subject: plate
+  reference: island_top
+  params: {}
+- kind: position_limits_box
+  subject: plate
+  params:
+    x_min: 2.55
+    x_max: 2.75
+    y_min: -4.0
+    y_max: -3.7
+- kind: 'on'
+  subject: apple
+  reference: plate
+  params: {}
+- kind: 'on'
+  subject: banana
+  reference: plate
+  params: {}
+- kind: 'on'
+  subject: wooden_bowl
+  reference: island_top
+  params: {}
+- kind: next_to
+  subject: wooden_bowl
+  reference: plate
+  params:
+    side: positive_x
+    distance_m: 0.1
+- kind: 'on'
+  subject: mug
+  reference: island_top
+  params: {}
+- kind: face_to
+  subject: mug
+  reference: wooden_bowl
+  params: {}
+- kind: 'on'
+  subject: milk
+  reference: island_top
+  params: {}
+- kind: position_limits_box
+  subject: milk
+  params:
+    x_min: 3.3
+    x_max: 3.4
+    y_min: -3.5
+    y_max: -3.35
+- kind: position_limits_box
+  subject: mug
+  params:
+    x_min: 2.2
+    x_max: 2.3
+    y_min: -3.95
+    y_max: -3.8
+- kind: not_next_to
+  subject: milk
+  reference: plate
+  params:
+    side: negative_x
+task:
+  composition: atomic
+  description: Pick up the apple from the plate on the kitchen island and put it in the wooden bowl.
+  subtasks:
+  - kind: PickAndPlaceTask
+    params:
+      pick_up_object: apple
+      destination_location: wooden_bowl
+      background_scene: kitchen
+      destination_object: wooden_bowl
