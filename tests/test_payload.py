@@ -3,12 +3,17 @@
 The registered assets are a fixed ~30 kB that rides every message. The SimReady
 props are a megabyte that changes only when the index is rebuilt or a picture is
 fetched, so they ride the message that changed them and no other.
+
+The spec rides every message too, so one about a file that no longer reads
+carries the spec it last read to.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import msgpack
+import pytest
 from isaaclab.utils.assets import _mirror_path
 
 from arena_composer import catalog, payload, simready, usd_assets
@@ -119,3 +124,50 @@ def test_an_asset_registered_from_a_local_directory_draws_its_own_sidecar(tmp_pa
 
     sidecar.write_bytes(b"not really a png")
     assert payload._asset(asset)["thumbnail"] == str(sidecar)
+
+
+# Real registered names, because Arena validates them against live registries.
+SPEC = """\
+env_name: from_the_file
+embodiment: {id: droid, registry_name: droid_abs_joint_pos, params: {}}
+background: {id: maple_table_robolab, registry_name: maple_table_robolab, params: {}}
+objects:
+- {id: banana, registry_name: banana_ycb_robolab, params: {}}
+- {id: bowl, registry_name: bowl_ycb_robolab, params: {}}
+relations:
+- {kind: is_anchor, subject: maple_table_robolab, reference: null, params: {}}
+task:
+  composition: atomic
+  description: pick up the banana and place it in the bowl
+  subtasks:
+  - kind: PickAndPlaceTask
+    params: {pick_up_object: banana, destination_location: bowl, background_scene: maple_table_robolab}
+"""
+
+
+def test_a_spec_that_no_longer_reads_still_carries_the_reason(tmp_path: Path, monkeypatch):
+    """A hand edit that is not YAML, or that Arena will not validate, has no
+    editor half of its own. The reason goes out on the one the panel holds —
+    the first layout's, then whichever the file last read to — rather than
+    being dropped with the message. A message with nothing to say still is."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    spec = tmp_path / "task.yaml"
+    spec.write_text(SPEC)
+
+    def carried(errors: list[str]) -> str:
+        message = msgpack.unpackb(payload.encode_spec(spec, errors, solving=False))
+        assert message["errors"] == errors
+        return message["spec"]["env_name"]
+
+    payload.build_payload({"assets": [], "spec": {"env_name": "opened"}, "spec_path": str(spec)}, remote=False)
+    spec.write_text("env_name: [\n")
+    assert carried(["ParserError"]) == "opened", "the panel opens on the first layout's spec"
+    with pytest.raises(Exception):
+        payload.encode_spec(spec, [])
+
+    spec.write_text(SPEC)
+    assert carried([]) == "from_the_file"
+    # A later layout's spec was read when its solve began, and may be behind.
+    payload.build_payload({"assets": [], "spec": {"env_name": "solved"}, "spec_path": str(spec)}, remote=False)
+    spec.write_text(SPEC.replace("banana_ycb_robolab", "no_such_asset"))
+    assert carried(["ValidationError"]) == "from_the_file"

@@ -49,6 +49,11 @@ _UNDRAWN_ROLES = {"object_reference"}
 # own: in the default grey it vanishes into a white table seen from above.
 _STAND_IN = Material(base_color=(0.3, 0.55, 0.9))
 
+# The spec and owners each file last read to, which is what the panel holds: it
+# opens on the first layout's and takes every spec that reads after that. What a
+# message about a file that no longer reads carries instead — see `encode_spec`.
+_last_read: dict[Path, tuple[dict[str, Any], dict[str, str]]] = {}
+
 
 def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
     """Turn a resolved-layout dump into the structure the viewer decodes.
@@ -77,6 +82,12 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             geometries.append([_encode_node(node) for node in extract(open_stage(path))])
         return by_usd[path]
 
+    spec, owners = dump.get("spec") or {}, _owners(dump.get("spec_path"))
+    if dump.get("spec_path"):
+        # The first layout only: a later one's spec was read when its solve
+        # began, and the panel may be edits past it by the time it lands.
+        _last_read.setdefault(Path(dump["spec_path"]).resolve(), (spec, owners))
+
     return {
         "env_name": dump.get("env_name", ""),
         "assets": [
@@ -95,8 +106,8 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         "geometries": geometries,
         "lighting": {"auto_injected_dome_light": bool(dump.get("lighting", {}).get("auto_injected_dome_light"))},
         "viewer": _viewer(dump.get("viewer")),
-        "spec": dump.get("spec") or {},
-        "owners": _owners(dump.get("spec_path")),
+        "spec": spec,
+        "owners": owners,
         "vocabulary": _vocabulary(),
         "remote": _remote() if remote else None,
         # A layout that resolved is the answer to whatever was asked of it, so
@@ -238,13 +249,28 @@ def encode_spec(
     the last edit or the solve behind it, so sending it must not clear a
     refusal or stop a spinner. Pass ``[]`` to say an edit landed, and
     ``False`` to say no solve is coming.
+
+    A file that no longer reads — a hand edit that is not YAML, or that Arena
+    will not validate — has no editor half of its own. A message with `errors`
+    to carry goes out on the one it last read to instead, which is the one the
+    panel holds, so the reason reaches the panel and the form stays as it is.
+    A message with nothing to say raises, as it always has: the next one to
+    read says it.
     """
     from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 
+    key = Path(spec_path).resolve()
+    try:
+        _last_read[key] = ArenaEnvGraphSpec.from_yaml(spec_path).model_dump(mode="json"), _owners(str(spec_path))
+    except Exception:
+        if not errors or key not in _last_read:
+            raise
+    spec, owners = _last_read[key]
+
     return msgpack.packb(
         {
-            "spec": ArenaEnvGraphSpec.from_yaml(spec_path).model_dump(mode="json"),
-            "owners": _owners(str(spec_path)),
+            "spec": spec,
+            "owners": owners,
             "vocabulary": _vocabulary(),
             "remote": _remote() if remote else None,
             "indexing": indexing,

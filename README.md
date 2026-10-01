@@ -44,7 +44,7 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
   - takes an object's relations along when it is renamed or removed
   - edits a task and the scene it includes as one spec
 - **The visual editor follows the file.** Every change is re-solved and redrawn, whoever made it.
-  One that does not solve leaves the last layout up.
+  One that does not solve leaves the last layout up and says why.
 - **Arena places things.** The layout comes from Arena's own placement solver: one of the layouts
   Arena draws at runtime, held still by a seed.
 - **Isaac Sim never loads.** A lightweight Rust renderer, [Bevy](https://bevy.org), draws the layout,

@@ -63,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     use_local_asset_cache(args.asset_cache)
+    # Stamped before the first solve, so a change made during those seconds is
+    # noticed for what it is rather than taken for the file that was solved.
+    stamps = _watched(args.spec)
     # The opening payload is the only one that carries the SimReady props: the
     # window keeps the list it is given, and a payload written to a file has
     # nothing else to fill its browser from.
@@ -71,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.payload:
         args.payload.write_bytes(payload)
 
-    return asyncio.run(_view(args.spec, args.seed, payload))
+    return asyncio.run(_view(args.spec, args.seed, payload, stamps))
 
 
 def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
@@ -82,8 +85,9 @@ def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
         return encode(resolve_layout_from_yaml(spec, seed=seed), remote=remote)
 
 
-async def _view(spec: Path, seed: int, payload: bytes) -> int:
-    """Draw `payload`, reloading it from `spec` until the window closes."""
+async def _view(spec: Path, seed: int, payload: bytes, stamps: dict[Path, int | None]) -> int:
+    """Draw `payload`, reloading it from `spec` until the window closes.
+    `stamps` is the files as they stood when `payload` was solved from them."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
@@ -109,9 +113,16 @@ async def _view(spec: Path, seed: int, payload: bytes) -> int:
         loop.add_signal_handler(sig, stop)
 
     await _send(proc, payload)
+    # One solver, asked by the panel's edits and by changes on disk alike: two
+    # solves at once could land out of order and leave the older layout drawn.
+    # The files are stamped as `payload` was solved from them, and the panel
+    # stamps its own writes, so the watcher does not ask for those a second
+    # time.
+    asked = asyncio.Event()
     running = [
-        asyncio.create_task(_reload_on_change(spec, seed, proc)),
-        asyncio.create_task(_serve_requests(spec, seed, proc)),
+        asyncio.create_task(_solve_when_asked(spec, seed, proc, asked)),
+        asyncio.create_task(_reload_on_change(spec, proc, stamps, asked)),
+        asyncio.create_task(_serve_requests(spec, proc, stamps, asked)),
         asyncio.create_task(_catch_up_on_pictures(spec, proc)),
     ]
     try:
@@ -137,14 +148,17 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
     await proc.stdin.drain()
 
 
-async def _serve_requests(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
+async def _serve_requests(
+    spec: Path, proc: asyncio.subprocess.Process, stamps: dict[Path, int | None], asked: asyncio.Event
+) -> None:
     """Serve what the editor asks for: edits to the spec, and asset requests.
 
     An accepted edit is answered twice: with the spec as soon as it is on disk,
-    and with the layout it resolves to once the solver has caught up. Only the
-    first is on this path, and it costs milliseconds against the solve's
-    seconds — which is what lets the panel show an edit at once, and what keeps
-    this loop reading while a solve is still running.
+    and with the layout it resolves to once `_solve_when_asked`, which `asked`
+    asks, has caught up. Only the first is on this path, and it costs
+    milliseconds against the solve's seconds — which is what lets the panel
+    show an edit at once, and what keeps this loop reading while a solve is
+    still running.
 
     Writing goes through :mod:`arena_composer.spec_edit`, which owns which of
     the two files a key lives in and validates before either is touched, so a
@@ -155,12 +169,8 @@ async def _serve_requests(spec: Path, seed: int, proc: asyncio.subprocess.Proces
     — so it goes to :func:`_serve_assets` and this loop reads on.
     """
     assert proc.stdout is not None
-    asked = asyncio.Event()
     crawls: asyncio.Queue[None] = asyncio.Queue()
-    helpers = [
-        asyncio.create_task(_solve_when_asked(spec, seed, proc, asked)),
-        asyncio.create_task(_serve_assets(spec, proc, crawls)),
-    ]
+    helpers = [asyncio.create_task(_serve_assets(spec, proc, crawls))]
     try:
         while (request := await _read_request(proc.stdout)) is not None:
             if (op := request.get("op", "")) == ASSET_REQUEST:
@@ -178,14 +188,17 @@ async def _serve_requests(spec: Path, seed: int, proc: asyncio.subprocess.Proces
             if proc.returncode is not None:
                 return  # the window closed while we were writing
 
-            await _send(proc, encode_spec(spec, result.errors, solving=result.ok))
             if result.ok:
-                # `_reload_on_change` would catch this too, but only after its
-                # poll and settle; an edit the user just made should redraw now.
+                # Stamped and asked for before the answer goes out, however long
+                # the pipe takes to drain: the watcher catches the write after its
+                # poll and settle, and one it finds unstamped it asks for again —
+                # a refusal twice over, dropping what was typed in between.
+                _restamp(stamps, spec)
                 asked.set()
                 print(f"{spec}: {'; '.join(result.changed)}", file=sys.stderr)
             else:
                 print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
+            await _send(proc, encode_spec(spec, result.errors, solving=result.ok))
     finally:
         for helper in helpers:
             helper.cancel()
@@ -231,9 +244,11 @@ async def _answer(
     """Send the browser what it is waiting for, waiting out a write to the spec.
 
     The message carries the spec as every message does, so one caught mid-write
-    builds no message at all. An edit's answer can afford to drop on that —
-    `_reload_on_change` sends another the moment the file parses — but this is
-    a request's only reply, and the request has already been served.
+    builds no message at all, unless it has errors to carry (see
+    `payload.encode_spec`). An edit's answer can afford to drop on that — the
+    write that finishes the file is a change `_reload_on_change` asks a solve
+    for, and the solve answers — but this is a request's only reply, and the
+    request has already been served.
     """
     for attempt in range(ANSWER_TRIES):
         try:
@@ -273,7 +288,12 @@ async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) ->
 
 
 async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:
-    """Re-resolve `spec` whenever `asked`, and draw what comes out.
+    """Re-resolve `spec` whenever `asked` — by an edit from the panel, or a change
+    on disk — and draw what comes out.
+
+    The one solver for both, so no two solves overlap: each reads the file
+    after the last one did, and the layouts land in the order of the files
+    they were solved from.
 
     One solve per burst of edits, not one per edit: `asked` is cleared before
     the solve and set again by anything that arrives during it, so the edits
@@ -298,7 +318,9 @@ def _solved(spec: Path, seed: int) -> tuple[bytes | None, list[str]]:
     try:
         return _resolve(spec, seed), []
     except Exception as error:
-        # Anything Arena raises on a spec that validates but will not build.
+        # Anything Arena raises on a spec that will not build: one from the
+        # panel that validates but will not place, or a change on disk that
+        # does not even read.
         reason = f"{type(error).__name__}: {error}"
         print(f"{spec}: {reason}", file=sys.stderr)
         return None, [reason]
@@ -319,9 +341,9 @@ async def _draw(
     where it does. Nothing is awaited between reading the file here and writing
     it into the pipe, so what goes out is the file as it stands.
 
-    The spec is left out where it no longer reads, which takes `spec` becoming
-    unreadable since the edit that validated it. `_reload_on_change` answers
-    once it parses again; until then the panel is left as it is.
+    A spec that no longer reads still carries `errors`, on the spec it last
+    read to — see `payload.encode_spec`. With none to carry it is left out, and
+    `_reload_on_change` asks for another solve once it reads again.
     """
     if layout is not None:
         await _send(proc, layout)
@@ -338,15 +360,24 @@ async def _read_request(stream: asyncio.StreamReader) -> dict | None:
         return None
 
 
-async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Process) -> None:
-    """Re-resolve `spec` on every write to it, or to the scene it includes, and
-    draw what comes out. The SimReady index is watched from here too.
+async def _reload_on_change(
+    spec: Path, proc: asyncio.subprocess.Process, stamps: dict[Path, int | None], asked: asyncio.Event
+) -> None:
+    """Ask for `spec` to be re-resolved on every write to it, or to the scene it
+    includes. The SimReady index is watched from here too.
+
+    Solved by `_solve_when_asked`, as an edit from the panel is, and answered
+    the same way: a change Arena cannot build — a hand edit, or an agent's —
+    leaves the last layout up, and the reason goes to the panel with the spec
+    as the file now reads, or, where it no longer reads at all, as it last did.
+
+    `stamps` is shared with `_serve_requests`, which brings it up to date with
+    every write it makes: it asks for those itself.
 
     An index rebuilt by another process — the MCP server, or ``python -m
     arena_composer.simready`` — is a new prop list and nothing else, so it is
     sent on its own rather than costing a solve.
     """
-    stamps = _watched(spec)
     index = simready.index_stamp()
     while True:
         await asyncio.sleep(WATCH_INTERVAL)
@@ -358,23 +389,11 @@ async def _reload_on_change(spec: Path, seed: int, proc: asyncio.subprocess.Proc
         if _watched(spec) == stamps:
             continue
         await asyncio.sleep(SETTLE)
-        stamps = _watched(spec)
-
-        try:
-            # Off this thread: a resolve takes seconds, and the loop has to
-            # stay answerable for all of them — not least to the window
-            # closing under us.
-            payload = await asyncio.to_thread(_resolve, spec, seed)
-        except Exception as error:
-            # Anything Arena raises on a half-written spec. The viewer keeps
-            # drawing the last scene that did resolve.
-            print(f"{spec}: {type(error).__name__}: {error}", file=sys.stderr)
-            continue
-
-        if proc.returncode is not None:
-            return  # the window closed while we were resolving
-        await _draw(proc, spec, payload)
-        print(f"{spec}: reloaded", file=sys.stderr)
+        if _watched(spec) == stamps:
+            continue  # the panel's own write, landing while this one polled
+        _restamp(stamps, spec)
+        asked.set()
+        print(f"{spec}: changed on disk", file=sys.stderr)
 
 
 def _watched(spec: Path) -> dict[Path, int | None]:
@@ -388,6 +407,13 @@ def _watched(spec: Path) -> dict[Path, int | None]:
         if include:
             paths.append((spec.parent / include).resolve())
     return {path: _mtime(path) for path in paths}
+
+
+def _restamp(stamps: dict[Path, int | None], spec: Path) -> None:
+    """Bring `stamps` up to the files as they stand. In place, since the
+    watcher and the request loop hold the same one."""
+    stamps.clear()
+    stamps.update(_watched(spec))
 
 
 def _mtime(path: Path) -> int | None:
