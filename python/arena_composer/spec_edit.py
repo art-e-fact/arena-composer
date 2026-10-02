@@ -82,8 +82,15 @@ def check_entry(path: Path) -> None:
     A scene validates only merged with a task that includes it, and several
     tasks can include one scene, so which to load is the caller's to name. The
     message ends with a regex for the include line, to search the specs with.
+
+    A file that does not read as YAML is not known to be a scene, and is left
+    to whoever reads it next — an edit, or Arena's loader — which refuses it
+    naming the file and the line.
     """
-    document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    try:
+        document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return
     if isinstance(document, dict) and "task" not in document and INCLUDE not in document:
         pattern = rf"""{INCLUDE}:\s*['"]?(.*/)?{re.escape(Path(path).name)}"""
         raise ValueError(
@@ -225,6 +232,20 @@ class SpecFiles:
         return [asset_id for asset_id in ids if asset_id]
 
 
+def _files(path: Path) -> SpecFiles | Result:
+    """`path` and its scene, or the refusal to make of a pair that does not read.
+
+    A refusal rather than an exception, for the reason :class:`Result` is one:
+    a file broken by hand mid-session — not YAML, not a mapping, an include
+    that is not there — is the normal case, the message names the file and
+    the line, and the loop serving the editor panel has to outlive it.
+    """
+    try:
+        return SpecFiles(path)
+    except Exception as error:
+        return Result.failed(f"{type(error).__name__}: {error}")
+
+
 def _message(entry: dict[str, Any]) -> str:
     """One pydantic error as a line an agent can act on."""
     # Arena's validators are bare `assert`s, which pydantic reports under this
@@ -253,7 +274,9 @@ def add_object(
     does not know. What the asset then needs is checked in
     :meth:`SpecFiles.validate`, before the file is written.
     """
-    files = SpecFiles(path)
+    files = _files(path)
+    if isinstance(files, Result):
+        return files
     known = files.asset_ids()
     if node_id in known:
         return Result.failed(f"id {node_id!r} is already used in this spec")
@@ -300,7 +323,9 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     if not steps:
         return Result.failed("an edit needs a path")
 
-    files = SpecFiles(path)
+    files = _files(path)
+    if isinstance(files, Result):
+        return files
     key = str(steps[0])
     document = files.documents[files.owner(key)]
 
@@ -507,7 +532,9 @@ def remove_object(path: Path, node_id: str) -> Result:
     a task whose target has gone is a decision about the task, not a reference
     to tidy up, and the validation error says so.
     """
-    files = SpecFiles(path)
+    files = _files(path)
+    if isinstance(files, Result):
+        return files
     objects = files.section("objects")
     matched = [entry for entry in objects if entry.get("id") == node_id]
     if not matched:

@@ -270,6 +270,28 @@ def test_a_path_that_isnt_there_is_refused(spec: Path):
     assert (spec.read_text(), scene_of(spec).read_text()) == before
 
 
+@pytest.mark.parametrize("broken", ["task", "scene"])
+def test_an_edit_on_a_spec_that_does_not_read_is_refused(spec: Path, broken: str):
+    """A `task: [` left by a hand edit is the normal case mid-session, and has to
+    come back as a refusal naming the file and the line, the way a spec that
+    does not validate does. An exception ends the loop serving the editor
+    panel, and every edit after it goes unanswered."""
+    path, key = (spec, "task") if broken == "task" else (scene_of(spec), "objects")
+    path.write_text(path.read_text().replace(f"{key}:\n", f"{key}: [\n", 1))
+    before = spec.read_text(), scene_of(spec).read_text()
+
+    spec_edit.check_entry(spec)  # not known to be a scene: the edit says what is wrong
+    for edit in (
+        lambda: spec_edit.apply(spec, "set", ["env_name"], "x"),
+        lambda: spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE),
+        lambda: spec_edit.remove_object(spec, "banana"),
+    ):
+        result = edit()
+        assert not result.ok
+        assert "ParserError" in result.errors[0] and path.name in result.errors[0], result.errors
+    assert (spec.read_text(), scene_of(spec).read_text()) == before, "a refused edit wrote anyway"
+
+
 def test_a_whole_entry_is_written_in_a_settled_key_order(spec: Path):
     """Changing a relation's kind replaces the entry, because the old kind's
     parameters mean nothing to the new one and whether there is a `reference`

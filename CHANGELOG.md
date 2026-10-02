@@ -75,6 +75,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   no longer land last and stay drawn.
 - A change to the spec made while `arena-view` was still solving its first layout is solved once
   the window is up, where it used to go unnoticed until the next change.
+- An edit from the editor panel on a spec that no longer parses — a `task: [` left by a hand edit —
+  is refused with the reason as a toast, where it used to end the loop serving the panel: every
+  edit and reindex after it in that `arena-view` session went unanswered.
+- The MCP edit tools — `add_object`, `remove_object`, `set_embodiment` — answer a spec that does
+  not parse with `{"ok": false, "errors": [...]}` naming the file and the line, where the client
+  saw only `Error executing tool`. `arena-resolve-layout` and `arena-view`'s toast name the file
+  in that error too.
 
 ## [0.2.0] - 2026-09-28
 
