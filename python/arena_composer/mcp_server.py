@@ -369,12 +369,15 @@ async def render_views(
     if unknown := [view for view in views if view not in render.VIEWS]:
         raise ToolError(f"unknown view(s) {unknown}, expected any of {list(render.VIEWS)}")
 
+    # Progress, not a log message: the protocol deprecated logging (SEP-2577,
+    # 2026-07-28) and a client has to opt in per request to receive any, where
+    # a progress notification reaches whoever asked for progress on this call.
     if ctx:
-        await ctx.info(f"resolving {path.name} (seed {seed})")
+        await ctx.report_progress(0, 2, f"resolving {path.name} (seed {seed})")
     payload = await _or_refused(_pack, path, seed)
 
     if ctx:
-        await ctx.info(f"drawing {', '.join(views)}")
+        await ctx.report_progress(1, 2, f"drawing {', '.join(views)}")
     out_dir = _RENDERS / hashlib.sha256(str(path).encode()).hexdigest()[:16]
     paths = await _or_refused(render.render, payload, out_dir, views, size)
     return [Image(path=path) for path in paths]

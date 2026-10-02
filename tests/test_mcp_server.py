@@ -15,10 +15,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
+from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from mcp.shared.exceptions import MCPDeprecationWarning
 
 from arena_composer import mcp_server
 
@@ -87,7 +90,8 @@ def test_a_wrong_file_is_refused_with_the_reason(tmp_path: Path):
 def test_a_spec_that_does_not_read_is_described_as_a_result_and_refused_as_a_render(tmp_path: Path):
     """`describe_scene` answers as a refused edit does, with the reason naming
     the file; `render_views` has pictures or a reason, never both, so it fails
-    with the same lines — as it does on a view it does not know."""
+    with the same lines — as it does on a view it does not know — having
+    reported the step it was on as progress."""
     spec = tmp_path / "task.yaml"
     spec.write_text("task: [\n")
 
@@ -96,8 +100,22 @@ def test_a_spec_that_does_not_read_is_described_as_a_result_and_refused_as_a_ren
     assert "ParserError" in described["errors"][0] and "task.yaml" in described["errors"][0], described
 
     assert "sideways" in _refusal("render_views", spec=str(spec), views=["sideways"])
-    # Called as a function: through `call_tool` its progress reports want a
-    # request to send them on. The `ToolError` is what the SDK passes through.
-    with pytest.raises(ToolError) as refused:
-        asyncio.run(mcp_server.render_views(spec=str(spec)))
-    assert "ParserError" in str(refused.value) and "task.yaml" in str(refused.value), str(refused.value)
+
+    # Through a client, which gives the tool a request to report progress on;
+    # in-process, so the callback is called directly. As a log message the
+    # report would reach nobody: logging is deprecated, a client opts in per
+    # request, and the SDK warns on the call — an error here.
+    progress: list[str | None] = []
+
+    async def noted(_: float, __: float | None, message: str | None) -> None:
+        progress.append(message)
+
+    async def rendered():
+        async with Client(mcp_server.mcp) as client:
+            return await client.call_tool("render_views", {"spec": str(spec)}, progress_callback=noted)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MCPDeprecationWarning)
+        result = asyncio.run(rendered())
+    assert result.is_error and "ParserError" in result.content[0].text and "task.yaml" in result.content[0].text, result
+    assert progress == [f"resolving task.yaml (seed {mcp_server.DEFAULT_SEED})"], progress

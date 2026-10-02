@@ -47,6 +47,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   corner of the 3D view, where they were lines at the top of the panel. Each stays until its × is
   clicked, and its text can be selected or taken whole with its copy button.
 - The panel no longer opens with the environment's name; the window's title carries it.
+- `render_views` reports its two steps — resolving the spec, drawing the views — as MCP progress
+  notifications, which reach a client that asked for progress on the call. They went out as log
+  messages, which the protocol has deprecated: a current client receives none unless it opts in per
+  request, and the SDK warned on every one.
 
 ### Removed
 
