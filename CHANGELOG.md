@@ -82,6 +82,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   not parse with `{"ok": false, "errors": [...]}` naming the file and the line, where the client
   saw only `Error executing tool`. `arena-resolve-layout` and `arena-view`'s toast name the file
   in that error too.
+- The MCP tools' other refusals reach the agent again — no spec at the path, a scene passed where
+  the task was asked for, an unknown view, a spec that does not read, validate or build, a render
+  that logged an error — where the client saw only `Error executing tool`: the `mcp` SDK withholds
+  the message of any exception but its own `ToolError`. `describe_scene` answers a spec that does
+  not build as a refused edit does, `{"ok": false, "errors": [...]}`; `render_views` fails with the
+  same lines.
 
 ## [0.2.0] - 2026-09-28
 
