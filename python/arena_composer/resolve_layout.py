@@ -44,23 +44,14 @@ from isaaclab_arena.relations.object_placer_params import ObjectPlacerParams
 from isaaclab_arena.relations.passive_collision_objects import get_passive_collision_objects
 from isaaclab_arena.relations.placement_events import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
+from isaaclab_arena.relations.placement_validation import PlacementCheck
 from isaaclab_arena.relations.relations import get_anchor_objects
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 
 from arena_composer import spec_edit
+from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 from arena_composer.usd_assets import localize, use_local_asset_cache
-
-DEFAULT_SEED = 42
-
-
-class SpecError(Exception):
-    """A spec that validates but names an asset the sim could not use. One
-    line per asset, since a scene wrong in one place is often wrong in two."""
-
-    def __init__(self, errors: list[str]) -> None:
-        super().__init__("\n".join(errors))
-        self.errors = errors
 
 
 def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[str, Any]:
@@ -285,17 +276,22 @@ def _pose(asset: Any, layout: PlacementResult | None) -> Pose:
 
 
 def _placement_summary(layout: PlacementResult | None, seed: int) -> dict[str, Any]:
-    """Whether this sample is a layout the sim would accept, and which checks decided that."""
+    """Whether this sample passed the checks a dry solve can run, and which it
+    could not: a pass here is necessary for the sim to accept the layout, not
+    sufficient, since physics settling and IK reach are the simulator's to
+    decide and `not_run` says so."""
     if layout is None:
         return {"seed": seed, "solved_assets": 0}
+    checks = layout.validation_results.validation_results
     return {
         "seed": seed,
         "solved_assets": len(layout.positions),
         "success": layout.success,
         "final_loss": layout.final_loss,
         "attempts": layout.attempts,
-        "checks": {str(check): passed for check, passed in layout.validation_results.validation_results.items()},
+        "checks": {str(check): passed for check, passed in checks.items()},
         "failed_checks": layout.validation_results.get_failed_validation_check_names,
+        "not_run": [str(check) for check in PlacementCheck if check not in checks],
     }
 
 
@@ -347,6 +343,8 @@ def _format_text(dump: dict[str, Any]) -> str:
         status = "valid layout"
     else:
         status = "INVALID layout, failed: " + ", ".join(placement["failed_checks"])
+    if placement.get("not_run"):
+        status += "; not run dry: " + ", ".join(placement["not_run"])
     lines = [f"{dump['env_name']}  (seed {placement['seed']}, {status})"]
     for asset in dump["assets"]:
         position = ", ".join(f"{value:+.3f}" for value in asset["position_xyz"])

@@ -146,18 +146,19 @@ def _vocabulary() -> dict[str, Any]:
     """
     from arena_composer import catalog
 
-    return {"assets": [_asset(asset) for asset in catalog.catalog()], **_kinds()}
+    return {"assets": [_asset(asset) for asset in catalog.catalog()], **kinds()}
 
 
 @cache
-def _kinds() -> dict[str, Any]:
+def kinds() -> dict[str, Any]:
     """The relation and task kinds, each with the form that edits it, and the
     task composition names Arena's ``CompositeTaskSpec`` accepts. Cached: a
     form is inferred by introspecting a constructor, and no registry changes
     while the process runs.
 
     The assets are not cached with them, because an asset's picture arrives
-    after the asset does — see :func:`_thumbnail`.
+    after the asset does — see :func:`_thumbnail`. The MCP server's
+    `list_kinds` returns this as it is.
     """
     from isaaclab_arena.environment_spec.arena_env_graph_types import TaskCompositionType
 

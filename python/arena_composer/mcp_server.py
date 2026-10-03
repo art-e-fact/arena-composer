@@ -1,6 +1,6 @@
 """An MCP server for authoring Arena environment specs.
 
-Seven tools, chosen against the question "what can the agent not already do with
+Nine tools, chosen against the question "what can the agent not already do with
 Read and Edit?" — listing a spec's objects did not survive that test, since the
 YAML is short and reading it is exact and free. What survived either touches
 live state (the asset registry, the SimReady index, the solver, a GPU) or knows
@@ -29,9 +29,14 @@ from typing import Any
 
 from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from arena_composer import catalog, render, simready, spec_edit, usd_assets
-from arena_composer.resolve_layout import DEFAULT_SEED, SpecError
+
+# From `spec_edit`, not `resolve_layout`: importing the latter imports Arena's
+# solver, two seconds the client spends waiting on the handshake. The first
+# tool that solves pays for it instead — see `_resolve`.
+from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 
 #: Sent to the client at handshake, as the model's orientation to this server.
 #: Per-tool detail lives in the tool docstrings; this is what ties them into an
@@ -51,21 +56,25 @@ How the tools fit together:
    the only place these names exist. NVIDIA's SimReady props — ~1,500 objects
    beyond the registry — are searched too once `reindex_assets` has built the
    local index; a hit among them carries the `params` to add it with.
+   `list_kinds` for the relation and task kinds a spec can name, and the
+   params each takes.
 2. `add_object` / `remove_object` to edit the objects, `set_embodiment` to
    change the robot. Editing the YAML directly is fine too, and is the way to
-   do anything these do not cover.
+   do anything these do not cover; run `check_spec` after a hand edit. Quote
+   the `on` relation kind — `kind: 'on'` — since Arena reads YAML 1.1, where
+   a bare `on` is `true`.
 3. `describe_scene` for where the solver actually put things, and whether the
-   layout passed its checks.
+   layout passed the checks a dry solve can run.
 4. `render_views` to look at it.
 
-Steps 1 and 2 return in milliseconds. Steps 3 and 4 re-run the placement solver
-and read every asset's USD, so they take seconds — make a run of edits, then
-check once.
+Steps 1 and 2 and `check_spec` return in milliseconds. Steps 3 and 4 re-run
+the placement solver and read every asset's USD, so they take seconds — make a
+run of edits, then check once.
 
 A failed edit is a normal result, not an error: it comes back as
 `{"ok": false, "errors": [...]}` with both files untouched, and so does a
-`describe_scene` of a spec that does not read, validate or build. Read the
-errors and correct the call, or the spec.
+`describe_scene` of a spec that does not read, validate or build, and a
+`check_spec` of one. Read the errors and correct the call, or the spec.
 
 `describe_scene` answers "did that land where I meant" more cheaply and more
 precisely than a picture. Reach for `render_views` when the question is about
@@ -79,6 +88,11 @@ at runtime Arena draws a different valid layout on every reset.
 """
 
 mcp = MCPServer("arena-composer", instructions=INSTRUCTIONS)
+
+#: Declared on the tools that write nothing of the user's, so a client may run
+#: them without asking. A resolve still fills the asset cache and a render
+#: writes PNGs under tmp, which is this process's own housekeeping.
+_READ_ONLY = ToolAnnotations(read_only_hint=True)
 
 #: Where renders are written. One directory per spec and view, so a re-render
 #: replaces its picture rather than filling the disk with a history of them.
@@ -149,7 +163,7 @@ async def _or_refused(work: Callable[..., Any], *args: Any) -> Any:
         raise ToolError("\n".join(_reasons(error))) from error
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def search_assets(query: str = "", role: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """Find assets to use as an object, background or embodiment `registry_name`.
 
@@ -207,14 +221,19 @@ def _reindex() -> list[simready.RemoteAsset]:
         return simready.build()
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
     """Resolve a spec and report where every asset ended up.
 
     This is the spec as the simulator would build it, not as it was written:
-    positions come from the placement solver, and `placement` says whether the
-    layout it found is one the sim would accept. Read the YAML itself for what
+    positions come from the placement solver. Read the YAML itself for what
     was authored.
+
+    `placement` is the solver's verdict on this one seeded sample: `checks`
+    and `failed_checks` for what a dry solve can decide — resting on, next to,
+    overlap — and `not_run` for what only the simulator can, physics settling
+    among them. A pass is necessary for the sim to accept the layout, not
+    sufficient, and another seed may fail where this one passed.
 
     Takes seconds. Prefer it after a run of edits rather than between each.
 
@@ -328,7 +347,7 @@ def set_embodiment(spec: str, registry_name: str) -> dict[str, Any]:
         return vars(spec_edit.apply(_spec_path(spec), "set", ["embodiment", "registry_name"], registry_name))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def render_views(
     spec: str,
     views: list[str] | None = None,
@@ -381,6 +400,55 @@ async def render_views(
     out_dir = _RENDERS / hashlib.sha256(str(path).encode()).hexdigest()[:16]
     paths = await _or_refused(render.render, payload, out_dir, views, size)
     return [Image(path=path) for path in paths]
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def check_spec(spec: str) -> dict[str, Any]:
+    """Validate a spec as Arena will read it: milliseconds, no solve, no asset read.
+
+    The check every edit tool runs before it writes, on the files as they are
+    on disk — so this is what to run after editing the YAML by hand, before
+    `describe_scene` spends seconds on it. It catches what stops a spec
+    loading: YAML that does not parse, a `registry_name` the registry lacks, a
+    relation or task param naming an id the spec has not got, an object short
+    of the params its asset needs, a bare `on` read as the boolean true.
+
+    Whether the layout solves it cannot see; that is `describe_scene`.
+
+    Returns what an edit returns, with nothing written: `{"ok": true}` for a
+    spec that validates, else `{"ok": false, "errors": [...]}`, one line per
+    problem.
+
+    Args:
+        spec: Path to the task YAML.
+    """
+    with _quiet():
+        return vars(spec_edit.check(_spec_path(spec)))
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def list_kinds() -> dict[str, Any]:
+    """The relation and task kinds a spec can name, with the params each takes.
+
+    `relations` and `tasks` carry one entry per registered kind: its `name` as
+    the spec writes it, a `summary`, and `fields` — each param with its
+    `kind` (`number`, `int`, `bool`, `text`, `enum` with `options`, or
+    `node_ref`, which names another entry's id), whether it is `required`, and
+    its `default`. `other_params` lists the params with a shape no field
+    covers — a tuple range, a list of ids — by their annotated type.
+    `agent_ready` marks the kinds Arena vetted for its own agent; the rest are
+    registered all the same. A `unary` relation takes no `reference`.
+    `compositions` is what `task.composition` may be.
+
+    Milliseconds, about 16 kB, and the same for the life of the server, so
+    once is enough.
+    """
+    with _quiet():
+        # Imported here, as `_pack` does: the payload module pulls in numpy
+        # and the geometry readers, which nothing on this path needs.
+        from arena_composer.payload import kinds
+
+        return kinds()
 
 
 def _pack(path: Path, seed: int) -> bytes:

@@ -51,3 +51,24 @@ def test_only_the_generic_simready_object_needs_a_param():
     assert catalog.missing_params("simready_usd_object", {}) == ["usd_path"]
     assert catalog.missing_params("simready_usd_object", {"usd_path": "x.usd"}) == []
     assert catalog.missing_params("banana_ycb_robolab", {}) == []
+
+
+def test_a_kind_lists_the_params_no_control_edits_and_whether_arena_vetted_it():
+    """A tuple range or a list of ids gets no form field, but a text edit can
+    still set it, so the kind says it is there and what shape it has. Whether
+    Arena marked the kind `agent_ready` travels with it; the rest are
+    registered all the same."""
+    by_name = {kind.name: kind for kind in (*catalog.relations(), *catalog.tasks())}
+    assert by_name["on"].agent_ready and not by_name["GoalPoseTask"].agent_ready
+    assert by_name["GoalPoseTask"].other_params["target_x_range"] == {
+        "type": "tuple[float, float] | None",
+        "required": False,
+        "default": None,
+    }
+    assert by_name["LiftObjectTask"].other_params["goal_position_delta_xyz"]["default"] == [0.0, 0.0, 0.3]
+    assert by_name["SortMultiObjectTask"].other_params["pick_up_object_list"] == {
+        "type": "list[Asset]",
+        "required": True,
+        "default": None,
+    }
+    assert "pick_up_object" not in by_name["PickAndPlaceTask"].other_params, "a field was listed twice"

@@ -23,7 +23,7 @@ from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.shared.exceptions import MCPDeprecationWarning
 
-from arena_composer import mcp_server
+from arena_composer import mcp_server, spec_edit
 
 
 def test_arena_chatter_never_reaches_stdout(capsys, monkeypatch):
@@ -119,3 +119,46 @@ def test_a_spec_that_does_not_read_is_described_as_a_result_and_refused_as_a_ren
         result = asyncio.run(rendered())
     assert result.is_error and "ParserError" in result.content[0].text and "task.yaml" in result.content[0].text, result
     assert progress == [f"resolving task.yaml (seed {mcp_server.DEFAULT_SEED})"], progress
+
+
+def test_the_cheap_tools_stay_off_stdout_too(capsys, monkeypatch, tmp_path: Path):
+    """`check_spec` and `list_kinds` import and populate Arena's registries,
+    which print while they do."""
+
+    def noisy_check(path):
+        print("[registry] populated")
+        return spec_edit.Result(ok=True)
+
+    empty = {"relations": [], "tasks": [], "compositions": []}
+
+    def noisy_kinds():
+        print("[registry] populated")
+        return empty
+
+    monkeypatch.setattr(spec_edit, "check", noisy_check)
+    monkeypatch.setattr("arena_composer.payload.kinds", noisy_kinds)
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: {}\n")
+
+    assert json.loads(_call("check_spec", spec=str(spec)).content[0].text)["ok"] is True
+    assert json.loads(_call("list_kinds").content[0].text) == empty
+    captured = capsys.readouterr()
+    assert captured.out == "", f"reached the protocol stream: {captured.out!r}"
+
+
+def test_check_spec_answers_a_broken_spec_as_a_result(tmp_path: Path):
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: [\n")
+    checked = json.loads(_call("check_spec", spec=str(spec)).content[0].text)
+    assert checked["ok"] is False
+    assert "ParserError" in checked["errors"][0] and "task.yaml" in checked["errors"][0], checked
+
+
+def test_the_tools_that_write_nothing_say_so():
+    """A client may run a read-only tool without asking, so the hint has to
+    sit on exactly the tools that leave the spec alone — not the edits, and
+    not the reindex, which rewrites a shared file."""
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    read_only = {tool.name for tool in tools if tool.annotations and tool.annotations.read_only_hint}
+    assert read_only == {"search_assets", "describe_scene", "render_views", "check_spec", "list_kinds"}
+    assert len(tools) == 9

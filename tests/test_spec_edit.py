@@ -183,6 +183,36 @@ def test_a_spec_without_an_include_edits_itself(tmp_path: Path):
     assert "apple" in [obj["id"] for obj in yaml.safe_load(path.read_text())["objects"]]
 
 
+def test_check_judges_the_bytes_on_disk_and_writes_nothing(spec: Path):
+    """The check an edit passes before it lands, on the files as they are: a
+    bare `on` left by a hand edit is the boolean true under YAML 1.1, which
+    the in-memory document would not show. Nothing is written either way."""
+    assert spec_edit.check(spec) == spec_edit.Result(ok=True)
+
+    scene_of(spec).write_text(SCENE.replace("kind: 'on'", "kind: on", 1))
+    before = spec.read_text(), scene_of(spec).read_text()
+    result = spec_edit.check(spec)
+    assert not result.ok
+    assert any("relations.1.kind" in error and "string" in error for error in result.errors), result.errors
+    assert (spec.read_text(), scene_of(spec).read_text()) == before
+
+
+def test_check_names_what_a_pair_is_short_of(spec: Path):
+    """Three ways a hand edit leaves a spec: a task param naming nothing, a
+    scene that does not parse, an include that is not there. Each comes back
+    as a result naming the file or the id, never as an exception."""
+    spec.write_text(TASK.replace("pick_up_object: banana", "pick_up_object: plantain"))
+    assert any("plantain" in error for error in spec_edit.check(spec).errors)
+
+    scene_of(spec).write_text("objects: [\n")
+    result = spec_edit.check(spec)
+    assert not result.ok and "scene.yaml" in result.errors[0], result.errors
+
+    spec.write_text(TASK.replace("scene.yaml", "gone.yaml"))
+    result = spec_edit.check(spec)
+    assert not result.ok and "gone.yaml" in result.errors[0], result.errors
+
+
 def test_a_scene_is_refused_with_a_regex_that_finds_its_task(spec: Path):
     with pytest.raises(ValueError) as refused:
         spec_edit.check_entry(scene_of(spec))

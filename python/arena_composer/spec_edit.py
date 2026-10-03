@@ -33,6 +33,24 @@ from ruamel.yaml import YAML
 #: Key through which a task spec includes its scene.
 INCLUDE = "external_yaml"
 
+#: The placement seed every command and tool solves with unless told otherwise.
+DEFAULT_SEED = 42
+
+
+class SpecError(Exception):
+    """A spec that validates but names an asset the sim could not use. One
+    line per asset, since a scene wrong in one place is often wrong in two.
+
+    Raised by :mod:`arena_composer.resolve_layout`, and defined here with
+    ``DEFAULT_SEED`` so the MCP server and ``arena-view`` can name both at
+    import without paying for Arena's solver before their first solve.
+    """
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("\n".join(errors))
+        self.errors = errors
+
+
 #: Strings that have to go out quoted.
 #:
 #: Arena loads these files with PyYAML, which reads YAML 1.1, where a bare
@@ -73,6 +91,21 @@ class Result:
     @classmethod
     def failed(cls, *errors: str) -> Result:
         return cls(ok=False, errors=list(errors))
+
+
+def check(path: Path) -> Result:
+    """Validate the spec at `path` as Arena will read it, writing nothing.
+
+    The check every edit passes before it lands, on the text as it is on
+    disk — so a hand edit is judged by the bytes Arena's YAML 1.1 reader will
+    see, a bare ``on`` included — and the same :class:`Result`: `ok` with
+    nothing in `errors` for a spec that validates.
+    """
+    files = _files(path)
+    if isinstance(files, Result):
+        return files
+    errors = files.validate({file: file.read_text(encoding="utf-8") for file in files.documents})
+    return Result(ok=not errors, errors=errors)
 
 
 def check_entry(path: Path) -> None:

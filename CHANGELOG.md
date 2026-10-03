@@ -25,8 +25,20 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   no other node. A click on a node, chip or edge opens its card in the panel and scrolls to it, and
   hovering one shows it in the 3D view. Drag to pan, scroll to zoom, double-click to fit.
 - arena-composer is licensed under MIT OR Apache-2.0, at your option, and the wheel says so.
+- `check_spec`, an MCP tool that validates a spec as Arena will read it — in milliseconds, with no
+  solve and no asset read — and reports what the edit tools would refuse, for after a hand edit.
+- `list_kinds`, an MCP tool listing the relation and task kinds a spec can name: the params each
+  takes, the ones no form edits — a tuple range, a list of ids — by type, and which Arena marks
+  `agent_ready`.
+- `describe_scene` and `arena-resolve-layout` report `placement.not_run`: the checks only the
+  simulator decides — physics settling, IK reach — so a dry pass reads as necessary, not sufficient.
 
 ### Changed
+
+- The MCP tools that write nothing — `search_assets`, `describe_scene`, `render_views`, `check_spec`,
+  `list_kinds` — declare themselves read-only, so a client may run them without asking.
+- `arena-mcp` answers its handshake about two seconds sooner: Arena's solver is imported by the first
+  tool that needs it, not at start.
 
 - Every entry in the editor panel is a card, after Blender's modifier stack: it folds, its header
   names it, and its × removes it. A folded card sums up its entry beside the name, and an object's

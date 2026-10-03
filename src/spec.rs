@@ -353,6 +353,28 @@ mod tests {
         assert_eq!(params["z_min"], Value::Null);
     }
 
+    /// Python describes a kind with more than the form needs — whether Arena
+    /// marked it `agent_ready`, the params no control edits — for the MCP
+    /// server's `list_kinds`. A field this side does not know is skipped, so
+    /// the vocabulary keeps decoding as Python's grows.
+    #[test]
+    fn a_kind_carrying_more_than_the_form_needs_decodes() {
+        let packed = rmp_serde::to_vec_named(&serde_json::json!({
+            "relations": [{
+                "name": "on",
+                "fields": [],
+                "summary": "Rests on.",
+                "unary": false,
+                "agent_ready": true,
+                "other_params": {"target_x_range": {"type": "tuple[float, float] | None", "required": false}},
+            }],
+        }))
+        .unwrap();
+
+        let vocabulary: Vocabulary = rmp_serde::from_slice(&packed).unwrap();
+        assert_eq!(vocabulary.relation("on").map(|kind| kind.unary), Some(Some(false)));
+    }
+
     /// The fixtures above are hand-written; this is the shape Python actually
     /// packs. Ignored because it needs a payload to read. Make one first:
     /// `arena-resolve-layout <spec>.yaml --payload scene.msgpack`, then

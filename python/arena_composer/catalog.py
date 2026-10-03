@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import enum
 import inspect
+import re
 import sys
 import types
 import typing
@@ -231,6 +232,14 @@ class Kind:
     summary: str
     #: Relations only: a unary relation takes no `reference`.
     unary: bool | None = None
+    #: Marked by Arena as one its own spec-writing agent may use. The rest are
+    #: registered all the same, and a spec may name them.
+    agent_ready: bool = False
+    #: The parameters no control edits — a tuple, a list of assets, a Literal,
+    #: a callable — by name: their annotated `type`, whether one is `required`
+    #: and the `default`. A text edit can still set what a form cannot, so the
+    #: kind's whole signature stays readable.
+    other_params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @cache
@@ -255,16 +264,39 @@ def tasks() -> tuple[Kind, ...]:
 
 def _kind(cls: type, name: str, unary: bool | None = None) -> Kind:
     hints = _hints(cls)
-    fields = []
+    fields, other = [], {}
     for param in inspect.signature(cls.__init__).parameters.values():
         if param.name in _NOT_PARAMS or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
         # A parameter no control can edit — a callable factory, a list of
-        # assets — is left out. Edits address one leaf at a time, so a value
-        # the form never shows still survives a write.
-        if (field := _field(param, hints.get(param.name, param.annotation))) is not None:
+        # assets — gets no field, only a line under `other_params`. Edits
+        # address one leaf at a time, so a value the form never shows still
+        # survives a write.
+        annotation = hints.get(param.name, param.annotation)
+        if (field := _field(param, annotation)) is not None:
             fields.append(field)
-    return Kind(name=name, fields=tuple(fields), summary=_summary(cls), unary=unary)
+        else:
+            required = param.default is inspect.Parameter.empty
+            other[param.name] = {
+                "type": _type_name(annotation),
+                "required": required,
+                "default": None if required else _plain(param.default),
+            }
+    return Kind(
+        name=name,
+        fields=tuple(fields),
+        summary=_summary(cls),
+        unary=unary,
+        agent_ready=bool(getattr(cls, "agent_ready", False)),
+        other_params=other,
+    )
+
+
+def _type_name(annotation: Any) -> str:
+    """An annotation as the signature reads, without module paths:
+    ``tuple[float, float] | None``, ``list[Asset]``."""
+    text = annotation.__qualname__ if isinstance(annotation, type) else repr(annotation)
+    return re.sub(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.([A-Za-z_]\w*)", r"\1", text)
 
 
 def _field(param: inspect.Parameter, annotation: Any) -> Field | None:
