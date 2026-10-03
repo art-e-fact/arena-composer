@@ -70,6 +70,10 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         if asset.get("role") in _UNDRAWN_ROLES:
             return None
         path = asset.get("local_usd_path")
+        if not path and asset["bbox_min"] == asset["bbox_max"]:
+            # A light or a ground plane: nothing to draw, and a degenerate box
+            # would still pull the camera's framing to where it sits.
+            return None
         if not path:
             # The box it was placed by. It already carries the asset's scale, and
             # the viewer applies that again.
@@ -83,6 +87,7 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         return by_usd[path]
 
     spec, owners = dump.get("spec") or {}, _owners(dump.get("spec_path"))
+    lighting = dump.get("lighting", {})
     if dump.get("spec_path"):
         # The first layout only: a later one's spec was read when its solve
         # began, and the panel may be edits past it by the time it lands.
@@ -104,7 +109,11 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             for asset in dump["assets"]
         ],
         "geometries": geometries,
-        "lighting": {"auto_injected_dome_light": bool(dump.get("lighting", {}).get("auto_injected_dome_light"))},
+        # The viewer's one stand-in light also stands in for a light the spec
+        # lists, which is not drawn either.
+        "lighting": {
+            "auto_injected_dome_light": bool(lighting.get("auto_injected_dome_light") or lighting.get("light_assets"))
+        },
         "viewer": _viewer(dump.get("viewer")),
         "spec": spec,
         "owners": owners,

@@ -238,12 +238,16 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
     among them. A pass is necessary for the sim to accept the layout, not
     sufficient, and another seed may fail where this one passed.
 
+    A light or a ground plane has nothing to place: it stays where it is
+    configured, unsolved, with an empty box.
+
     Takes seconds. Prefer it after a run of edits rather than between each.
 
     A spec that does not read, validate or build comes back as `{"ok": false,
     "errors": [...]}` with no layout: one line per object whose
     `params.usd_path` cannot be used — a URL that is not on the server, or a
-    prop that is not the single rigid body the sim would spawn — or Arena's
+    prop that is not the single rigid body the sim would spawn — one per
+    relation naming a light or a ground plane, which take none, or Arena's
     own reason.
 
     Args:
@@ -303,7 +307,8 @@ def add_object(
         id: Node id for the new object, unique within the spec.
         registry_name: A name from `search_assets`.
         on: Id of the asset to place it on. Without one the object takes no
-            part in placement and lands at the origin.
+            part in placement and lands at the origin. Leave it out for a
+            light or a ground plane, which take no relation.
         params: The `params` the search hit carries, as they are: a SimReady
             prop needs its `usd_path`. An object short of what its asset needs
             is refused before the file is written.

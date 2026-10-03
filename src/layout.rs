@@ -63,11 +63,13 @@ pub fn spawn_scene(world: &mut World, scene: &Scene) -> Entity {
 }
 
 /// Stand in for the dome light Arena injects at build time when neither the
-/// spec nor the background USD supplies one.
+/// spec nor the background USD supplies one, and for a light the spec lists as
+/// an object, which is not drawn either. `payload.build_payload` sets the flag
+/// for both.
 ///
-/// Only that one. Lights authored inside an asset are not extracted, so a scene
-/// that reports its own lighting is drawn by whatever the assets carry — which
-/// is nothing, today. It lights whatever is drawn, so a reload leaves it alone.
+/// Only those. Lights authored inside a USD are not extracted, so a background
+/// that carries its own is drawn by whatever the assets carry — which is
+/// nothing, today. It lights whatever is drawn, so a reload leaves it alone.
 pub fn spawn_lighting(world: &mut World, scene: &Scene) {
     if scene.lighting.auto_injected_dome_light {
         world.spawn((

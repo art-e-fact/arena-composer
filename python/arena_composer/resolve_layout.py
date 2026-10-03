@@ -24,7 +24,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from isaaclab.sim import CuboidCfg, SphereCfg
+from isaaclab.sim import CuboidCfg, GroundPlaneCfg, LightCfg, SphereCfg
 from isaaclab_arena.assets.background import Background
 from isaaclab_arena.assets.deformable_object import DeformableObject
 from isaaclab_arena.assets.object import Object
@@ -58,13 +58,15 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[st
     """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
 
     Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
-    used, or that spawns neither a USD nor a shape to bound it by; anything
-    else Arena raises passes through.
+    used, that spawns neither a USD nor a shape to bound it by, or that is a
+    light or a ground plane a relation names; anything else Arena raises passes
+    through. A light or a ground plane no relation names is left where it is
+    configured, with an empty box, as the sim leaves it out of placement too.
     """
     use_local_asset_cache()
     check_usd_params(spec.objects)
     assets = instantiate_assets_from_spec(spec, AssetRegistry())
-    bound_spawned_shapes(assets)
+    bound_spawned_shapes(assets, spec.relations)
     _attach_spatial_relations_to_assets(spec.relations, assets)
 
     # Assets without relations keep their configured pose; the rest are solved together.
@@ -129,19 +131,27 @@ def check_usd_params(objects: Iterable[Any]) -> None:
         raise SpecError(errors)
 
 
-def bound_spawned_shapes(assets: dict[str, Any]) -> None:
+def bound_spawned_shapes(assets: dict[str, Any], relations: Iterable[Any] = ()) -> None:
     """Give each object spawned from a shape, not a USD, the bounding box of that shape.
 
     Arena's ``Object.get_bounding_box`` reads the box from ``usd_path``, which
     these leave unset, and returns one already set as it is. So the solver
     places them by this box, and the payload draws it.
+
+    A light or a ground plane has nothing to place and keeps its unset
+    ``usd_path``, which is what keeps Arena from taking it for an obstacle. A
+    relation naming one is refused here, by index: Arena would stop on a bare
+    assert inside the solver.
     """
-    errors = []
+    errors, unplaceable = [], {}
     for node_id, asset in assets.items():
         # An object set names no USD of its own either, but bounds itself by its members'.
         if not isinstance(asset, Object) or isinstance(asset, RigidObjectSet) or asset.usd_path:
             continue
         spawn = asset.object_cfg.spawn
+        if isinstance(spawn, (LightCfg, GroundPlaneCfg)):
+            unplaceable[node_id] = type(spawn).__name__
+            continue
         if isinstance(spawn, CuboidCfg):
             half_size = [size / 2 for size in spawn.size]
         elif isinstance(spawn, SphereCfg):
@@ -155,6 +165,13 @@ def bound_spawned_shapes(assets: dict[str, Any]) -> None:
         # get_bounding_box asserts usd_path is not None before reading the box, and an object
         # built from a spawner_cfg (`sphere`) has None where the procedural ones have "".
         asset.usd_path = ""
+    for index, relation in enumerate(relations):
+        for node_id in (relation.subject, relation.reference):
+            if node_id in unplaceable:
+                errors.append(
+                    f"relations.{index}: {relation.kind} names {node_id!r}, a {unplaceable[node_id]} with"
+                    " nothing to place; it takes no relation"
+                )
     if errors:
         raise SpecError(errors)
 
@@ -255,6 +272,9 @@ def _bounding_box(asset: Any) -> Any:
     """Local bounds, using the variant this env actually spawns for an object set."""
     if isinstance(asset, RigidObjectSet) and asset.variant_indices_by_env:
         return asset.get_bounding_box_per_env(num_envs=1)
+    if isinstance(asset, Object) and asset.usd_path is None:
+        # A light or a ground plane (bound_spawned_shapes): an empty box, drawn as nothing.
+        return AxisAlignedBoundingBox(min_point=(0.0, 0.0, 0.0), max_point=(0.0, 0.0, 0.0))
     return asset.get_bounding_box()
 
 

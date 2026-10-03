@@ -83,6 +83,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   inside it and their relations, where it left them dangling and the edit was refused.
 - Removing the last entry of a list that holds a comment no longer writes a file that does not
   parse.
+- A spec listing a light or a ground plane as an object resolves, in `arena-view`,
+  `arena-resolve-layout` and the MCP tools, where it was refused: the asset stays where it is
+  configured, out of placement as in the sim, and is drawn as nothing. A relation naming one is
+  refused with its index. A spec's own light lights the window as the light Arena injects does.
 - A number typed into the editor panel was saved even when escaped from, and saved twice when
   entered.
 - The status line drew its separators as boxes.
