@@ -72,6 +72,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- Renaming an id carries it into every slot Arena checks — an object reference's `parent_id`, a CLI
+  override's target, a task param that lists ids — and into the prim path of a reference inside a
+  renamed object, where the spec went on naming the old id and stopped loading.
+- Removing an object, from its card, the MCP tool or `apply`, also removes the object references
+  inside it and their relations, where it left them dangling and the edit was refused.
+- Removing the last entry of a list that holds a comment no longer writes a file that does not
+  parse.
 - A number typed into the editor panel was saved even when escaped from, and saved twice when
   entered.
 - The status line drew its separators as boxes.

@@ -308,7 +308,9 @@ def add_object(
 
 @mcp.tool()
 def remove_object(spec: str, id: str) -> dict[str, Any]:
-    """Remove an object from a scene, along with every relation naming it.
+    """Remove an object from a scene, along with every relation naming it and
+    the object references inside it — a reference is a prim of the object's
+    USD — with their relations in turn. `changed` lists what went.
 
     A task param still pointing at it is left in place and reported as a
     validation error — what to do about the task is a decision, not a cleanup.

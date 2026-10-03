@@ -376,6 +376,130 @@ def test_renaming_the_background_carries_the_relation_and_task_param_naming_it(s
     assert params["background_scene"] == "new_table"
 
 
+REFERENCES = """\
+object_references:
+# anchors the tabletop prim, not the whole table
+- id: table_top
+  parent_id: maple_table_robolab
+  prim_path: '{ENV_REGEX_NS}/maple_table_robolab/table'
+  object_type: rigid
+  params: {}
+- id: distractor_top
+  parent_id: distractor
+  prim_path: '{ENV_REGEX_NS}/distractor/top'
+  object_type: rigid
+  params: {}
+"""
+TOP_RELATION = """\
+- kind: next_to
+  subject: bowl
+  reference: distractor_top
+  params: {}
+"""
+REFERENCED_SCENE = SCENE.replace("relations:\n", REFERENCES + "relations:\n") + TOP_RELATION
+OVERRIDE = "cli_override_specs:\n- arg: background\n  target_node_id: maple_table_robolab\ntask:\n"
+
+
+def test_renaming_carries_every_slot_arena_checks(spec: Path):
+    """Arena validates a reference's `parent_id` and a CLI override's target
+    against the ids, and refuses the spec when either names one that has gone
+    — so a rename has to reach both, in whichever file holds them. The prim
+    path of a reference inside the background spells the registry name, which
+    a rename of the id leaves alone."""
+    spec.write_text(TASK.replace("task:\n", OVERRIDE, 1))
+    scene_of(spec).write_text(REFERENCED_SCENE)
+
+    result = spec_edit.apply(spec, "set", ["background", "id"], "bench")
+    assert result.ok, result.errors
+
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert scene["object_references"][0]["parent_id"] == "bench"
+    assert scene["object_references"][0]["prim_path"] == "{ENV_REGEX_NS}/maple_table_robolab/table"
+    assert yaml.safe_load(spec.read_text())["cli_override_specs"][0]["target_node_id"] == "bench"
+    left = (spec.read_text() + scene_of(spec).read_text()).replace(f"registry_name: {TABLE}", "").replace("prim_path: '{ENV_REGEX_NS}/maple_table_robolab/table'", "")
+    assert TABLE not in left, "the old id survived somewhere"
+
+
+def test_renaming_an_object_rewrites_the_prim_path_of_a_reference_inside_it(spec: Path):
+    """Arena spawns an asset under its id, so a reference inside an object
+    names the object's id in its prim path too; left as it was, the spec
+    validates and fails to build."""
+    scene_of(spec).write_text(REFERENCED_SCENE)
+    result = spec_edit.apply(spec, "set", ["objects", 2, "id"], "decoy")  # distractor
+    assert result.ok, result.errors
+
+    reference = yaml.safe_load(scene_of(spec).read_text())["object_references"][1]
+    assert (reference["parent_id"], reference["prim_path"]) == ("decoy", "{ENV_REGEX_NS}/decoy/top")
+
+
+SORT_TASK = TASK.replace(
+    """  - kind: PickAndPlaceTask
+    params:
+      pick_up_object: banana
+      destination_location: bowl
+""",
+    """  - kind: SortMultiObjectTask
+    params:
+      pick_up_object_list: [banana, distractor]
+      destination_location_list: [bowl, bowl]
+""",
+)
+
+
+def test_renaming_reaches_inside_a_list_task_param(spec: Path):
+    """Arena checks only string params when it validates, but looks every
+    listed id up when it builds — so an id in a list is a reference like any
+    other, and the rename has to find it."""
+    spec.write_text(SORT_TASK)
+    result = spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain")  # banana
+    assert result.ok, result.errors
+
+    params = yaml.safe_load(spec.read_text())["task"]["subtasks"][0]["params"]
+    assert params["pick_up_object_list"] == ["plantain", "distractor"]
+    assert params["destination_location_list"] == ["bowl", "bowl"]
+
+
+def test_removing_an_object_takes_the_references_inside_it(spec: Path):
+    """A reference is a prim of its parent's USD and Arena allows it no other
+    parent, so with the object gone there is one thing to do with it — and
+    with the relations that named it."""
+    scene_of(spec).write_text(REFERENCED_SCENE)
+    result = spec_edit.remove_object(spec, "distractor")
+    assert result.ok, result.errors
+    assert any("distractor_top" in line for line in result.changed), result.changed
+
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert [reference["id"] for reference in scene["object_references"]] == ["table_top"]
+    assert all("distractor" not in (r["subject"], r.get("reference")) for r in scene["relations"])
+    assert all("distractor_top" not in (r["subject"], r.get("reference")) for r in scene["relations"])
+
+
+def test_removing_the_last_entry_of_a_commented_list_still_parses(spec: Path):
+    """ruamel writes a list emptied of a commented entry as a `[]` at column 0,
+    which does not parse — the list version of the emptied-mapping trap. Both
+    ways of emptying one: the card's remove, and a cascade."""
+    only_top = REFERENCES.split("- id: distractor_top")[0]
+    scene_of(spec).write_text(SCENE.replace("relations:\n", only_top + "relations:\n"))
+    result = spec_edit.apply(spec, "remove", ["object_references", 0])
+    assert result.ok, result.errors
+    assert yaml.safe_load(scene_of(spec).read_text())["object_references"] == []
+
+    scene_of(spec).write_text(SCENE.replace("relations:\n", only_top.replace(TABLE, "distractor", 1).replace("maple_table_robolab/table", "distractor/table") + "relations:\n"))
+    result = spec_edit.remove_object(spec, "distractor")
+    assert result.ok, result.errors
+    assert yaml.safe_load(scene_of(spec).read_text())["object_references"] == []
+
+
+def test_a_cascade_tolerates_sections_a_hand_edit_left_null(spec: Path):
+    """`relations: null` and `object_references: null` are the shape a hand
+    edit leaves; the cascade walks them without raising, and the edit is
+    answered as a result either way."""
+    scene_of(spec).write_text(SCENE.split("relations:")[0] + "object_references: null\nrelations: null\n")
+    result = spec_edit.remove_object(spec, "distractor")
+    assert isinstance(result, spec_edit.Result)
+    assert spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain").ok is not None
+
+
 def test_a_param_called_id_does_not_trigger_a_rename(spec: Path):
     """Only the embodiment's and background's own `id` renames — a param that
     happens to be called `id` a step further down must not."""

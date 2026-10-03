@@ -9,9 +9,10 @@ not have is the two things this module adds:
   ``relations`` live in exactly one of the files. An edit goes to whichever file
   owns the key.
 * **What an edit drags with it.** Removing an object also has to remove the
-  relations that name it, and renaming one — an object's, the embodiment's, or
-  the background's — has to carry them across, or the spec stops loading with a
-  dangling reference. Switching the embodiment's or the background's
+  relations that name it and the object references inside it, and renaming one
+  — an object's, the embodiment's, or the background's — has to carry every
+  slot that holds its id (see :func:`_id_slots`), or the spec stops loading
+  with a dangling reference. Switching the embodiment's or the background's
   ``registry_name`` has to shed the params the new one does not take, or the
   spec stops building.
 
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import io
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -343,10 +345,10 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     * ``insert`` — append `value` to the list `steps` names. Appending a second
       subtask to an ``atomic`` task switches its composition to ``sequential``,
       since ``atomic`` holds only one.
-    * ``remove`` — drop what `steps` names: an entry, with any relation left
-      dangling, or a parameter, which hands it back to the kind's default.
-      Dropping a task down to one subtask switches its composition back to
-      ``atomic``.
+    * ``remove`` — drop what `steps` names: an entry, with the relations
+      naming it and the object references inside it, or a parameter, which
+      hands it back to the kind's default. Dropping a task down to one subtask
+      switches its composition back to ``atomic``.
 
     One leaf at a time rather than whole sections, so a key the editor's form
     never shows is not dropped by a write that passes over it. Which file the
@@ -406,11 +408,16 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             node_id = parent[last].get("id") if names_entry else None
             del parent[last]
             # ruamel writes a mapping emptied of a commented key at column 0,
-            # which does not parse. A fresh one writes as `{}`.
-            if isinstance(parent, dict) and not parent and len(steps) > 1:
-                _walk(document, steps[:-2])[steps[-2]] = {}
-            if node_id and (dropped := _drop_relations_naming(files, node_id)):
-                changed.append(f"removed {dropped} relation(s) naming {node_id!r}")
+            # which does not parse. A fresh one writes as `{}`; a list has its
+            # own trap, see `_emptied`.
+            if not parent and len(steps) > 1:
+                grandparent = _walk(document, steps[:-2])
+                if isinstance(parent, dict):
+                    grandparent[steps[-2]] = {}
+                else:
+                    _emptied(grandparent, steps[-2])
+            if node_id:
+                changed += _drop_dependents(files, node_id)
             if steps[:2] == ["task", "subtasks"] and len(steps) == 3 and (bumped := _keep_composition_valid(files)):
                 changed.append(bumped)
             return files.write(changed)
@@ -467,43 +474,122 @@ def _label(steps: list[Any]) -> str:
     return ".".join(str(step) for step in steps)
 
 
-def _drop_relations_naming(files: SpecFiles, node_id: str) -> int:
-    """Remove every relation with `node_id` as subject or reference.
+def _entries(mapping: Any, key: str) -> list[dict[str, Any]]:
+    """The mapping entries of the list under `key`, or none: these paths run
+    on specs a hand edit may have left in any shape."""
+    found = mapping.get(key) if isinstance(mapping, dict) else None
+    return [entry for entry in (found if isinstance(found, list) else []) if isinstance(entry, dict)]
 
-    A relation pointing at an asset that has gone stops the spec loading at
-    all, so removing the asset has to remove them in the same edit.
+
+def _id_slots(spec: Any) -> Iterator[tuple[Any, Any]]:
+    """Every slot in `spec` — one document, or the merged pair — holding a node
+    id, as ``(container, key)`` to read or write through.
+
+    The complete list, checked against Arena's validator and its builder: a
+    relation's ``subject`` and ``reference``; an object reference's
+    ``parent_id``; a CLI override's ``target_node_id``; and a task param that
+    is a string, or the strings in one that is a list, since Arena requires
+    each to name a node — an object set's ``members`` are registry names, not
+    ids, and stay out.
     """
-    relations = files.section("relations")
-    dropped = [r for r in relations if node_id in (r.get("subject"), r.get("reference"))]
-    for relation in dropped:
-        relations.remove(relation)
-    return len(dropped)
+    for relation in _entries(spec, "relations"):
+        for slot in ("subject", "reference"):
+            if isinstance(relation.get(slot), str):
+                yield relation, slot
+    for reference in _entries(spec, "object_references"):
+        if isinstance(reference.get("parent_id"), str):
+            yield reference, "parent_id"
+    for override in _entries(spec, "cli_override_specs"):
+        if isinstance(override.get("target_node_id"), str):
+            yield override, "target_node_id"
+    for subtask in _entries(spec.get("task") if isinstance(spec, dict) else None, "subtasks"):
+        params = subtask.get("params")
+        if not isinstance(params, dict):
+            continue
+        for name, value in params.items():
+            if isinstance(value, str):
+                yield params, name
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    if isinstance(item, str):
+                        yield value, index
+
+
+def _remove(files: SpecFiles, key: str, entries: list[Any]) -> None:
+    """Take `entries` out of the list under `key`, leaving a fresh ``[]`` when
+    that empties it."""
+    document = files.documents[files.owner(key)]
+    for entry in entries:
+        document[key].remove(entry)
+    if not document[key]:
+        _emptied(document, key)
+
+
+def _emptied(mapping: Any, key: Any) -> None:
+    """Leave a fresh ``[]`` under `key`, without the comment its entries had.
+
+    ruamel keeps a comment written above a list's first entry on the key in
+    the parent, and writes it between the key and the emptied list — where
+    the `[]` lands at column 0, or indented with the next key's block sequence
+    pulled onto its line, and neither parses. The comment was about entries
+    that are gone.
+    """
+    mapping[key] = []
+    if hasattr(mapping, "ca"):
+        mapping.ca.items.pop(key, None)
+
+
+def _drop_dependents(files: SpecFiles, node_id: str) -> list[str]:
+    """Remove what cannot outlive the entry `node_id` names, one line per kind
+    of thing dropped.
+
+    The relations naming it, since a relation pointing at an asset that has
+    gone stops the spec loading at all. And the object references whose parent
+    it is, with their relations in turn: a reference is a prim inside its
+    parent's USD, and Arena allows it no parent but a background or an object,
+    so with the parent gone there is nothing for it to be — one outcome, hence
+    a cascade and not a refusal.
+    """
+    gone, changed = [node_id], []
+    references = _entries(files.documents[files.owner("object_references")], "object_references")
+    if inside := [reference for reference in references if reference.get("parent_id") == node_id]:
+        _remove(files, "object_references", inside)
+        gone += [reference["id"] for reference in inside if isinstance(reference.get("id"), str)]
+        changed.append(f"removed object reference(s) {gone[1:]} inside {node_id!r}")
+    relations = _entries(files.documents[files.owner("relations")], "relations")
+    if naming := [r for r in relations if r.get("subject") in gone or r.get("reference") in gone]:
+        _remove(files, "relations", naming)
+        changed.append(f"removed {len(naming)} relation(s) naming {' or '.join(repr(name) for name in gone)}")
+    return changed
 
 
 def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
-    """Point everything naming `previous` at `node_id` instead.
+    """Point everything naming `previous` at `node_id` instead: every slot
+    :func:`_id_slots` finds in either file, and the prim path of an object
+    reference inside a renamed *object*, which Arena spells as
+    ``{ENV_REGEX_NS}/<parent id>/...`` — an asset is spawned under its id. A
+    reference inside the background spells the background's registry name
+    there, which a rename of its id leaves alone.
 
     A name left behind is a reference to an asset that no longer exists, which
     stops the spec loading — the same failure removing an asset without its
-    relations causes. Two places hold one: a relation's ``subject`` and
-    ``reference``, and a task param, since Arena requires every string-valued
-    task param to name a node.
-
-    Task params go with a rename and not with a remove, which leaves them
-    alone deliberately: the node a rename renames still exists.
+    relations causes. Task params go with a rename and not with a remove,
+    which leaves them alone deliberately: the node a rename renames still
+    exists.
     """
     renamed = 0
-    for relation in files.section("relations"):
-        for slot in ("subject", "reference"):
-            if relation.get(slot) == previous:
-                relation[slot] = node_id
+    for document in files.documents.values():
+        for container, key in _id_slots(document):
+            if container[key] == previous:
+                container[key] = node_id
                 renamed += 1
-
-    task = files.documents[files.owner("task")].get("task") or {}
-    for subtask in task.get("subtasks") or []:
-        params = subtask.get("params") or {}
-        for name in [name for name, value in params.items() if value == previous]:
-            params[name] = node_id
+    object_ids = {entry.get("id") for entry in _entries(files.documents[files.owner("objects")], "objects")}
+    prefix = f"{{ENV_REGEX_NS}}/{previous}/"
+    for reference in _entries(files.documents[files.owner("object_references")], "object_references"):
+        # `parent_id` already carries the new id by now.
+        prim_path = reference.get("prim_path")
+        if reference.get("parent_id") == node_id and node_id in object_ids and str(prim_path).startswith(prefix):
+            reference["prim_path"] = f"{{ENV_REGEX_NS}}/{node_id}/{prim_path.removeprefix(prefix)}"
             renamed += 1
     return renamed
 
@@ -558,28 +644,23 @@ def _drop_params_not_taken(entry: Any, registry_name: Any) -> list[str]:
 
 
 def remove_object(path: Path, node_id: str) -> Result:
-    """Remove an object from `path`'s scene, along with the relations naming it.
+    """Remove an object from `path`'s scene, along with the relations naming it
+    and the object references inside it, with theirs.
 
-    Relations go with it because a relation pointing at a missing asset stops
-    the spec loading at all. Task params naming it are left alone deliberately:
-    a task whose target has gone is a decision about the task, not a reference
-    to tidy up, and the validation error says so.
+    Those go with it because a relation pointing at a missing asset stops the
+    spec loading at all, and a reference is a prim of its parent's USD — see
+    :func:`_drop_dependents`. Task params naming it are left alone
+    deliberately: a task whose target has gone is a decision about the task,
+    not a reference to tidy up, and the validation error says so.
     """
     files = _files(path)
     if isinstance(files, Result):
         return files
-    objects = files.section("objects")
-    matched = [entry for entry in objects if entry.get("id") == node_id]
+    matched = [entry for entry in _entries(files.documents[files.owner("objects")], "objects") if entry.get("id") == node_id]
     if not matched:
         return Result.failed(f"no object {node_id!r} in this spec; it has {files.asset_ids()}")
 
-    for entry in matched:
-        objects.remove(entry)
-    changed = [f"removed object {node_id!r}"]
-
-    if dropped := _drop_relations_naming(files, node_id):
-        changed.append(f"removed {dropped} relation(s) naming {node_id!r}")
-
-    return files.write(changed)
+    _remove(files, "objects", matched)
+    return files.write([f"removed object {node_id!r}", *_drop_dependents(files, node_id)])
 
 
