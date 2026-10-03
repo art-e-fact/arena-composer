@@ -215,5 +215,5 @@ def test_the_tools_that_write_nothing_say_so():
     not the reindex, which rewrites a shared file."""
     tools = asyncio.run(mcp_server.mcp.list_tools())
     read_only = {tool.name for tool in tools if tool.annotations and tool.annotations.read_only_hint}
-    assert read_only == {"search_assets", "describe_scene", "render_views", "check_spec", "list_kinds"}
-    assert len(tools) == 9
+    assert read_only == {"search_assets", "describe_scene", "get_prim_tree", "render_views", "check_spec", "list_kinds"}
+    assert len(tools) == 10

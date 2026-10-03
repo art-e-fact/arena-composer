@@ -12,6 +12,7 @@ if importlib.util.find_spec("isaaclab_arena") is None:
         "test_composed_assets.py",
         "test_mcp_server.py",
         "test_payload.py",
+        "test_prim_tree.py",
         "test_resolve_checks.py",
         "test_simready.py",
         "test_spec_edit.py",

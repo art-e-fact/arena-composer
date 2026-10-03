@@ -43,6 +43,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `samples` on `describe_scene`, and `--samples N` on `arena-resolve-layout`, solve that many
   layouts at once, as Arena draws one per reset, and report how many passed, which failed, how
   often each check failed and how many of the layouts differ. The first is still the one described.
+- `get_prim_tree`, an MCP tool listing the prims in the background's or an object's USD that an
+  object reference can name — a tabletop, a drawer — each with the `prim_path` to write, its
+  physics type and, for a jointed body, its joint names. It filters by text and by type, since a
+  kitchen has a thousand.
 
 ### Changed
 

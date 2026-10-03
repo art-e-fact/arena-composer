@@ -1,6 +1,6 @@
 """An MCP server for authoring Arena environment specs.
 
-Nine tools, chosen against the question "what can the agent not already do with
+Ten tools, chosen against the question "what can the agent not already do with
 Read and Edit?" — listing a spec's objects did not survive that test, since the
 YAML is short and reading it is exact and free. What survived either touches
 live state (the asset registry, the SimReady index, the solver, a GPU) or knows
@@ -25,11 +25,12 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from arena_composer import catalog, render, simready, spec_edit, usd_assets
 
@@ -57,7 +58,9 @@ How the tools fit together:
    beyond the registry — are searched too once `reindex_assets` has built the
    local index; a hit among them carries the `params` to add it with.
    `list_kinds` for the relation and task kinds a spec can name, and the
-   params each takes.
+   params each takes. `get_prim_tree` for the parts of the background or of
+   an object an `object_references` entry can name — a tabletop, a drawer —
+   and the `prim_path` to write.
 2. `add_object` / `remove_object` to edit the objects, `set_embodiment` to
    change the robot. Editing the YAML directly is fine too, and is the way to
    do anything these do not cover; run `check_spec` after a hand edit. Quote
@@ -67,7 +70,8 @@ How the tools fit together:
    layout passed the checks a dry solve can run.
 4. `render_views` to look at it.
 
-Steps 1 and 2 and `check_spec` return in milliseconds. Steps 3 and 4 re-run
+Steps 1 and 2 and `check_spec` return in milliseconds, but `get_prim_tree`,
+which reads a USD. Steps 3 and 4 re-run
 the placement solver and read every asset's USD, so they take seconds — make a
 run of edits, then check once.
 
@@ -353,6 +357,62 @@ async def describe_scene(
         ],
         "relations": dump["relations"],
     }
+
+
+@mcp.tool(annotations=_READ_ONLY)
+async def get_prim_tree(
+    spec: str,
+    node_id: str,
+    query: str = "",
+    object_type: Literal["base", "rigid", "articulation"] | None = None,
+    limit: Annotated[int, Field(ge=1)] = 100,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """The prims in the background's or an object's USD that an `object_references` entry can name.
+
+    A reference picks out part of an asset by its `prim_path` — a tabletop to
+    anchor on, a drawer for an affordance task to open. Only prims in physics
+    or collision can be one, so only those are listed, with their ancestors.
+
+    Write a prim's `prim_path` as it comes, with `node_id` as the reference's
+    `parent_id`: it is relative under the background and starts
+    `{ENV_REGEX_NS}/<id>/` under an object, where a relative path validates
+    and then fails when Arena builds the scene. `object_type` is the one to
+    give the reference: `articulation` for the root of a jointed body, with
+    the `joint_names` that `openable_joint_name` and its kin take, `rigid` for
+    a rigid body, `base` for the rest.
+
+    A kitchen has hundreds of these prims. `total` counts them, `matched` the
+    ones the filters keep, and `prims` holds the first `limit` of those, in
+    path order.
+
+    Reads the asset's USD, downloading it the first time, so it takes seconds.
+    A background that finds its USD in code, as Lightwheel's kitchens do, may
+    need the network for that too. A node with no USD — a shape composed in
+    code — is refused.
+
+    Args:
+        spec: Path to the task YAML.
+        node_id: The id of the spec's background or of one of its objects.
+        query: Text the prim path has to contain, any case, e.g. "drawer".
+        object_type: Keep only the prims of this type.
+        limit: How many prims to return at most.
+    """
+    path = _spec_path(spec)
+    prims = await _or_refused(_Progress(ctx), f"reading {node_id}'s prims", _prim_tree, path, node_id)
+    matched = [
+        prim
+        for prim in prims
+        if query.lower() in prim["prim_path"].lower() and object_type in (None, prim["object_type"])
+    ]
+    return {"total": len(prims), "matched": len(matched), "prims": matched[:limit]}
+
+
+def _prim_tree(path: Path, node_id: str) -> list[dict[str, Any]]:
+    with _quiet():
+        from arena_composer.resolve_layout import prim_tree
+
+        return prim_tree(path, node_id)
 
 
 @mcp.tool()

@@ -52,6 +52,7 @@ from isaaclab_arena.relations.placement_validation import PlacementCheck
 from isaaclab_arena.relations.relations import get_anchor_objects
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
+from isaaclab_arena.utils.usd.prim_tree import load_usd_prim_tree
 
 from arena_composer import catalog, spec_edit
 from arena_composer.spec_edit import DEFAULT_SEED, SpecError
@@ -191,6 +192,30 @@ def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED, samples
     spec_edit.check_entry(path)
     spec = ArenaEnvGraphSpec.from_yaml(path)
     return {"spec_path": str(Path(path).resolve()), **resolve_layout(spec, seed=seed, samples=samples)}
+
+
+def prim_tree(path: str | Path, node_id: str) -> list[dict[str, Any]]:
+    """The prims of `node_id`'s USD an object reference can name: those in physics or collision, and
+    their ancestors. Each `prim_path` is what the reference writes. Relative under the background, which
+    Arena expands with the background's name; whole under an object, which a relative path would miss."""
+    spec_edit.check_entry(path)
+    spec = ArenaEnvGraphSpec.from_yaml(path)
+    parents = {spec.background.id: spec.background} | {obj.id: obj for obj in spec.objects}
+    if node_id not in parents:
+        raise SpecError(
+            [f"{node_id!r} is not the background or an object, the parents a reference can have: {', '.join(parents)}"]
+        )
+    asset = parents[node_id]
+    prefix = "" if asset is spec.background else f"{{ENV_REGEX_NS}}/{asset.params.get('instance_name', node_id)}/"
+    use_local_asset_cache()
+    return [
+        {
+            "prim_path": prefix + record.relative_path,
+            "object_type": record.object_type.value,
+            **({"joint_names": list(record.joint_names)} if record.joint_names else {}),
+        }
+        for record in load_usd_prim_tree(localize(asset.resolve_usd_path()))
+    ]
 
 
 def _collision_objects(assets: dict[str, Any], placeable: list[Any], params: ObjectPlacerParams) -> list[Any]:
