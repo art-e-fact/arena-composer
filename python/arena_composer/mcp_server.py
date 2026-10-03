@@ -23,10 +23,12 @@ import hashlib
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import Context, Image, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from arena_composer import catalog, render, simready, spec_edit, usd_assets
 from arena_composer.resolve_layout import DEFAULT_SEED, SpecError
@@ -61,8 +63,9 @@ and read every asset's USD, so they take seconds — make a run of edits, then
 check once.
 
 A failed edit is a normal result, not an error: it comes back as
-`{"ok": false, "errors": [...]}` with both files untouched. Read the errors and
-correct the call.
+`{"ok": false, "errors": [...]}` with both files untouched, and so does a
+`describe_scene` of a spec that does not read, validate or build. Read the
+errors and correct the call, or the spec.
 
 `describe_scene` answers "did that land where I meant" more cheaply and more
 precisely than a picture. Reach for `render_views` when the question is about
@@ -96,10 +99,21 @@ def _quiet():
 
 
 def _spec_path(spec: str) -> Path:
+    """The task YAML `spec` names, or a refusal the agent can read.
+
+    A `ToolError`, the SDK's channel for a failure a tool saw coming: the
+    model reads its message, where any other exception reaches it as a bare
+    `Error executing tool`. Not a result, because these are about the
+    argument — no file there, a scene where the task was asked for — and the
+    tools' results are about the spec.
+    """
     path = Path(spec).expanduser().resolve()
     if not path.is_file():
-        raise ValueError(f"no spec at {path}")
-    spec_edit.check_entry(path)
+        raise ToolError(f"no spec at {path}")
+    try:
+        spec_edit.check_entry(path)
+    except ValueError as error:
+        raise ToolError(str(error)) from error
     return path
 
 
@@ -113,6 +127,26 @@ def _resolve(path: Path, seed: int) -> dict[str, Any]:
         from arena_composer.resolve_layout import resolve_layout_from_yaml
 
         return resolve_layout_from_yaml(path, seed=seed)
+
+
+def _reasons(error: Exception) -> list[str]:
+    """What stopped a resolve, as lines the agent can act on: `SpecError`'s
+    own, one per object, and for anything else Arena raises on a spec that
+    does not read, validate or build — not YAML, a name the registry does not
+    know, a placement that fails — its type and message, as `arena-view`'s
+    toast gives them."""
+    return error.errors if isinstance(error, SpecError) else [f"{type(error).__name__}: {error}"]
+
+
+async def _or_refused(work: Callable[..., Any], *args: Any) -> Any:
+    """`work(*args)` off the event loop — a resolve or a render blocks for
+    seconds — or what stopped it as a `ToolError`. Pictures or a reason, never
+    both; and a `ToolError` because the model reads its message, where any
+    other exception's is withheld."""
+    try:
+        return await asyncio.to_thread(work, *args)
+    except Exception as error:
+        raise ToolError("\n".join(_reasons(error))) from error
 
 
 @mcp.tool()
@@ -184,10 +218,11 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
 
     Takes seconds. Prefer it after a run of edits rather than between each.
 
-    An object whose `params.usd_path` cannot be used — a URL that is not on the
-    server, or a prop that is not the single rigid body the sim would spawn —
-    comes back as `{"ok": false, "errors": [...]}`, one line per object, with
-    no layout.
+    A spec that does not read, validate or build comes back as `{"ok": false,
+    "errors": [...]}` with no layout: one line per object whose
+    `params.usd_path` cannot be used — a URL that is not on the server, or a
+    prop that is not the single rigid body the sim would spawn — or Arena's
+    own reason.
 
     Args:
         spec: Path to the task YAML.
@@ -199,10 +234,11 @@ async def describe_scene(spec: str, seed: int = DEFAULT_SEED) -> dict[str, Any]:
     # stay answerable for all of them.
     try:
         dump = await asyncio.to_thread(_resolve, path, seed)
-    except SpecError as error:
-        # A spec that validates but names an asset the sim cannot use is the
-        # same normal case as a refused edit, and reads the same way.
-        return {"ok": False, "errors": error.errors}
+    except Exception as error:
+        # A spec that does not read, validate or build is the same normal case
+        # as a refused edit, and reads the same way. Returned rather than
+        # raised: the SDK withholds any exception's message but `ToolError`'s.
+        return {"ok": False, "errors": _reasons(error)}
     return {
         "env_name": dump["env_name"],
         "spec_path": dump["spec_path"],
@@ -315,9 +351,12 @@ async def render_views(
     Takes seconds, and images are expensive to read — ask for the views that
     answer the question, not all four.
 
-    A render that logs an error fails rather than returning the picture, since
-    an asset that did not load leaves its object out of a frame that otherwise
-    looks right. That message is the renderer's, and is not about the spec.
+    A spec that does not read, validate or build fails with the reason — the
+    lines `describe_scene` returns as `errors` — since there is no layout to
+    draw. A render that logs an error fails too, rather than returning the
+    picture, since an asset that did not load leaves its object out of a frame
+    that otherwise looks right. That message is the renderer's, and is not
+    about the spec.
 
     Args:
         spec: Path to the task YAML.
@@ -328,16 +367,19 @@ async def render_views(
     path = _spec_path(spec)
     views = views or ["top", "front"]
     if unknown := [view for view in views if view not in render.VIEWS]:
-        raise ValueError(f"unknown view(s) {unknown}, expected any of {list(render.VIEWS)}")
+        raise ToolError(f"unknown view(s) {unknown}, expected any of {list(render.VIEWS)}")
+
+    # Progress, not a log message: the protocol deprecated logging (SEP-2577,
+    # 2026-07-28) and a client has to opt in per request to receive any, where
+    # a progress notification reaches whoever asked for progress on this call.
+    if ctx:
+        await ctx.report_progress(0, 2, f"resolving {path.name} (seed {seed})")
+    payload = await _or_refused(_pack, path, seed)
 
     if ctx:
-        await ctx.info(f"resolving {path.name} (seed {seed})")
-    payload = await asyncio.to_thread(_pack, path, seed)
-
-    if ctx:
-        await ctx.info(f"drawing {', '.join(views)}")
+        await ctx.report_progress(1, 2, f"drawing {', '.join(views)}")
     out_dir = _RENDERS / hashlib.sha256(str(path).encode()).hexdigest()[:16]
-    paths = await asyncio.to_thread(render.render, payload, out_dir, views, size)
+    paths = await _or_refused(render.render, payload, out_dir, views, size)
     return [Image(path=path) for path in paths]
 
 

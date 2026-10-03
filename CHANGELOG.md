@@ -47,6 +47,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   corner of the 3D view, where they were lines at the top of the panel. Each stays until its × is
   clicked, and its text can be selected or taken whole with its copy button.
 - The panel no longer opens with the environment's name; the window's title carries it.
+- `render_views` reports its two steps — resolving the spec, drawing the views — as MCP progress
+  notifications, which reach a client that asked for progress on the call. They went out as log
+  messages, which the protocol has deprecated: a current client receives none unless it opts in per
+  request, and the SDK warned on every one.
 
 ### Removed
 
@@ -75,6 +79,19 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   no longer land last and stay drawn.
 - A change to the spec made while `arena-view` was still solving its first layout is solved once
   the window is up, where it used to go unnoticed until the next change.
+- An edit from the editor panel on a spec that no longer parses — a `task: [` left by a hand edit —
+  is refused with the reason as a toast, where it used to end the loop serving the panel: every
+  edit and reindex after it in that `arena-view` session went unanswered.
+- The MCP edit tools — `add_object`, `remove_object`, `set_embodiment` — answer a spec that does
+  not parse with `{"ok": false, "errors": [...]}` naming the file and the line, where the client
+  saw only `Error executing tool`. `arena-resolve-layout` and `arena-view`'s toast name the file
+  in that error too.
+- The MCP tools' other refusals reach the agent again — no spec at the path, a scene passed where
+  the task was asked for, an unknown view, a spec that does not read, validate or build, a render
+  that logged an error — where the client saw only `Error executing tool`: the `mcp` SDK withholds
+  the message of any exception but its own `ToolError`. `describe_scene` answers a spec that does
+  not build as a refused edit does, `{"ok": false, "errors": [...]}`; `render_views` fails with the
+  same lines.
 
 ## [0.2.0] - 2026-09-28
 
