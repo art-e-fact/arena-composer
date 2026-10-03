@@ -516,6 +516,8 @@ def _subtask_problems(spec: Any) -> list[str]:
     list params hold, which Arena's validator skips and its builder looks up."""
     from isaaclab_arena.assets.registries import TaskRegistry
 
+    from arena_composer import catalog
+
     registry = TaskRegistry()
     task = spec.get("task") if isinstance(spec, dict) else None
     # Arena passes the task's description to an atomic task only.
@@ -527,7 +529,13 @@ def _subtask_problems(spec: Any) -> list[str]:
         if not isinstance(kind, str) or not registry.is_registered(kind):
             continue
         params, where = params if isinstance(params, dict) else {}, f"task.subtasks.{index}.params"
-        errors += _binding(where, kind, registry.get_task_by_name(kind), params, given)
+        cls = registry.get_task_by_name(kind)
+        errors += _binding(where, kind, cls, params, given)
+        if given and catalog.unexpected_params(cls, dict.fromkeys(given)):
+            errors.append(
+                f"task.subtasks.{index}.kind: {kind} takes no task_description, which Arena passes an atomic"
+                " task, so it does not build alone; it builds as one of several sequential or parallel subtasks"
+            )
         for name in _node_lists(kind) or ():
             value = params.get(name)
             if value is not None and not isinstance(value, list):

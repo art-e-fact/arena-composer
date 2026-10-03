@@ -551,9 +551,9 @@ def check_spec(spec: str) -> dict[str, Any]:
     relation or task param naming an id the spec has not got, a bare `on` read
     as the boolean true. And what Arena only finds once it builds the scene,
     after the sim has started: a param an asset, relation or subtask lacks or
-    does not take, an id in a list param the spec has not got, an object
-    reference with no `prim_path`, a misspelled field under
-    `env_cfg_override.sim`.
+    does not take, an id in a list param the spec has not got, an atomic
+    task of a kind that builds only among other subtasks, an object reference
+    with no `prim_path`, a misspelled field under `env_cfg_override.sim`.
 
     Whether the layout solves it cannot see; that is `describe_scene`.
 

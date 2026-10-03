@@ -783,6 +783,9 @@ def test_the_ids_in_a_list_param_are_checked_where_arena_skips_them(spec: Path):
     )
     spec.write_text(sort)
     assert spec_edit.check(spec).errors == [
+        # Arena's builder passes an atomic task its description, which SortMultiObjectTask does not take.
+        "task.yaml: task.subtasks.0.kind: SortMultiObjectTask takes no task_description, which Arena passes an"
+        " atomic task, so it does not build alone; it builds as one of several sequential or parallel subtasks",
         "task.yaml: task.subtasks.0.params.pick_up_object_list.1: 'ghost' is not an id this spec declares",
         "task.yaml: task.subtasks.0.params: SortMultiObjectTask pairs each pick_up_object_list entry with a"
         " destination_location_list one, and has 2 and 1",

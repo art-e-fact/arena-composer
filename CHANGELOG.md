@@ -60,6 +60,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   among them, that the spec does not declare; and an object reference with no `prim_path`, or an
   affordance on one that is not an articulation; and an `env_cfg_override` Arena would refuse, a
   field under `sim` its physics backend lacks among it. A spec that already has one is still edited.
+- So is an atomic task whose kind takes no description, which Arena passes every atomic task:
+  `NoTask`, `LiftObjectTask`, `SortMultiObjectTask`, `GoalPoseTask` and two more build only as one
+  of several subtasks, and stopped the sim with a `TypeError` as it started.
 - An edit replaces each file it changes whole, where it wrote into it, so `arena-view`, Arena or
   an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download
