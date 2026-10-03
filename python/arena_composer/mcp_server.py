@@ -74,7 +74,10 @@ run of edits, then check once.
 A failed edit is a normal result, not an error: it comes back as
 `{"ok": false, "errors": [...]}` with both files untouched, and so does a
 `describe_scene` of a spec that does not read, validate or build, and a
-`check_spec` of one. Read the errors and correct the call, or the spec.
+`check_spec` of one. Read the errors and correct the call, or the spec. An
+edit on a spec that is already broken is refused only for what it introduces;
+what was wrong before comes back as `remaining_errors`, whether the edit
+landed or not, so a spec with two problems is repaired one edit at a time.
 
 `describe_scene` answers "did that land where I meant" more cheaply and more
 precisely than a picture. Reach for `render_views` when the question is about
@@ -290,7 +293,10 @@ def add_object(
 
     Writes to whichever of the spec and its included scene owns `objects` —
     they are a disjoint union, so only one of them can. The edit is validated
-    against the merged pair and both files are left untouched if it fails.
+    against the merged pair and both files are left untouched if it fails. A
+    spec already broken is refused only for what this edit introduces, with
+    the rest as `remaining_errors` — so an object a task already names can be
+    added even while the task names another that is still missing.
 
     Args:
         spec: Path to the task YAML.
@@ -312,8 +318,9 @@ def remove_object(spec: str, id: str) -> dict[str, Any]:
     the object references inside it — a reference is a prim of the object's
     USD — with their relations in turn. `changed` lists what went.
 
-    A task param still pointing at it is left in place and reported as a
-    validation error — what to do about the task is a decision, not a cleanup.
+    A task param still pointing at it is left in place and refused as the
+    error this edit introduces — what to do about the task is a decision, not
+    a cleanup. Problems the spec had before come back as `remaining_errors`.
 
     Args:
         spec: Path to the task YAML.
@@ -338,7 +345,8 @@ def set_embodiment(spec: str, registry_name: str) -> dict[str, Any]:
     what was dropped.
 
     The first `describe_scene` or `render_views` after switching to a robot not
-    yet on this machine downloads its USD.
+    yet on this machine downloads its USD. Problems the spec had before the
+    switch come back as `remaining_errors`, and do not refuse it.
 
     Args:
         spec: Path to the task YAML.

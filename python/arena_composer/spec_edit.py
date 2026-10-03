@@ -17,13 +17,16 @@ not have is the two things this module adds:
   spec stops building.
 
 Every edit is checked against the merged spec before either file is written, so
-a rejected edit leaves the pair on disk exactly as it was.
+a rejected edit leaves the pair on disk exactly as it was. A spec that is already
+broken is refused only for what the edit introduces — see :func:`_introduced` —
+or an agent with two problems to fix could fix neither.
 """
 
 from __future__ import annotations
 
 import io
 import re
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,7 +91,11 @@ class Result:
     wrote: list[str] = field(default_factory=list)
     #: One line per change, in the order they were made.
     changed: list[str] = field(default_factory=list)
+    #: What refused the edit: the problems it would introduce.
     errors: list[str] = field(default_factory=list)
+    #: What was wrong with the spec before the edit and still is, whether the
+    #: edit landed or not. `ok` says only whether the edit landed.
+    remaining_errors: list[str] = field(default_factory=list)
 
     @classmethod
     def failed(cls, *errors: str) -> Result:
@@ -206,52 +213,65 @@ class SpecFiles:
         file with and the two do not always agree — see ``YAML_11_BOOLEANS``.
         A spec that only validates before it is written is not validated.
         """
+        merged = self._read_back(texts)
+        return merged if isinstance(merged, list) else self._problems(merged)
+
+    def _read_back(self, texts: dict[Path, str]) -> dict[str, Any] | list[str]:
+        """`texts` merged as Arena reads them, or the one line saying why they
+        do not read."""
+        try:
+            return self.merged({path: yaml.safe_load(text) for path, text in texts.items()})
+        except Exception as error:
+            return [f"{type(error).__name__}: {error}"]
+
+    def _problems(self, merged: dict[str, Any]) -> list[str]:
+        """What Arena's validator refuses in `merged`, then what it leaves to
+        the build and this module checks for it — off the merged dict, so a
+        spec the validator refuses is checked for those too, and an edit on
+        it is judged on both (see :func:`_introduced`)."""
         from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
         from pydantic import ValidationError
 
+        errors = []
         try:
-            reloaded = {path: yaml.safe_load(text) for path, text in texts.items()}
-            spec = ArenaEnvGraphSpec.from_dict(self.merged(reloaded))
+            ArenaEnvGraphSpec.from_dict(merged)
         except ValidationError as error:
             # Not `str(error)`: that quotes the whole merged spec back as the
             # offending input, burying the one sentence worth reading.
-            return [_message(entry) for entry in error.errors()]
+            errors = [_message(entry) for entry in error.errors()]
         except Exception as error:
             # Arena asserts outside pydantic too, e.g. on a duplicate key
             # across the include.
-            return [f"{type(error).__name__}: {error}"]
-
-        # Arena checks that a registry name exists, not what the asset behind
-        # it takes; an entry short of a required parameter fails only when the
-        # spec is built.
-        from isaaclab_arena.assets.registries import AssetRegistry
-        from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
-
-        from arena_composer import catalog
-
-        errors = [
-            f"objects.{index}.params: {obj.registry_name} needs {', '.join(missing)}"
-            for index, obj in enumerate(spec.objects)
-            if (missing := catalog.missing_params(obj.registry_name, obj.params))
-        ]
-        # Nor that the asset is the kind its slot holds: a banana validates as
-        # the embodiment, and fails when the scene is built.
-        if not issubclass(AssetRegistry().get_asset_by_name(spec.embodiment.registry_name), EmbodimentBase):
-            errors.append(f"embodiment.registry_name: {spec.embodiment.registry_name} is not an embodiment")
-        return errors
+            errors = [f"{type(error).__name__}: {error}"]
+        return errors + _build_problems(merged)
 
     def write(self, changed: list[str]) -> Result:
-        """Validate the text an edit produced, then write the files it changes."""
+        """Validate the text an edit produced, then write the files it changes.
+
+        A spec that was good before is refused for anything wrong after. One
+        that was already broken is refused only for what the edit introduces,
+        and what was wrong before travels as `remaining_errors` — on the
+        refusal, and on the edit that landed.
+        """
         texts = {path: self._dump(document) for path, document in self.documents.items()}
-        if errors := self.validate(texts):
-            return Result.failed(*errors)
+        after_spec = self._read_back(texts)
+        if isinstance(after_spec, list):
+            return Result.failed(*after_spec)
+        introduced, remaining = self._problems(after_spec), []
+        if introduced:
+            before_spec = self._read_back({path: path.read_text(encoding="utf-8") for path in self.documents})
+            before = [] if isinstance(before_spec, list) else self._problems(before_spec)
+            if before:
+                introduced, remaining = _introduced(before_spec, after_spec, before, introduced)
+        if introduced:
+            return Result(ok=False, errors=introduced, remaining_errors=remaining)
 
         wrote = []
         for path, text in texts.items():
             if text != path.read_text(encoding="utf-8"):
                 path.write_text(text, encoding="utf-8")
                 wrote.append(str(path))
-        return Result(ok=True, wrote=wrote, changed=changed)
+        return Result(ok=True, wrote=wrote, changed=changed, remaining_errors=remaining)
 
     def _dump(self, document: Any) -> str:
         buffer = io.StringIO()
@@ -265,6 +285,34 @@ class SpecFiles:
         for key in ("objects", "object_sets", "object_references"):
             ids += [entry.get("id") for entry in (spec.get(key) or [])]
         return [asset_id for asset_id in ids if asset_id]
+
+
+def _build_problems(spec: Any) -> list[str]:
+    """What fails only when the scene is built, in the merged spec `spec`.
+
+    Arena checks that a registry name exists, not what the asset behind it
+    takes — an entry short of a required parameter is a valid spec that
+    asserts when instantiated — nor that the asset is the kind its slot
+    holds: a banana validates as the embodiment. A name Arena does not know
+    is left to its validator, which refuses it by name.
+    """
+    from isaaclab_arena.assets.registries import AssetRegistry
+    from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
+
+    from arena_composer import catalog
+
+    registry = AssetRegistry()
+    errors = []
+    for index, entry in _indexed(spec, "objects"):
+        name, params = entry.get("registry_name"), entry.get("params")
+        if isinstance(name, str) and registry.is_registered(name):
+            if missing := catalog.missing_params(name, params if isinstance(params, dict) else {}):
+                errors.append(f"objects.{index}.params: {name} needs {', '.join(missing)}")
+    embodiment = spec.get("embodiment") if isinstance(spec, dict) else None
+    name = embodiment.get("registry_name") if isinstance(embodiment, dict) else None
+    if isinstance(name, str) and registry.is_registered(name) and not issubclass(registry.get_asset_by_name(name), EmbodimentBase):
+        errors.append(f"embodiment.registry_name: {name} is not an embodiment")
+    return errors
 
 
 def _files(path: Path) -> SpecFiles | Result:
@@ -474,16 +522,21 @@ def _label(steps: list[Any]) -> str:
     return ".".join(str(step) for step in steps)
 
 
-def _entries(mapping: Any, key: str) -> list[dict[str, Any]]:
-    """The mapping entries of the list under `key`, or none: these paths run
-    on specs a hand edit may have left in any shape."""
+def _indexed(mapping: Any, key: str) -> list[tuple[int, dict[str, Any]]]:
+    """The mapping entries of the list under `key` with their indices, or
+    none: these paths run on specs a hand edit may have left in any shape."""
     found = mapping.get(key) if isinstance(mapping, dict) else None
-    return [entry for entry in (found if isinstance(found, list) else []) if isinstance(entry, dict)]
+    return [(index, entry) for index, entry in enumerate(found if isinstance(found, list) else []) if isinstance(entry, dict)]
 
 
-def _id_slots(spec: Any) -> Iterator[tuple[Any, Any]]:
+def _entries(mapping: Any, key: str) -> list[dict[str, Any]]:
+    return [entry for _, entry in _indexed(mapping, key)]
+
+
+def _id_slots(spec: Any) -> Iterator[tuple[Any, Any, str]]:
     """Every slot in `spec` — one document, or the merged pair — holding a node
-    id, as ``(container, key)`` to read or write through.
+    id, as ``(container, key, path)``: the first two to read or write through,
+    the path as the spec reads, ``relations.2.reference``.
 
     The complete list, checked against Arena's validator and its builder: a
     relation's ``subject`` and ``reference``; an object reference's
@@ -492,27 +545,106 @@ def _id_slots(spec: Any) -> Iterator[tuple[Any, Any]]:
     each to name a node — an object set's ``members`` are registry names, not
     ids, and stay out.
     """
-    for relation in _entries(spec, "relations"):
+    for index, relation in _indexed(spec, "relations"):
         for slot in ("subject", "reference"):
             if isinstance(relation.get(slot), str):
-                yield relation, slot
-    for reference in _entries(spec, "object_references"):
+                yield relation, slot, f"relations.{index}.{slot}"
+    for index, reference in _indexed(spec, "object_references"):
         if isinstance(reference.get("parent_id"), str):
-            yield reference, "parent_id"
-    for override in _entries(spec, "cli_override_specs"):
+            yield reference, "parent_id", f"object_references.{index}.parent_id"
+    for index, override in _indexed(spec, "cli_override_specs"):
         if isinstance(override.get("target_node_id"), str):
-            yield override, "target_node_id"
-    for subtask in _entries(spec.get("task") if isinstance(spec, dict) else None, "subtasks"):
+            yield override, "target_node_id", f"cli_override_specs.{index}.target_node_id"
+    for index, subtask in _indexed(spec.get("task") if isinstance(spec, dict) else None, "subtasks"):
         params = subtask.get("params")
         if not isinstance(params, dict):
             continue
         for name, value in params.items():
             if isinstance(value, str):
-                yield params, name
+                yield params, name, f"task.subtasks.{index}.params.{name}"
             elif isinstance(value, list):
-                for index, item in enumerate(value):
-                    if isinstance(item, str):
-                        yield value, index
+                for item, member in enumerate(value):
+                    if isinstance(member, str):
+                        yield value, item, f"task.subtasks.{index}.params.{name}.{item}"
+
+
+#: A list index in an error line or a slot path — `objects.2.params`,
+#: `Relation[3]` — which an edit that inserts or removes an entry shifts.
+_INDEX = re.compile(r"(?<=\.)\d+(?=[.:]|$)|\[\d+\]")
+
+
+def _normalised(line: str) -> str:
+    return _INDEX.sub("*", line)
+
+
+def _dangling(spec: Any) -> list[tuple[tuple[str, str], str]]:
+    """Each slot of `spec` naming an id it does not declare — or one Arena
+    does not allow there: a reference's parent is the background or an
+    object, an override's target is one of those or the embodiment — as
+    ``((normalised path, id), line)``.
+
+    Computed here rather than read off Arena's validator, whose
+    cross-reference checks are asserts in one validator: it reports the first
+    dangling id and stops, so fixing one surfaces the next as if the fix had
+    introduced it.
+    """
+    singles = {
+        role: spec[role].get("id")
+        for role in ("embodiment", "background")
+        if isinstance(spec, dict) and isinstance(spec.get(role), dict) and isinstance(spec[role].get("id"), str)
+    }
+    ids = {
+        section: {entry["id"] for entry in _entries(spec, section) if isinstance(entry.get("id"), str)}
+        for section in _ID_SECTIONS
+    }
+    everything = set(singles.values()).union(*ids.values()), "an id this spec declares"
+    allowed = {
+        "object_references": ({singles.get("background")} | ids["objects"], "the background or an object"),
+        "cli_override_specs": (set(singles.values()) | ids["objects"], "the embodiment, the background or an object"),
+    }
+    found = []
+    for container, key, where in _id_slots(spec):
+        declared, expected = allowed.get(where.split(".")[0], everything)
+        if (value := container[key]) not in declared:
+            found.append(((_normalised(where), value), f"{where}: {value!r} is not {expected}"))
+    return found
+
+
+#: What Arena's cross-reference asserts say — see `ArenaEnvGraphSpec.validate`.
+#: Their lines are replaced by `_dangling`'s, which name every slot; a wording
+#: Arena changes falls through to the text comparison, which can only refuse.
+_CROSS_REFERENCE = ("references unknown", "references invalid parent", "targets unknown or non-swappable")
+
+
+def _introduced(
+    before_spec: Any, after_spec: Any, before: list[str], after: list[str]
+) -> tuple[list[str], list[str]]:
+    """Split `after`, the problems with the edited spec, into the ones the edit
+    introduced and the ones `before` already had, as ``(introduced, remaining)``.
+
+    Dangling ids are compared as the slots this module finds, since Arena
+    names only the first; everything else as lines, with list indices
+    normalised so an entry inserted or removed above does not make every line
+    below it read as new, and as a multiset, so a second entry wrong in the
+    same way as a first is still new.
+    """
+    was = Counter(key for key, _ in _dangling(before_spec))
+    now = Counter(key for key, _ in _dangling(after_spec))
+    lines = dict(_dangling(after_spec))
+    introduced = [lines[key] for key in now if now[key] > was[key]]
+    remaining = [lines[key] for key in now if now[key] <= was[key]]
+
+    def rest(problems: list[str]) -> list[str]:
+        return [line for line in problems if not any(mark in line for mark in _CROSS_REFERENCE)]
+
+    new = Counter(_normalised(line) for line in rest(after)) - Counter(_normalised(line) for line in rest(before))
+    for line in rest(after):
+        if new[_normalised(line)] > 0:
+            new[_normalised(line)] -= 1
+            introduced.append(line)
+        else:
+            remaining.append(line)
+    return introduced, remaining
 
 
 def _remove(files: SpecFiles, key: str, entries: list[Any]) -> None:
@@ -579,7 +711,7 @@ def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
     """
     renamed = 0
     for document in files.documents.values():
-        for container, key in _id_slots(document):
+        for container, key, _ in _id_slots(document):
             if container[key] == previous:
                 container[key] = node_id
                 renamed += 1

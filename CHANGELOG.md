@@ -72,6 +72,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- An edit on a spec that is already broken is refused only for the problems it introduces, and
+  reports what was wrong before as `remaining_errors` — on the refusal, and on the edit that landed.
+  Adding the first of two objects a task names no longer deadlocks on the second, from the panel or
+  from `add_object`.
 - Renaming an id carries it into every slot Arena checks — an object reference's `parent_id`, a CLI
   override's target, a task param that lists ids — and into the prim path of a reference inside a
   renamed object, where the spec went on naming the old id and stopped loading.

@@ -136,6 +136,66 @@ def test_removing_an_object_a_task_needs_is_refused(spec: Path):
     assert (spec.read_text(), scene_of(spec).read_text()) == before, "a refused edit wrote anyway"
 
 
+def test_an_edit_on_a_broken_spec_is_refused_only_for_what_it_introduces(spec: Path):
+    """The deadlock this exists for: a task naming two objects the scene lacks.
+    Arena's cross-reference check asserts and stops at the first, so adding
+    `apple` surfaces `basket` — which a before/after diff of Arena's lines
+    reads as a new error, and the spec can never be repaired. Comparing the
+    dangling slots this module finds instead, adding `apple` lands with
+    `basket` as what remains, and adding `basket` finishes the job."""
+    spec.write_text(TASK.replace("pick_up_object: banana", "pick_up_object: apple").replace("destination_location: bowl", "destination_location: basket"))
+    assert not spec_edit.check(spec).ok
+
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert result.ok, result.errors
+    assert result.remaining_errors and all("basket" in line for line in result.remaining_errors), result.remaining_errors
+    assert not any("apple" in line for line in result.remaining_errors), result.remaining_errors
+
+    result = spec_edit.add_object(spec, "basket", "bowl_ycb_robolab", on=TABLE)
+    assert result.ok and result.remaining_errors == [], result
+    assert spec_edit.check(spec).ok
+
+
+def test_what_an_edit_introduces_is_told_apart_from_what_was_wrong(spec: Path):
+    """A refusal on a broken spec names only the new problem, and still reports
+    the old one beside it, so the agent sees both without the one blocking
+    the other."""
+    spec.write_text(TASK.replace("pick_up_object: banana", "pick_up_object: apple"))
+    before = scene_of(spec).read_text()
+
+    result = spec_edit.add_object(spec, "can", "simready_usd_object", on=TABLE)
+    assert not result.ok
+    assert len(result.errors) == 1 and "usd_path" in result.errors[0], result.errors
+    assert result.remaining_errors and "apple" in result.remaining_errors[0], result.remaining_errors
+    assert scene_of(spec).read_text() == before, "a refused edit wrote anyway"
+
+
+def test_a_second_entry_wrong_the_same_way_is_still_new(spec: Path):
+    """Errors are compared as multisets with list indices normalised: a relation
+    inserted above an already-dangling one must not make the old one read as
+    new, and a new relation naming the same missing id must."""
+    ghost = {"kind": "next_to", "subject": "banana", "reference": "ghost", "params": {}}
+    scene_of(spec).write_text(SCENE + "- kind: next_to\n  subject: banana\n  reference: ghost\n  params: {}\n")
+
+    result = spec_edit.apply(spec, "insert", ["relations"], ghost)
+    assert not result.ok
+    assert result.errors == ["relations.4.reference: 'ghost' is not an id this spec declares"], result.errors
+
+    result = spec_edit.apply(spec, "set", ["relations", 1, "params", "clearance_m"], 0.03)
+    assert result.ok, result.errors
+    assert result.remaining_errors == ["relations.3.reference: 'ghost' is not an id this spec declares"], result.remaining_errors
+
+    result = spec_edit.apply(spec, "set", ["objects", 0, "params", "probe"], {"id": "x"})
+    assert result.ok and len(result.remaining_errors) == 1, result
+
+
+def test_a_good_spec_is_refused_for_anything_wrong_after(spec: Path):
+    """Nothing to compare against: Arena's own lines come back as they are."""
+    result = spec_edit.apply(spec, "insert", ["relations"], {"kind": "next_to", "subject": "banana", "reference": "ghost", "params": {}})
+    assert not result.ok and result.remaining_errors == []
+    assert any("ghost" in line for line in result.errors), result.errors
+
+
 def test_an_unregistered_asset_is_refused(spec: Path):
     before = scene_of(spec).read_text()
     result = spec_edit.add_object(spec, "apple", "not_a_real_asset", on=TABLE)
