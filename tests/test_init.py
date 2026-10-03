@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from arena_composer.cli import init, main
+from arena_composer import cli
+from arena_composer.cli import SKILLS, init, main
 
 VENV = Path(sys.prefix)
 # The server imports Arena as it starts.
@@ -79,6 +80,44 @@ def test_an_import_a_kept_launcher_lacks_says_how_to_add_it(tmp_path: Path, caps
     (tmp_path / "bin" / "arena-mcp").write_text("#!/usr/bin/env bash\n")
     assert main(["init", str(tmp_path), "--import", "my_assets"]) == 0
     assert "add this line to it:\n  export ARENA_COMPOSER_IMPORTS=my_assets\n" in capsys.readouterr().err
+
+
+def test_the_skills_are_linked_where_clients_look(tmp_path: Path):
+    written = dict(init(tmp_path, VENV))
+    for directory in (".agents/skills", ".claude/skills"):
+        link = tmp_path / directory / "author-arena-spec"
+        assert link.is_symlink() and link.resolve() == (SKILLS / "author-arena-spec").resolve()
+        assert written[link]
+
+
+def test_through_an_alias_the_second_link_is_the_first(tmp_path: Path):
+    """A template project commits `.claude/skills -> ../.agents/skills`."""
+    (tmp_path / ".agents" / "skills").mkdir(parents=True)
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "skills").symlink_to("../.agents/skills")
+    written = dict(init(tmp_path, VENV))
+    assert written[tmp_path / ".agents/skills/author-arena-spec"]
+    assert not written[tmp_path / ".claude/skills/author-arena-spec"]
+    assert (tmp_path / ".claude/skills/author-arena-spec/SKILL.md").is_file()
+
+
+def test_a_link_an_earlier_install_left_is_pointed_at_this_one(tmp_path: Path):
+    """Switching between a release and an editable checkout moves the package."""
+    stale = tmp_path / ".agents" / "skills" / "author-arena-spec"
+    stale.parent.mkdir(parents=True)
+    stale.symlink_to(tmp_path / "old-venv" / "author-arena-spec")
+    init(tmp_path, VENV)
+    assert stale.resolve() == (SKILLS / "author-arena-spec").resolve()
+
+
+def test_an_install_inside_the_project_is_linked_relative_to_it(tmp_path: Path, monkeypatch):
+    skills = tmp_path / "a" / "venv" / "skills"
+    (skills / "mine").mkdir(parents=True)
+    (skills / "mine" / "SKILL.md").write_text("---\nname: mine\n---\n")
+    monkeypatch.setattr(cli, "SKILLS", skills)
+    init(tmp_path / "a", tmp_path / "a" / "venv")
+    (tmp_path / "a").rename(tmp_path / "b")
+    assert (tmp_path / "b" / ".agents" / "skills" / "mine" / "SKILL.md").is_file()
 
 
 def test_a_venv_at_the_project_root_is_refused(tmp_path: Path):

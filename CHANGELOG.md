@@ -47,6 +47,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   object reference can name — a tabletop, a drawer — each with the `prim_path` to write, its
   physics type and, for a jointed body, its joint names. It filters by text and by type, since a
   kitchen has a thousand.
+- `arena-composer init` links the `author-arena-spec` skill into `.agents/skills/` and
+  `.claude/skills/`. It is the procedure an agent follows to write a spec with the MCP tools, from
+  the scaffold to every sampled layout passing, with a playbook for the errors and failed checks it
+  meets on the way. The link follows the install, so a new release updates it.
+- `arena-composer new PATH` writes a task YAML at `PATH`, and the scene it includes, holding a
+  pick-and-place that validates, solves and builds. The scene goes in the `scenes` beside a `tasks`
+  directory, else beside the task.
 
 ### Changed
 

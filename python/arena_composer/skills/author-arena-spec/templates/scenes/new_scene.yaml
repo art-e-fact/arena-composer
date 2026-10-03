@@ -1,0 +1,29 @@
+# The scene the task includes: what is in it and where the solver may put it.
+embodiment:
+  id: droid
+  registry_name: droid_abs_joint_pos
+  params: {}
+background:
+  id: table
+  registry_name: maple_table_robolab
+  params: {}
+objects:
+- id: banana
+  registry_name: banana_ycb_robolab
+  params: {}
+- id: bowl
+  registry_name: bowl_ycb_robolab
+  params: {}
+relations:
+- kind: is_anchor
+  subject: table
+  reference: null
+  params: {}
+- kind: 'on'
+  subject: bowl
+  reference: table
+  params: {}
+- kind: 'on'
+  subject: banana
+  reference: table
+  params: {}

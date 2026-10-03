@@ -23,7 +23,7 @@ from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.shared.exceptions import MCPDeprecationWarning
 
-from arena_composer import mcp_server, spec_edit
+from arena_composer import cli, mcp_server, spec_edit
 
 
 def test_arena_chatter_never_reaches_stdout(capsys, monkeypatch):
@@ -217,3 +217,17 @@ def test_the_tools_that_write_nothing_say_so():
     read_only = {tool.name for tool in tools if tool.annotations and tool.annotations.read_only_hint}
     assert read_only == {"search_assets", "describe_scene", "get_prim_tree", "render_views", "check_spec", "list_kinds"}
     assert len(tools) == 10
+
+
+def test_the_skill_names_every_tool_the_server_has():
+    """A tool renamed or added is a skill out of step with the server."""
+    skill = (cli.SKILLS / "author-arena-spec" / "SKILL.md").read_text()
+    tools = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    assert {tool for tool in tools if f"`{tool}`" not in skill} == set()
+
+
+def test_a_new_spec_validates(tmp_path: Path):
+    """The skill starts every spec from it."""
+    task = tmp_path / "tasks" / "new.yaml"
+    cli.new(task)
+    assert json.loads(_call("check_spec", spec=str(task)).content[0].text)["ok"] is True

@@ -45,7 +45,8 @@ skill for changing what they show.
 | [viewer_process.py](python/arena_composer/viewer_process.py), [render_process.py](python/arena_composer/render_process.py) | the child processes Bevy runs in |
 | [render.py](python/arena_composer/render.py) | one-shot PNG renders of a packed scene |
 | [mcp_server.py](python/arena_composer/mcp_server.py) | `arena-mcp` |
-| [cli.py](python/arena_composer/cli.py) | `arena-composer init`: the MCP launcher and client configs |
+| [cli.py](python/arena_composer/cli.py) | `arena-composer init`: the MCP launcher, client configs and skill links; `arena-composer new` |
+| [skills/](python/arena_composer/skills/) | Agent Skills the wheel ships and `init` links into a project; `new` copies `author-arena-spec`'s templates |
 | [_core.pyi](python/arena_composer/_core.pyi) | typed signatures for the compiled extension |
 
 ### Rust, under `src/`
@@ -90,7 +91,8 @@ skill for changing what they show.
   It validates by reading the text back with PyYAML, the YAML 1.1 reader Arena uses, where a bare
   `on` is `true`.
 - **MCP tools are documented in their docstrings and `INSTRUCTIONS`, nowhere else.** That is what
-  the client shows the model.
+  the client shows the model. The [author-arena-spec](python/arena_composer/skills/author-arena-spec/SKILL.md)
+  skill is procedure: it names tools and result fields but defines none.
 - **Bevy's default features stay off.** Its audio and gamepad support link libasound and libudev,
   which a manylinux wheel may not. Name each feature you need in [Cargo.toml](Cargo.toml).
 - **The `python` feature is off by default**, so plain `cargo check`/`clippy`/`test` never compile

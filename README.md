@@ -33,6 +33,8 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
 - `arena-mcp` is an MCP server whose tools search assets, add and remove objects, and describe and
   render the solved layout.
 - `arena-resolve-layout <spec>.yaml` prints the solved layout as JSON or text.
+- `arena-composer new environments/tasks/<name>.yaml` starts a spec: a task, and the scene it
+  includes, holding a pick-and-place that validates, solves and builds.
 
 Each command registers the Isaac Cap assets and tasks Arena's own CLI registers. A project that
 registers its own assets or kinds names the modules that do it with `--import MODULE`, or in
@@ -102,6 +104,10 @@ configs Claude Code, VS Code and Cursor read, keeping any that already exist:
 
 An MCP client starts the server with almost no environment, so `init --import MODULE` writes
 `ARENA_COMPOSER_IMPORTS` into `bin/arena-mcp` itself.
+
+`init` also links the `author-arena-spec` skill into `.agents/skills/` and `.claude/skills/`. The
+skill is the procedure an agent follows to write a spec with the MCP tools, through to every
+sampled layout passing.
 
 ## Developing
 

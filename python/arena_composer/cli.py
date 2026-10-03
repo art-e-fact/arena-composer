@@ -1,4 +1,5 @@
-"""`arena-composer init`: point a project's agent clients at this install's MCP server.
+"""`arena-composer init`: point a project's agent clients at this install's MCP server and skills.
+`arena-composer new`: start a spec.
 
 A client starts a server with a stripped environment and from a working
 directory of its own choosing, and each client has its own config format. So
@@ -7,6 +8,11 @@ its own path and execs the server installed in the venv that ran `init`.
 
 `init` writes only the files that are missing, so a project's own edits survive
 a re-run. Delete a file to have it written again.
+
+It links the skills this package ships into `.agents/skills/` and
+`.claude/skills/`, where clients look for them. A link follows the install, so
+an upgrade updates the skill; one an earlier install left pointing elsewhere is
+pointed at this one.
 
 `--import MODULE` bakes `ARENA_COMPOSER_IMPORTS` into the launcher: the one
 place a client's stripped environment can get it from.
@@ -24,6 +30,10 @@ from pathlib import Path
 from arena_composer.catalog import IMPORTS
 
 LAUNCHER_PATH = "bin/arena-mcp"
+SKILLS = Path(__file__).parent / "skills"
+SKILL_DIRS = (".agents/skills", ".claude/skills")
+#: `new` copies these: one source for the scaffold and the skill that reads it.
+TEMPLATES = SKILLS / "author-arena-spec" / "templates"
 
 #: `@SERVER@` becomes the venv's `arena-mcp`, relative to the project when the
 #: venv is inside it so the launcher can be checked in, else absolute.
@@ -103,7 +113,46 @@ def init(project: Path, venv: Path, imports: tuple[str, ...] = ()) -> list[tuple
         if name == LAUNCHER_PATH:
             path.chmod(0o755)
         results.append((path, True))
+    return results + link_skills(project)
+
+
+def link_skills(project: Path) -> list[tuple[Path, bool]]:
+    """Link each shipped skill into `project`'s skill directories: relative when
+    the install is inside the project, so the link moves with it, else absolute.
+    Through a `.claude/skills -> .agents/skills` alias the second is the first,
+    and kept."""
+    results = []
+    for skill in sorted(path.resolve() for path in SKILLS.iterdir() if (path / "SKILL.md").is_file()):
+        for directory in SKILL_DIRS:
+            link = project / directory / skill.name
+            if link.is_symlink() and link.resolve() != skill:
+                link.unlink()
+            if link.exists() or link.is_symlink():
+                results.append((link, False))
+                continue
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(os.path.relpath(skill, link.parent) if skill.is_relative_to(project) else skill)
+            results.append((link, True))
     return results
+
+
+def new(task: Path) -> Path:
+    """Write a task YAML at `task`, and the scene it includes, from the skill's
+    templates. Returns the scene's path: in the `scenes` beside a `tasks`
+    directory, as a template project lays them out, else beside the task."""
+    in_tasks = task.parent.name == "tasks"
+    scene = task.parent.parent / "scenes" / task.name if in_tasks else task.with_name(f"{task.stem}_scene.yaml")
+    for path in (task, scene):
+        if path.exists():
+            raise FileExistsError(f"{path} exists")
+    text = (TEMPLATES / "tasks" / "new_task.yaml").read_text()
+    # Quoted, as JSON: a bare `on` or `yes` is a boolean to the YAML 1.1 Arena reads.
+    text = text.replace("env_name: new_task", f"env_name: {json.dumps(task.stem)}")
+    text = text.replace("../scenes/new_scene.yaml", os.path.relpath(scene, task.parent))
+    for path, body in ((scene, (TEMPLATES / "scenes" / "new_scene.yaml").read_text()), (task, text)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+    return scene
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,7 +172,21 @@ def main(argv: list[str] | None = None) -> int:
         metavar="MODULE",
         help="Have the server import MODULE first, for the assets and kinds it registers with Arena; repeatable",
     )
+    new_parser = commands.add_parser(
+        "new",
+        help="Start a spec: a task and the scene it includes, a pick-and-place that builds",
+        description=new.__doc__,
+    )
+    new_parser.add_argument("task", type=Path, help="The task YAML to write, e.g. environments/tasks/my_task.yaml")
     args = parser.parse_args(argv)
+
+    if args.command == "new":
+        try:
+            scene = new(args.task)
+        except OSError as error:
+            parser.error(str(error))
+        print(f"wrote {args.task}\nwrote {scene}")
+        return 0
 
     project, venv = args.project.resolve(), Path(sys.prefix).resolve()
     if not (venv / "bin" / "arena-mcp").exists():
