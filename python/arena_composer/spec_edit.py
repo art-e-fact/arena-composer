@@ -25,10 +25,12 @@ or an agent with two problems to fix could fix neither.
 from __future__ import annotations
 
 import difflib
+import inspect
 import io
 import os
 import re
 import shutil
+import sys
 import tempfile
 from collections import Counter
 from collections.abc import Iterator
@@ -429,29 +431,149 @@ def _hint(line: str, spec: Any) -> str:
 def _build_problems(spec: Any) -> list[str]:
     """What fails only when the scene is built, in the merged spec `spec`.
 
-    Arena checks that a registry name exists, not what the asset behind it
-    takes — an entry short of a required parameter is a valid spec that
-    asserts when instantiated — nor that the asset is the kind its slot
-    holds: a banana validates as the embodiment. A name Arena does not know
-    is left to its validator, which refuses it by name.
+    Arena's validator checks that each name is registered and that each id a
+    slot holds is declared, and leaves the rest to the build: whether the
+    params bind to the constructor they are passed to, whether an asset is
+    the kind its slot holds — a banana validates as the embodiment — whether
+    an object reference can be built at all, and the ids in a list param,
+    which it skips. A name Arena does not know is left to its validator,
+    which refuses it by name.
+
+    Each group fails open: one that cannot run, on an Arena that moved its
+    internals, says so on stderr and refuses nothing.
     """
+    errors = []
+    for group in (_asset_problems, _reference_problems, _relation_problems, _subtask_problems):
+        try:
+            errors += group(spec)
+        except Exception as error:
+            print(f"arena-composer: {group.__name__} skipped: {type(error).__name__}: {error}", file=sys.stderr)
+    return errors
+
+
+def _asset_problems(spec: Any) -> list[str]:
+    """The embodiment's, the background's and each object's params against the
+    constructor they are passed to, and the embodiment an embodiment."""
     from isaaclab_arena.assets.registries import AssetRegistry
     from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
 
+    registry = AssetRegistry()
+    # Arena fills an object's `instance_name` from its id, and nobody else's.
+    slots = [(role, spec.get(role) if isinstance(spec, dict) else None, ()) for role in ("embodiment", "background")]
+    slots += [(f"objects.{index}", entry, ("instance_name",)) for index, entry in _indexed(spec, "objects")]
+    errors = []
+    for where, entry, given in slots:
+        name = entry.get("registry_name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not registry.is_registered(name):
+            continue
+        cls, params = registry.get_asset_by_name(name), entry.get("params")
+        errors += _binding(f"{where}.params", name, cls, params if isinstance(params, dict) else {}, given)
+        if where == "embodiment" and not issubclass(cls, EmbodimentBase):
+            errors.append(f"embodiment.registry_name: {name} is not an embodiment")
+    return errors
+
+
+def _reference_problems(spec: Any) -> list[str]:
+    """What Arena asserts as it builds each object reference."""
+    from isaaclab_arena.assets.object_type import ObjectType
+
+    # Private API: the params that make a reference an affordance, each its own class.
+    from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import _AFFORDANCE_REFERENCE_CLASSES
+
+    errors = []
+    for index, reference in _indexed(spec, "object_references"):
+        where, params = f"object_references.{index}", reference.get("params")
+        if not reference.get("prim_path"):
+            errors.append(f"{where}.prim_path: a reference is built from the prim it names, and names none")
+        joints = [name for name in _AFFORDANCE_REFERENCE_CLASSES if isinstance(params, dict) and name in params]
+        if len(joints) > 1:
+            errors.append(f"{where}.params: a reference exposes one affordance, not {' and '.join(joints)}")
+        elif joints and reference.get("object_type") != ObjectType.ARTICULATION.value:
+            errors.append(f"{where}.object_type: {joints[0]} makes it an articulation; set it to articulation")
+    return errors
+
+
+def _relation_problems(spec: Any) -> list[str]:
+    """Each relation's params against its kind's constructor."""
+    from isaaclab_arena.assets.registries import ObjectRelationLibraryRegistry
+
+    registry = ObjectRelationLibraryRegistry()
+    errors = []
+    for index, relation in _indexed(spec, "relations"):
+        kind, params = relation.get("kind"), relation.get("params")
+        if not isinstance(kind, str) or not registry.is_registered(kind):
+            continue
+        cls = registry.get_object_relation_by_name(kind)
+        # A binary relation's first argument is the reference, which Arena passes.
+        given = () if cls.is_unary() else tuple(name for name in inspect.signature(cls.__init__).parameters)[1:2]
+        errors += _binding(f"relations.{index}.params", kind, cls, params if isinstance(params, dict) else {}, given)
+    return errors
+
+
+def _subtask_problems(spec: Any) -> list[str]:
+    """Each subtask's params against its kind's constructor, and the ids its
+    list params hold, which Arena's validator skips and its builder looks up."""
+    from isaaclab_arena.assets.registries import TaskRegistry
+
+    registry = TaskRegistry()
+    task = spec.get("task") if isinstance(spec, dict) else None
+    # Arena passes the task's description to an atomic task only.
+    given = ("task_description",) if isinstance(task, dict) and task.get("composition") == "atomic" else ()
+    ids, _ = _id_pools(spec)
+    errors = []
+    for index, subtask in _indexed(task, "subtasks"):
+        kind, params = subtask.get("kind"), subtask.get("params")
+        if not isinstance(kind, str) or not registry.is_registered(kind):
+            continue
+        params, where = params if isinstance(params, dict) else {}, f"task.subtasks.{index}.params"
+        errors += _binding(where, kind, registry.get_task_by_name(kind), params, given)
+        for name in _node_lists(kind) or ():
+            value = params.get(name)
+            if value is not None and not isinstance(value, list):
+                errors.append(f"{where}.{name}: {kind} takes a list of ids here")
+                continue
+            for item, member in enumerate(value or []):
+                if member not in ids:
+                    errors.append(f"{where}.{name}.{item}: {member!r} is not an id this spec declares")
+        # ponytail: SortMultiObjectTask's own assert, the one list rule Arena's
+        # tasks share with nobody. Read the asserts off the task if more appear.
+        picked, placed = params.get("pick_up_object_list"), params.get("destination_location_list")
+        if kind == "SortMultiObjectTask" and isinstance(picked, list) and isinstance(placed, list) and len(picked) != len(placed):
+            errors.append(
+                f"{where}: {kind} pairs each pick_up_object_list entry with a destination_location_list one,"
+                f" and has {len(picked)} and {len(placed)}"
+            )
+    return errors
+
+
+def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: tuple[str, ...]) -> list[str]:
+    """What passing `params` to `cls`, with Arena's `given`, would refuse: a
+    required parameter nobody supplies, and a key the constructor does not take."""
     from arena_composer import catalog
 
-    registry = AssetRegistry()
     errors = []
-    for index, entry in _indexed(spec, "objects"):
-        name, params = entry.get("registry_name"), entry.get("params")
-        if isinstance(name, str) and registry.is_registered(name):
-            if missing := catalog.missing_params(name, params if isinstance(params, dict) else {}):
-                errors.append(f"objects.{index}.params: {name} needs {', '.join(missing)}")
-    embodiment = spec.get("embodiment") if isinstance(spec, dict) else None
-    name = embodiment.get("registry_name") if isinstance(embodiment, dict) else None
-    if isinstance(name, str) and registry.is_registered(name) and not issubclass(registry.get_asset_by_name(name), EmbodimentBase):
-        errors.append(f"embodiment.registry_name: {name} is not an embodiment")
+    if missing := catalog.missing_params(cls, params, given):
+        errors.append(f"{where}: {label} needs {', '.join(missing)}")
+    taken = [name for name in inspect.signature(cls.__init__).parameters if name not in ("self", *given)]
+    for name in catalog.unexpected_params(cls, params):
+        close = difflib.get_close_matches(str(name), taken, n=1)
+        errors.append(f"{where}.{name}: {label} takes no {name!r}" + (f"; did you mean {close[0]!r}?" if close else ""))
     return errors
+
+
+def _node_lists(kind: Any) -> set[str] | None:
+    """The params of task `kind` that list node ids, or None when it is not
+    registered, and any list of strings may."""
+    from isaaclab_arena.assets.registries import TaskRegistry
+    from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
+        find_node_ref_params_in_signature,
+    )
+
+    registry = TaskRegistry()
+    if not isinstance(kind, str) or not registry.is_registered(kind):
+        return None
+    found = find_node_ref_params_in_signature(registry.get_task_by_name(kind))
+    return {name for name, listed in found.items() if listed}
 
 
 def _files(path: Path) -> SpecFiles | Result:
@@ -684,9 +806,9 @@ def _id_slots(spec: Any) -> Iterator[tuple[Any, Any, str]]:
     The complete list, checked against Arena's validator and its builder: a
     relation's ``subject`` and ``reference``; an object reference's
     ``parent_id``; a CLI override's ``target_node_id``; and a task param that
-    is a string, or the strings in one that is a list, since Arena requires
-    each to name a node — an object set's ``members`` are registry names, not
-    ids, and stay out.
+    is a string, or the strings in one its kind types as a list of assets,
+    since Arena requires each to name a node — a list of directions is not
+    one, and an object set's ``members`` are registry names, not ids.
     """
     for index, relation in _indexed(spec, "relations"):
         for slot in ("subject", "reference"):
@@ -702,10 +824,12 @@ def _id_slots(spec: Any) -> Iterator[tuple[Any, Any, str]]:
         params = subtask.get("params")
         if not isinstance(params, dict):
             continue
+        # A kind nobody registered: any list of strings may hold ids.
+        listed = _node_lists(subtask.get("kind"))
         for name, value in params.items():
             if isinstance(value, str):
                 yield params, name, f"task.subtasks.{index}.params.{name}"
-            elif isinstance(value, list):
+            elif isinstance(value, list) and (listed is None or name in listed):
                 for item, member in enumerate(value):
                     if isinstance(member, str):
                         yield value, item, f"task.subtasks.{index}.params.{name}.{item}"
@@ -784,11 +908,14 @@ def _introduced(
     introduced = [lines[key] for key in now if now[key] > was[key]]
     remaining = [lines[key] for key in now if now[key] <= was[key]]
 
-    def rest(problems: list[str]) -> list[str]:
-        return [line for line in problems if not any(mark in line for mark in _CROSS_REFERENCE)]
+    def rest(problems: list[str], spec: Any) -> list[str]:
+        # `_build_problems` names a list param's dangling ids as `_dangling` does.
+        dangling = {line for _, line in _dangling(spec)}
+        return [line for line in problems if line not in dangling and not any(mark in line for mark in _CROSS_REFERENCE)]
 
-    new = Counter(_normalised(line) for line in rest(after)) - Counter(_normalised(line) for line in rest(before))
-    for line in rest(after):
+    after_rest, before_rest = rest(after, after_spec), rest(before, before_spec)
+    new = Counter(_normalised(line) for line in after_rest) - Counter(_normalised(line) for line in before_rest)
+    for line in after_rest:
         if new[_normalised(line)] > 0:
             new[_normalised(line)] -= 1
             introduced.append(line)
@@ -916,7 +1043,7 @@ def _drop_params_not_taken(entry: Any, registry_name: Any) -> list[str]:
     # An unregistered name is left to validation, which refuses it by name.
     if not params or not isinstance(registry_name, str) or not AssetRegistry().is_registered(registry_name):
         return []
-    dropped = catalog.unexpected_params(registry_name, params)
+    dropped = catalog.unexpected_params(AssetRegistry().get_asset_by_name(registry_name), params)
     for name in dropped:
         del params[name]
     # As in `apply`'s remove: an emptied commented mapping does not parse.

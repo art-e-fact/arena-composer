@@ -32,6 +32,7 @@ import sys
 import types
 import typing
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
@@ -204,38 +205,37 @@ def search(query: str = "", role: str | None = None, limit: int = 20) -> list[As
     return found[:limit]
 
 
-def missing_params(registry_name: str, params: dict[str, Any]) -> list[str]:
-    """Constructor parameters of the asset with no default that `params` does
-    not supply — what makes a spec entry fail to build after it validated.
+def missing_params(cls: type, params: dict[str, Any], given: Iterable[str] = ()) -> list[str]:
+    """Constructor parameters of `cls` with no default that neither `params`
+    nor `given`, what Arena passes itself, supplies — what makes a spec entry
+    fail to build after it validated.
 
-    Arena checks that a registry name exists, not what the asset behind it
+    Arena checks that a registry name exists, not what the class behind it
     takes: a ``simready_usd_object`` without its ``usd_path`` is a valid spec
-    that asserts when instantiated. `instance_name` is filled in from the
-    entry's id and not counted.
+    that asserts when instantiated.
     """
-    from isaaclab_arena.assets.registries import AssetRegistry
-
-    cls = AssetRegistry().get_asset_by_name(registry_name)
     return [
         param.name
-        for param in inspect.signature(cls.__init__).parameters.values()
-        if param.name not in ("self", "instance_name")
-        and param.default is inspect.Parameter.empty
+        for param in _signature(cls)
+        if param.default is inspect.Parameter.empty
         and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
         and param.name not in params
+        and param.name not in given
     ]
 
 
-def unexpected_params(registry_name: str, params: dict[str, Any]) -> list[str]:
-    """Keys of `params` the asset's constructor does not take — what an entry
-    carries over from the asset it named before, and what fails the build with
-    a TypeError. None for a constructor that takes ``**kwargs``."""
-    from isaaclab_arena.assets.registries import AssetRegistry
-
-    taken = inspect.signature(AssetRegistry().get_asset_by_name(registry_name).__init__).parameters
-    if any(param.kind is param.VAR_KEYWORD for param in taken.values()):
+def unexpected_params(cls: type, params: dict[str, Any]) -> list[str]:
+    """Keys of `params` that `cls`'s constructor does not take — what an entry
+    carries over from the asset it named before, or a typo, and what fails the
+    build with a TypeError. None for a constructor that takes ``**kwargs``."""
+    taken = _signature(cls)
+    if any(param.kind is param.VAR_KEYWORD for param in taken):
         return []
-    return [name for name in params if name not in taken]
+    return [name for name in params if name not in {param.name for param in taken}]
+
+
+def _signature(cls: type) -> list[inspect.Parameter]:
+    return [param for param in inspect.signature(cls.__init__).parameters.values() if param.name != "self"]
 
 
 #: Modules whose classes name a node in the graph rather than a value. A

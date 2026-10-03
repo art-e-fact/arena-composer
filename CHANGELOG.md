@@ -50,6 +50,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   asset name, relation or task kind, or id that nothing declares comes with the closest that do.
   A name nothing registered is close to says how to import the module that registers it, and an
   unquoted `on` says to quote it.
+- Edits and `check_spec` refuse what Arena only finds when it builds the scene, after the sim has
+  started: a param a subtask, relation, embodiment, background or object does not take, with the
+  one probably meant, or a required one it lacks; an id in a list param, `pick_up_object_list`
+  among them, that the spec does not declare; and an object reference with no `prim_path`, or an
+  affordance on one that is not an articulation. A spec that already has one is still edited.
 - An edit replaces each file it changes whole, where it wrote into it, so `arena-view`, Arena or
   an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download

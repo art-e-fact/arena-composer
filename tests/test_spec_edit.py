@@ -174,8 +174,10 @@ def test_a_second_entry_wrong_the_same_way_is_still_new(spec: Path):
     """Errors are compared as multisets with list indices normalised: a relation
     inserted above an already-dangling one must not make the old one read as
     new, and a new relation naming the same missing id must."""
-    ghost = {"kind": "next_to", "subject": "banana", "reference": "ghost", "params": {}}
-    scene_of(spec).write_text(SCENE + "- kind: next_to\n  subject: banana\n  reference: ghost\n  params: {}\n")
+    ghost = {"kind": "next_to", "subject": "banana", "reference": "ghost", "params": {"side": "positive_y"}}
+    scene_of(spec).write_text(
+        SCENE + "- kind: next_to\n  subject: banana\n  reference: ghost\n  params:\n    side: positive_y\n"
+    )
 
     result = spec_edit.apply(spec, "insert", ["relations"], ghost)
     assert not result.ok
@@ -191,7 +193,8 @@ def test_a_second_entry_wrong_the_same_way_is_still_new(spec: Path):
 
 def test_a_good_spec_is_refused_for_anything_wrong_after(spec: Path):
     """Nothing to compare against: Arena's own lines come back as they are."""
-    result = spec_edit.apply(spec, "insert", ["relations"], {"kind": "next_to", "subject": "banana", "reference": "ghost", "params": {}})
+    ghost = {"kind": "next_to", "subject": "banana", "reference": "ghost", "params": {"side": "positive_y"}}
+    result = spec_edit.apply(spec, "insert", ["relations"], ghost)
     assert not result.ok and result.remaining_errors == []
     assert any("ghost" in line for line in result.errors), result.errors
 
@@ -562,8 +565,9 @@ def test_a_cascade_tolerates_sections_a_hand_edit_left_null(spec: Path):
 
 def test_a_param_called_id_does_not_trigger_a_rename(spec: Path):
     """Only the embodiment's and background's own `id` renames — a param that
-    happens to be called `id` a step further down must not."""
-    result = spec_edit.apply(spec, "set", ["embodiment", "params", "id"], "droid")
+    happens to be called `id` a step further down must not. The background's,
+    since its constructor takes any param and the embodiment's does not."""
+    result = spec_edit.apply(spec, "set", ["background", "params", "id"], TABLE)
     assert result.ok, result.errors
     assert not any("renamed" in line for line in result.changed), result.changed
 
@@ -749,3 +753,68 @@ def test_a_write_that_fails_is_a_refusal_and_leaves_the_file(spec: Path, monkeyp
     assert not result.ok and result.errors == ["OSError: [Errno 28] No space left on device"], result
     assert scene_of(spec).read_text() == SCENE
     assert [path.name for path in scene_of(spec).parent.iterdir()] == ["scene.yaml"]
+
+
+def test_a_subtask_param_its_kind_does_not_take_is_named_with_the_one_meant(spec: Path):
+    """Arena validates a subtask's kind, not that its params bind: this spec
+    validates, and fails the build with a TypeError."""
+    errors = broken(spec, "pick_up_object: banana", "pick_up_objekt: banana", file=spec)
+    assert errors == [
+        "task.yaml: task.subtasks.0.params: PickAndPlaceTask needs pick_up_object",
+        "task.yaml: task.subtasks.0.params.pick_up_objekt: PickAndPlaceTask takes no 'pick_up_objekt';"
+        " did you mean 'pick_up_object'?",
+    ]
+
+
+def test_a_relation_param_is_checked_against_its_kind(spec: Path):
+    errors = broken(spec, "  subject: banana\n  reference: maple_table_robolab\n  params: {}",
+                    "  subject: banana\n  reference: maple_table_robolab\n  params: {clearence_m: 0.01}")
+    assert errors == [
+        "../scenes/scene.yaml: relations.1.params.clearence_m: on takes no 'clearence_m'; did you mean 'clearance_m'?"
+    ]
+
+
+def test_the_ids_in_a_list_param_are_checked_where_arena_skips_them(spec: Path):
+    sort = TASK.replace(
+        "  - kind: PickAndPlaceTask\n    params:\n      pick_up_object: banana\n      destination_location: bowl\n",
+        "  - kind: SortMultiObjectTask\n    params:\n      pick_up_object_list: [banana, ghost]\n"
+        "      destination_location_list: [bowl]\n",
+    )
+    spec.write_text(sort)
+    assert spec_edit.check(spec).errors == [
+        "task.yaml: task.subtasks.0.params.pick_up_object_list.1: 'ghost' is not an id this spec declares",
+        "task.yaml: task.subtasks.0.params: SortMultiObjectTask pairs each pick_up_object_list entry with a"
+        " destination_location_list one, and has 2 and 1",
+    ]
+
+
+def test_an_object_reference_is_checked_as_arena_builds_it(spec: Path):
+    scene_of(spec).write_text(
+        SCENE + "object_references:\n- id: drawer\n  parent_id: maple_table_robolab\n  object_type: base\n"
+        "  params: {openable_joint_name: drawer_joint}\n"
+    )
+    assert spec_edit.check(spec).errors == [
+        "../scenes/scene.yaml: object_references.0.prim_path:"
+        " a reference is built from the prim it names, and names none",
+        "../scenes/scene.yaml: object_references.0.object_type: openable_joint_name makes it an articulation;"
+        " set it to articulation",
+    ]
+
+
+def test_an_embodiment_param_it_does_not_take_is_named(spec: Path):
+    errors = broken(spec, "registry_name: droid_abs_joint_pos\n  params: {}",
+                    "registry_name: droid_abs_joint_pos\n  params: {stand_heigth_m: 0.8}")
+    assert errors == [
+        "../scenes/scene.yaml: embodiment.params.stand_heigth_m: droid_abs_joint_pos takes no 'stand_heigth_m';"
+        " did you mean 'stand_height_m'?"
+    ]
+
+
+def test_a_stale_param_left_by_hand_does_not_block_other_edits(spec: Path):
+    """What makes these checks safe to add: a spec that already fails one is
+    still edited, the failure carried as `remaining_errors`."""
+    broken(spec, "  subject: banana\n  reference: maple_table_robolab\n  params: {}",
+           "  subject: banana\n  reference: maple_table_robolab\n  params: {clearence_m: 0.01}")
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert result.ok, result.errors
+    assert len(result.remaining_errors) == 1 and "clearence_m" in result.remaining_errors[0], result.remaining_errors
