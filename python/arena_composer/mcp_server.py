@@ -488,8 +488,12 @@ def check_spec(spec: str) -> dict[str, Any]:
     on disk — so this is what to run after editing the YAML by hand, before
     `describe_scene` spends seconds on it. It catches what stops a spec
     loading: YAML that does not parse, a `registry_name` the registry lacks, a
-    relation or task param naming an id the spec has not got, an object short
-    of the params its asset needs, a bare `on` read as the boolean true.
+    relation or task param naming an id the spec has not got, a bare `on` read
+    as the boolean true. And what Arena only finds once it builds the scene,
+    after the sim has started: a param an asset, relation or subtask lacks or
+    does not take, an id in a list param the spec has not got, an object
+    reference with no `prim_path`, a misspelled field under
+    `env_cfg_override.sim`.
 
     Whether the layout solves it cannot see; that is `describe_scene`.
 

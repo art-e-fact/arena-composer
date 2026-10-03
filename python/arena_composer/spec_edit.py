@@ -24,6 +24,7 @@ or an agent with two problems to fix could fix neither.
 
 from __future__ import annotations
 
+import copy
 import difflib
 import inspect
 import io
@@ -443,7 +444,7 @@ def _build_problems(spec: Any) -> list[str]:
     internals, says so on stderr and refuses nothing.
     """
     errors = []
-    for group in (_asset_problems, _reference_problems, _relation_problems, _subtask_problems):
+    for group in (_asset_problems, _reference_problems, _relation_problems, _subtask_problems, _override_problems):
         try:
             errors += group(spec)
         except Exception as error:
@@ -538,12 +539,67 @@ def _subtask_problems(spec: Any) -> list[str]:
         # ponytail: SortMultiObjectTask's own assert, the one list rule Arena's
         # tasks share with nobody. Read the asserts off the task if more appear.
         picked, placed = params.get("pick_up_object_list"), params.get("destination_location_list")
-        if kind == "SortMultiObjectTask" and isinstance(picked, list) and isinstance(placed, list) and len(picked) != len(placed):
+        lists = isinstance(picked, list) and isinstance(placed, list)
+        if kind == "SortMultiObjectTask" and lists and len(picked) != len(placed):
             errors.append(
                 f"{where}: {kind} pairs each pick_up_object_list entry with a destination_location_list one,"
                 f" and has {len(picked)} and {len(placed)}"
             )
     return errors
+
+
+def _override_problems(spec: Any) -> list[str]:
+    """`env_cfg_override` as Arena applies it once the sim has started: its
+    syntax over the whole mapping, and under `sim` each field name against
+    the simulation config of the spec's physics backend.
+
+    The other top-level keys get the syntax check only, since the env config
+    they land in is built with Kit. Values are not type-checked: Arena's
+    ``from_dict`` would refuse the gear task's own working override. The
+    backend is the spec's `default_physics_backend`; a run's ``--presets``
+    can pick the other, and this cannot know that.
+    """
+    override = spec.get("env_cfg_override") if isinstance(spec, dict) else None
+    if not isinstance(override, dict):
+        return []  # absent, or not a mapping, which the validator refuses
+    # Private API: the two checks apply_env_cfg_override runs first.
+    from isaaclab_arena.environment_spec.env_cfg_override import _materialize_targets, _validate_override_syntax
+
+    try:
+        _validate_override_syntax(copy.deepcopy(override), path="env")
+    except AssertionError as error:
+        return [f"env_cfg_override: {error}"]
+    sim = override.get("sim")
+    if not isinstance(sim, dict) or not all(_imported(target) for target in _targets(sim)):
+        # A `_target_` is imported to be resolved, and a module not yet loaded
+        # may load Kit, whose EULA prompt waits on a terminal.
+        return []
+    from isaaclab.sim import SimulationCfg
+    from isaaclab_newton.physics import NewtonCfg
+    from isaaclab_physx.physics import PhysxCfg
+
+    physics = NewtonCfg() if spec.get("default_physics_backend") == "newton" else PhysxCfg()
+    try:
+        _materialize_targets(SimulationCfg(physics=physics), copy.deepcopy(sim), path="env.sim", strict=True)
+    except (AssertionError, ValueError) as error:
+        return [f"env_cfg_override: {error}"]
+    return []
+
+
+def _targets(value: Any) -> Iterator[Any]:
+    """Every Hydra `_target_` under `value`."""
+    if isinstance(value, dict):
+        if "_target_" in value:
+            yield value["_target_"]
+        for item in value.values():
+            yield from _targets(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _targets(item)
+
+
+def _imported(target: Any) -> bool:
+    return isinstance(target, str) and target.rpartition(".")[0] in sys.modules
 
 
 def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: tuple[str, ...]) -> list[str]:
@@ -911,7 +967,9 @@ def _introduced(
     def rest(problems: list[str], spec: Any) -> list[str]:
         # `_build_problems` names a list param's dangling ids as `_dangling` does.
         dangling = {line for _, line in _dangling(spec)}
-        return [line for line in problems if line not in dangling and not any(mark in line for mark in _CROSS_REFERENCE)]
+        return [
+            line for line in problems if line not in dangling and not any(mark in line for mark in _CROSS_REFERENCE)
+        ]
 
     after_rest, before_rest = rest(after, after_spec), rest(before, before_spec)
     new = Counter(_normalised(line) for line in after_rest) - Counter(_normalised(line) for line in before_rest)

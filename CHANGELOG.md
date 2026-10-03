@@ -54,7 +54,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   started: a param a subtask, relation, embodiment, background or object does not take, with the
   one probably meant, or a required one it lacks; an id in a list param, `pick_up_object_list`
   among them, that the spec does not declare; and an object reference with no `prim_path`, or an
-  affordance on one that is not an articulation. A spec that already has one is still edited.
+  affordance on one that is not an articulation; and an `env_cfg_override` Arena would refuse, a
+  field under `sim` its physics backend lacks among it. A spec that already has one is still edited.
 - An edit replaces each file it changes whole, where it wrote into it, so `arena-view`, Arena or
   an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download

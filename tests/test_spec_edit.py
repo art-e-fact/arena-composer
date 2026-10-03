@@ -8,6 +8,7 @@ check tests the uninteresting half.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -818,3 +819,26 @@ def test_a_stale_param_left_by_hand_does_not_block_other_edits(spec: Path):
     result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
     assert result.ok, result.errors
     assert len(result.remaining_errors) == 1 and "clearence_m" in result.remaining_errors[0], result.remaining_errors
+
+
+def overridden(spec: Path, override: str) -> list[str]:
+    spec.write_text(TASK + f"env_cfg_override: {override}\n")
+    return spec_edit.check(spec).errors
+
+
+def test_an_override_arena_would_refuse_after_the_sim_starts_is_refused_now(spec: Path):
+    """Arena applies `env_cfg_override` to the env config the sim builds, so a
+    misspelled field otherwise surfaces minutes into a run."""
+    assert overridden(spec, "{sim: {dt: 0.01}}") == []
+    assert overridden(spec, "{sim: {dtt: 0.01}}") == ["task.yaml: env_cfg_override: Unknown config field 'env.sim.dtt'"]
+    assert overridden(spec, "{decimation: '${steps}'}") == [
+        "task.yaml: env_cfg_override: OmegaConf interpolation is not allowed at 'env.decimation'"
+    ]
+
+
+def test_an_override_naming_a_module_not_yet_loaded_is_not_imported_to_check_it(spec: Path):
+    """Resolving a `_target_` imports its module, and one may load Kit, whose
+    EULA prompt waits on a terminal. Left unchecked rather than risked."""
+    module = "isaaclab.envs.mdp.never_loaded_here"
+    assert overridden(spec, f"{{sim: {{physics: {{_target_: {module}.SomeCfg}}}}}}") == []
+    assert module not in sys.modules
