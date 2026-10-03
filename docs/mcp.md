@@ -10,9 +10,11 @@ Rules for changing it:
 - **stdout is the protocol.** Arena and the solver report progress with `print`, and one stray line
   stops the client parsing the message it lands in. Every tool does its work inside `_quiet()`. The
   SDK's own file-descriptor diversion does not cover it, and a test checks that. A tool that reports
-  progress does it through its `ctx: Context` with `await ctx.report_progress(...)`, as
-  `render_views` does — not `ctx.info(...)`: the protocol deprecated logging (SEP-2577), and a
-  client has to opt in per request to receive any, so a log line reaches nobody by default.
+  progress does it through its `ctx: Context`, with `_Progress`, as `describe_scene` and
+  `render_views` do. `_Progress.run` adds a heartbeat while the work runs in its thread, and keeps
+  one climbing count across the call, as the protocol asks. Not `ctx.info(...)`: the protocol
+  deprecated logging (SEP-2577), and a client has to opt in per request to receive any, so a log
+  line reaches nobody by default.
 - **No session.** Every tool takes a spec path and leaves its result on disk, so an `arena-view`
   window on the same spec redraws itself as the agent works.
 - **Failures are return values**, `{"ok": false, "errors": [...]}`, not exceptions. A spec an agent

@@ -40,8 +40,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   `agent_ready`.
 - `describe_scene` and `arena-resolve-layout` report `placement.not_run`: the checks only the
   simulator decides — physics settling, IK reach — so a dry pass reads as necessary, not sufficient.
+- `samples` on `describe_scene`, and `--samples N` on `arena-resolve-layout`, solve that many
+  layouts at once, as Arena draws one per reset, and report how many passed, which failed, how
+  often each check failed and how many of the layouts differ. The first is still the one described.
 
 ### Changed
+
+- `describe_scene` and `render_views` report progress every ten seconds while a solve, a download
+  or a render runs, where a long one looked frozen.
 
 - The MCP tools that write nothing — `search_assets`, `describe_scene`, `render_views`, `check_spec`,
   `list_kinds` — declare themselves read-only, so a client may run them without asking.
