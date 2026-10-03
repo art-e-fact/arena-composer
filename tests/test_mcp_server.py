@@ -146,6 +146,18 @@ def test_the_cheap_tools_stay_off_stdout_too(capsys, monkeypatch, tmp_path: Path
     assert captured.out == "", f"reached the protocol stream: {captured.out!r}"
 
 
+def test_an_import_that_fails_is_a_refusal_the_agent_reads(monkeypatch):
+    """Loaded on the first tool call, not at startup, so a bad
+    ARENA_COMPOSER_IMPORTS reaches the agent rather than a client's log."""
+
+    def failing(modules=()):
+        raise ImportError("ARENA_COMPOSER_IMPORTS names my_assets, which does not import: No module named 'my_assets'")
+
+    monkeypatch.setattr(mcp_server.catalog, "load_extensions", failing)
+    with pytest.raises(ToolError, match="^ARENA_COMPOSER_IMPORTS names my_assets, which does not import"):
+        mcp_server.list_kinds()
+
+
 def test_check_spec_answers_a_broken_spec_as_a_result(tmp_path: Path):
     spec = tmp_path / "task.yaml"
     spec.write_text("task: [\n")

@@ -110,8 +110,17 @@ def _quiet():
     server stdout is the wire: one `[placement] Validated ...` line in the
     stream and the client fails to parse a message. Every tool does its work in
     here, importing included — the registries print while they populate.
+
+    So it is also where `catalog.load_extensions` runs, before any tool reads
+    a registry. Not in `main()`: that imports Arena, seconds the handshake
+    would wait for and the first tool pays for anyway. A module that does not
+    import is a refusal the agent can read and pass on.
     """
     with contextlib.redirect_stdout(sys.stderr):
+        try:
+            catalog.load_extensions()
+        except ImportError as error:
+            raise ToolError(str(error)) from error
         yield
 
 
@@ -170,9 +179,11 @@ async def _or_refused(work: Callable[..., Any], *args: Any) -> Any:
 def search_assets(query: str = "", role: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """Find assets to use as an object, background or embodiment `registry_name`.
 
-    Two sources. Arena's registry, and NVIDIA's SimReady props: ~1,500
-    physics-ready objects on a public bucket, searched once `reindex_assets`
-    has built the local index. A SimReady hit shares one `registry_name` with
+    Two sources. Arena's registry, with the Isaac Cap assets its own CLI adds
+    and whatever the modules in `ARENA_COMPOSER_IMPORTS` register — set in
+    `bin/arena-mcp`, which `arena-composer init --import MODULE` writes. And
+    NVIDIA's SimReady props: ~1,500 physics-ready objects on a public bucket,
+    searched once `reindex_assets` has built the local index. A SimReady hit shares one `registry_name` with
     every other and is told apart by its `params`, which `add_object` has to be
     given as they are. Never make a URL up; the index is where they come from.
 

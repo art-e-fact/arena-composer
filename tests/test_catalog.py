@@ -4,10 +4,14 @@ that stubs it tests the uninteresting half."""
 
 from __future__ import annotations
 
+import os
 import socket
+import sys
 from pathlib import Path
 
-from arena_composer import catalog, simready
+import pytest
+
+from arena_composer import catalog, simready, spec_edit
 
 
 def test_a_remote_asset_is_found_with_the_params_to_add_it(tmp_path: Path, monkeypatch):
@@ -72,3 +76,44 @@ def test_a_kind_lists_the_params_no_control_edits_and_whether_arena_vetted_it():
         "default": None,
     }
     assert "pick_up_object" not in by_name["PickAndPlaceTask"].other_params, "a field was listed twice"
+
+
+@pytest.fixture
+def fresh_extensions():
+    """`load_extensions` runs once per process, and the catalog keeps what was
+    registered when first asked: both start over, and leave the next test the
+    same."""
+    catalog.load_extensions.cache_clear()
+    catalog.catalog.cache_clear()
+    yield
+    catalog.load_extensions.cache_clear()
+    catalog.catalog.cache_clear()
+
+
+def test_every_command_registers_what_arenas_own_cli_does(fresh_extensions):
+    import isaaclab_arena_environments
+
+    catalog.load_extensions()
+    assert "factory_gear_base" in {asset.registry_name for asset in catalog.search("gear", limit=100)}
+    # Names only Isaac Cap registers: the robot, the table, the gears.
+    gear_easy = Path(isaaclab_arena_environments.__file__).parent / "isaac_cap/gear_insertion/gear_easy.yaml"
+    assert spec_edit.check(gear_easy).ok
+
+
+def test_modules_are_imported_from_the_flag_and_the_variable(fresh_extensions, tmp_path: Path, monkeypatch):
+    for name in ("flag_extension", "variable_extension"):
+        (tmp_path / f"{name}.py").write_text("")
+    monkeypatch.syspath_prepend(tmp_path)
+    # An empty entry, as a trailing separator leaves, names nothing.
+    monkeypatch.setenv(catalog.IMPORTS, f"variable_extension{os.pathsep}")
+    catalog.load_extensions(("flag_extension",))
+    assert {"flag_extension", "variable_extension"} <= sys.modules.keys()
+
+
+def test_a_module_that_does_not_import_is_named_with_where_it_was_named(fresh_extensions, monkeypatch):
+    monkeypatch.setenv(catalog.IMPORTS, "no_such_extension")
+    with pytest.raises(ImportError) as refused:
+        catalog.load_extensions()
+    assert str(refused.value) == (
+        "ARENA_COMPOSER_IMPORTS names no_such_extension, which does not import: No module named 'no_such_extension'"
+    )

@@ -34,6 +34,10 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
   render the solved layout.
 - `arena-resolve-layout <spec>.yaml` prints the solved layout as JSON or text.
 
+Each command registers the Isaac Cap assets and tasks Arena's own CLI registers. A project that
+registers its own assets or kinds names the modules that do it with `--import MODULE`, or in
+`ARENA_COMPOSER_IMPORTS`, separated by `:`.
+
 ## How it works
 
 - **The YAML is the source of truth.** The visual editor, the MCP tools and your text editor all
@@ -95,6 +99,9 @@ configs Claude Code, VS Code and Cursor read, keeping any that already exist:
 ```bash
 <Arena's venv>/bin/arena-composer init <project>
 ```
+
+An MCP client starts the server with almost no environment, so `init --import MODULE` writes
+`ARENA_COMPOSER_IMPORTS` into `bin/arena-mcp` itself.
 
 ## Developing
 

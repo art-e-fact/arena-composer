@@ -25,6 +25,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   no other node. A click on a node, chip or edge opens its card in the panel and scrolls to it, and
   hovering one shows it in the 3D view. Drag to pan, scroll to zoom, double-click to fit.
 - arena-composer is licensed under MIT OR Apache-2.0, at your option, and the wheel says so.
+- Every command registers the Isaac Cap assets and tasks Arena's own CLI registers, so its gear
+  insertion and syringe sort specs open and describe, and `search_assets` and `list_kinds` find
+  them. The `gear_insertion_v2` specs still name assets nothing registers.
+- `--import MODULE` on `arena-view` and `arena-resolve-layout`, and `ARENA_COMPOSER_IMPORTS` for
+  all three commands, import a project's own modules first, for the assets and kinds they register.
+  A module that does not import is named, with where it was named. `arena-composer init --import
+  MODULE` writes the variable into `bin/arena-mcp`, since an MCP client starts it with almost no
+  environment.
 - `check_spec`, an MCP tool that validates a spec as Arena will read it — in milliseconds, with no
   solve and no asset read — and reports what the edit tools would refuse, for after a hand edit.
 - `list_kinds`, an MCP tool listing the relation and task kinds a spec can name: the params each

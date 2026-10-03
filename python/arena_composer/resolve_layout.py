@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 from collections.abc import Iterable
 from dataclasses import replace
@@ -49,7 +50,7 @@ from isaaclab_arena.relations.relations import get_anchor_objects
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 
-from arena_composer import spec_edit
+from arena_composer import catalog, spec_edit
 from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 from arena_composer.usd_assets import localize, use_local_asset_cache
 
@@ -406,8 +407,22 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
     )
+    parser.add_argument(
+        "--import",
+        dest="imports",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help=f"Import MODULE first, for the assets and kinds it registers with Arena; repeatable. "
+        f"${catalog.IMPORTS} names more, separated by '{os.pathsep}'",
+    )
     args = parser.parse_args(argv)
 
+    try:
+        catalog.load_extensions(tuple(args.imports))
+    except ImportError as error:
+        print(f"{parser.prog}: {error}", file=sys.stderr)
+        return 1
     use_local_asset_cache(args.asset_cache)
     # Arena and the solver print progress to stdout; keep it off the machine-readable output.
     with contextlib.redirect_stdout(sys.stderr):

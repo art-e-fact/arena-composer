@@ -15,12 +15,18 @@ agent only ever needs the handful matching what it is looking for — hence
 The kinds carry the form that edits them. Every parameter is inferred from the
 constructor rather than listed here, so a relation somebody registers
 themselves gets a form with no change to this file.
+
+What is registered depends on what has been imported, so every command calls
+:func:`load_extensions` before anything here is first asked.
 """
 
 from __future__ import annotations
 
+import contextlib
 import enum
+import importlib
 import inspect
+import os
 import re
 import sys
 import types
@@ -30,6 +36,45 @@ from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 from urllib.parse import urlparse
+
+#: Modules every command imports before it reads a spec, separated by
+#: `os.pathsep`: a project's own assets and kinds, registered as a side effect.
+IMPORTS = "ARENA_COMPOSER_IMPORTS"
+
+
+@cache
+def load_extensions(modules: tuple[str, ...] = ()) -> None:
+    """Register what Arena's own CLI registers, then import `modules` and the
+    ones `ARENA_COMPOSER_IMPORTS` names, for what they register.
+
+    Before the first :func:`catalog`, :func:`relations`, :func:`tasks` or
+    ``payload.kinds``: those are cached, and keep what was registered when
+    they were first asked. Raises an `ImportError` naming the module and
+    where it was named, for a command to print; a failure is not cached, so
+    the next call tries again.
+    """
+    # Arena and its registries print as they populate.
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            # Private API, the body of Arena's ensure_environments_registered().
+            # That function's module imports isaacsim, through AppLauncher, and
+            # Kit's EULA prompt then waits on a terminal there is none of.
+            from isaaclab_arena_environments.isaac_cap import register_components
+        except ModuleNotFoundError as error:
+            # An Arena without the environments package; a dependency missing
+            # from inside it is not that, and says so.
+            if not (error.name or "").startswith("isaaclab_arena_environments"):
+                raise
+        else:
+            register_components()
+
+        named = [(module, "--import") for module in modules]
+        named += [(module, IMPORTS) for module in os.environ.get(IMPORTS, "").split(os.pathsep) if module]
+        for module, source in named:
+            try:
+                importlib.import_module(module)
+            except ImportError as error:
+                raise ImportError(f"{source} names {module}, which does not import: {error}") from error
 
 
 @dataclass(frozen=True)

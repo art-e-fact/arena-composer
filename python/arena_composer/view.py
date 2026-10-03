@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import os
 import signal
 import sys
 from pathlib import Path
@@ -60,8 +61,22 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
     )
+    parser.add_argument(
+        "--import",
+        dest="imports",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help=f"Import MODULE first, for the assets and kinds it registers with Arena; repeatable. "
+        f"${catalog.IMPORTS} names more, separated by '{os.pathsep}'",
+    )
     args = parser.parse_args(argv)
 
+    try:
+        catalog.load_extensions(tuple(args.imports))
+    except ImportError as error:
+        print(f"{parser.prog}: {error}", file=sys.stderr)
+        return 1
     use_local_asset_cache(args.asset_cache)
     # Stamped before the first solve, so a change made during those seconds is
     # noticed for what it is rather than taken for the file that was solved.
