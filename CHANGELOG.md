@@ -46,6 +46,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Changed
 
+- A refused edit and `check_spec` name the file to fix when the spec includes a scene, and an
+  asset name, relation or task kind, or id that nothing declares comes with the closest that do.
+  A name nothing registered is close to says how to import the module that registers it, and an
+  unquoted `on` says to quote it.
+- An edit replaces each file it changes whole, where it wrote into it, so `arena-view`, Arena or
+  an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download
   or a render runs, where a long one looked frozen.
 
@@ -97,6 +103,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   inside it and their relations, where it left them dangling and the edit was refused.
 - Removing the last entry of a list that holds a comment no longer writes a file that does not
   parse.
+- A small float an edit writes, `0.00001`, goes out as `1.0e-05`, which Arena reads as a number.
+  It went out as `1e-05`, which Arena reads as a string.
 - A spec listing a light or a ground plane as an object resolves, in `arena-view`,
   `arena-resolve-layout` and the MCP tools, where it was refused: the asset stays where it is
   configured, out of placement as in the sim, and is drawn as nothing. A relation naming one is

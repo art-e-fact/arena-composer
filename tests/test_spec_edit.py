@@ -179,11 +179,11 @@ def test_a_second_entry_wrong_the_same_way_is_still_new(spec: Path):
 
     result = spec_edit.apply(spec, "insert", ["relations"], ghost)
     assert not result.ok
-    assert result.errors == ["relations.4.reference: 'ghost' is not an id this spec declares"], result.errors
+    assert result.errors == ["../scenes/scene.yaml: relations.4.reference: 'ghost' is not an id this spec declares"], result.errors
 
     result = spec_edit.apply(spec, "set", ["relations", 1, "params", "clearance_m"], 0.03)
     assert result.ok, result.errors
-    assert result.remaining_errors == ["relations.3.reference: 'ghost' is not an id this spec declares"], result.remaining_errors
+    assert result.remaining_errors == ["../scenes/scene.yaml: relations.3.reference: 'ghost' is not an id this spec declares"], result.remaining_errors
 
     result = spec_edit.apply(spec, "set", ["objects", 0, "params", "probe"], {"id": "x"})
     assert result.ok and len(result.remaining_errors) == 1, result
@@ -676,3 +676,76 @@ def test_only_a_robot_is_accepted_as_the_embodiment(spec: Path, registry_name: s
     assert not result.ok
     assert any(registry_name in error for error in result.errors), result.errors
     assert (spec.read_text(), scene_of(spec).read_text()) == before
+
+
+def broken(spec: Path, old: str, new: str, file: Path | None = None) -> list[str]:
+    """What `check` says of `spec` once `old` in `file`, the scene by default, reads `new`."""
+    file = file or scene_of(spec)
+    file.write_text(file.read_text().replace(old, new, 1))
+    return spec_edit.check(spec).errors
+
+
+def test_a_name_nothing_registers_comes_with_the_closest_that_are(spec: Path):
+    """And with the file to fix: the scene, spelled as the include spells it."""
+    assert broken(spec, "registry_name: banana_ycb_robolab", "registry_name: bananna_ycb_robolab") == [
+        "../scenes/scene.yaml: objects.0.registry_name: Unknown asset registry_name 'bananna_ycb_robolab';"
+        " did you mean 'banana_ycb_robolab'?"
+    ]
+
+
+def test_a_name_nothing_registered_is_close_to_points_at_the_import(spec: Path):
+    (line,) = broken(spec, "registry_name: banana_ycb_robolab", "registry_name: my_private_widget")
+    assert line.endswith(
+        "nothing registered is close. A module of the project that registers it has to be imported"
+        " first: `--import MODULE`, or ARENA_COMPOSER_IMPORTS in bin/arena-mcp"
+    ), line
+
+
+def test_a_kind_and_an_id_come_with_the_closest_too(spec: Path):
+    assert broken(spec, "- kind: 'on'\n  subject: distractor", "- kind: nxt_to\n  subject: distractor") == [
+        "../scenes/scene.yaml: relations.2: Unknown relation kind 'nxt_to'; did you mean 'next_to'?"
+    ]
+    scene_of(spec).write_text(SCENE)
+    # Arena's line is a sentence, so the hint follows as one; the task file owns `task`.
+    assert broken(spec, "pick_up_object: banana", "pick_up_object: banan", file=spec) == [
+        "task.yaml: Task 'PickAndPlaceTask' param 'pick_up_object' references unknown node 'banan'."
+        " Add it to 'objects' or 'object_references'. Did you mean 'banana'?"
+    ]
+
+
+def test_a_bare_on_is_said_to_need_quoting(spec: Path):
+    assert broken(spec, "- kind: 'on'\n  subject: distractor", "- kind: on\n  subject: distractor") == [
+        "../scenes/scene.yaml: relations.2.kind: Input should be a valid string;"
+        " Arena reads YAML 1.1, where a bare on, off, yes or no is a boolean, so quote it"
+    ]
+
+
+def test_a_small_float_is_written_as_a_float_yaml_1_1_reads(spec: Path):
+    """ruamel's `1e-05` is a string to PyYAML, whose floats need a dot."""
+    result = spec_edit.apply(spec, "set", ["relations", 1, "params", "clearance_m"], 1e-05)
+    assert result.ok, result.errors
+    assert "clearance_m: 1.0e-05\n" in scene_of(spec).read_text()
+    assert yaml.safe_load(scene_of(spec).read_text())["relations"][1]["params"]["clearance_m"] == 1e-05
+
+
+def test_a_file_is_replaced_whole_keeping_its_mode(spec: Path):
+    """Renamed over, never written into, so a reader finds the old file or the
+    new one; and it stays as readable as it was."""
+    scene = scene_of(spec)
+    scene.chmod(0o640)
+    before = scene.stat().st_ino
+    assert spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE).ok
+    assert scene.stat().st_ino != before
+    assert scene.stat().st_mode & 0o777 == 0o640
+    assert [path.name for path in scene.parent.iterdir()] == ["scene.yaml"], "a temporary file was left behind"
+
+
+def test_a_write_that_fails_is_a_refusal_and_leaves_the_file(spec: Path, monkeypatch):
+    def full(*_):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(spec_edit.os, "replace", full)
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert not result.ok and result.errors == ["OSError: [Errno 28] No space left on device"], result
+    assert scene_of(spec).read_text() == SCENE
+    assert [path.name for path in scene_of(spec).parent.iterdir()] == ["scene.yaml"]

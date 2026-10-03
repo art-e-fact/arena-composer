@@ -74,8 +74,9 @@ run of edits, then check once.
 A failed edit is a normal result, not an error: it comes back as
 `{"ok": false, "errors": [...]}` with both files untouched, and so does a
 `describe_scene` of a spec that does not read, validate or build, and a
-`check_spec` of one. Read the errors and correct the call, or the spec. An
-edit on a spec that is already broken is refused only for what it introduces;
+`check_spec` of one. Read the errors and correct the call, or the spec: each
+names the file to fix when the spec is two, and a name, kind or id nothing
+declares comes with the closest that are. An edit on a spec that is already broken is refused only for what it introduces;
 what was wrong before comes back as `remaining_errors`, whether the edit
 landed or not, so a spec with two problems is repaired one edit at a time.
 

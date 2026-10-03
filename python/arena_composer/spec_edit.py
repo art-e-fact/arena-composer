@@ -24,8 +24,12 @@ or an agent with two problems to fix could fix neither.
 
 from __future__ import annotations
 
+import difflib
 import io
+import os
 import re
+import shutil
+import tempfile
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -34,6 +38,7 @@ from typing import Any
 
 import yaml
 from ruamel.yaml import YAML
+from ruamel.yaml.representer import RoundTripRepresenter
 
 #: Key through which a task spec includes its scene.
 INCLUDE = "external_yaml"
@@ -69,6 +74,19 @@ def _represent_str(representer: Any, value: str) -> Any:
     """Quote a string YAML 1.1 would otherwise read as a boolean."""
     style = "'" if value.lower() in YAML_11_BOOLEANS else None
     return representer.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+def _represent_float(representer: Any, value: float) -> Any:
+    """Write an exponent with a dot before it, ``1.0e-05``, which PyYAML reads
+    as the float it is. ruamel writes ``1e-05``, valid YAML 1.2 but a string to
+    YAML 1.1: a task param refused as an unknown node, a relation param wrong
+    without a word. Only for a float an edit adds; one read from the file keeps
+    the spelling it has."""
+    node = RoundTripRepresenter.represent_float(representer, value)
+    mantissa, exponent, power = node.value.partition("e")
+    if exponent and "." not in mantissa:
+        node.value = f"{mantissa}.0e{power}"
+    return node
 
 
 def _represent_none(representer: Any, _value: None) -> Any:
@@ -156,7 +174,10 @@ class SpecFiles:
         # the first time any edit passes over the file. An edit rewrites only
         # what it was asked to.
         self.yaml.width = 4096
+        # Class-wide: ruamel keeps representers on the class, so every round-trip
+        # YAML in this process writes these three types this way.
         self.yaml.representer.add_representer(str, _represent_str)
+        self.yaml.representer.add_representer(float, _represent_float)
         self.yaml.representer.add_representer(type(None), _represent_none)
         self.path = Path(path).resolve()
         self.documents: dict[Path, Any] = {self.path: self._read(self.path)}
@@ -214,7 +235,7 @@ class SpecFiles:
         A spec that only validates before it is written is not validated.
         """
         merged = self._read_back(texts)
-        return merged if isinstance(merged, list) else self._problems(merged)
+        return merged if isinstance(merged, list) else self.explain(self._problems(merged), merged)
 
     def _read_back(self, texts: dict[Path, str]) -> dict[str, Any] | list[str]:
         """`texts` merged as Arena reads them, or the one line saying why they
@@ -263,15 +284,50 @@ class SpecFiles:
             before = [] if isinstance(before_spec, list) else self._problems(before_spec)
             if before:
                 introduced, remaining = _introduced(before_spec, after_spec, before, introduced)
+        remaining = self.explain(remaining, after_spec)
         if introduced:
-            return Result(ok=False, errors=introduced, remaining_errors=remaining)
+            return Result(ok=False, errors=self.explain(introduced, after_spec), remaining_errors=remaining)
 
         wrote = []
         for path, text in texts.items():
             if text != path.read_text(encoding="utf-8"):
-                path.write_text(text, encoding="utf-8")
+                try:
+                    _replace(path, text)
+                except OSError as error:
+                    # The pair is replaced a file at a time, so one may
+                    # already be: `wrote` says which.
+                    return Result(ok=False, wrote=wrote, errors=[f"{type(error).__name__}: {error}"])
                 wrote.append(str(path))
         return Result(ok=True, wrote=wrote, changed=changed, remaining_errors=remaining)
+
+    def explain(self, lines: list[str], spec: Any) -> list[str]:
+        """`lines`, the problems with the merged `spec`, as an agent can act on
+        them: each starts with the file to fix, where the spec is two, spelled
+        as the include spells it; and a name, kind or id nothing declares
+        comes with the closest that are — or, for a name nothing registered
+        is close to, with how to import what registers it.
+        """
+        explained = []
+        for line in lines:
+            if hint := _hint(line, spec):
+                # Arena's own lines are sentences; the hint follows as one.
+                line = f"{line} {hint[0].upper()}{hint[1:]}" if line.endswith(".") else f"{line}; {hint}"
+            explained.append(self._file_of(line) + line)
+        return explained
+
+    def _file_of(self, line: str) -> str:
+        """The prefix naming the file that owns what `line` is about, or none."""
+        if not self.include_path:
+            return ""
+        from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
+
+        key = next((key for pattern, key in _SECTIONS if pattern.match(line)), None)
+        if key is None and (match := re.match(r"(\w+)[.:]", line)):
+            key = match[1]
+        if key not in ArenaEnvGraphSpec.model_fields:
+            return ""
+        owner = self.owner(key)
+        return f"{self.path.name if owner == self.path else self.documents[self.path][INCLUDE]}: "
 
     def _dump(self, document: Any) -> str:
         buffer = io.StringIO()
@@ -285,6 +341,89 @@ class SpecFiles:
         for key in ("objects", "object_sets", "object_references"):
             ids += [entry.get("id") for entry in (spec.get(key) or [])]
         return [asset_id for asset_id in ids if asset_id]
+
+
+def _replace(path: Path, text: str) -> None:
+    """Write `text` over `path` whole: into a file beside it, then renamed over
+    it, so a reader — `arena-view`'s watcher, Arena, an editor — finds the old
+    file or the new one, never half of either."""
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        shutil.copymode(path, temporary)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+#: Arena's lines that name no path, and the key each is about.
+_SECTIONS = (
+    (re.compile(r"Relation\["), "relations"),
+    (re.compile(r"Object reference '"), "object_references"),
+    (re.compile(r"Task '"), "task"),
+    (re.compile(r"CLI override '|Duplicate cli_override"), "cli_override_specs"),
+)
+
+#: A name or id an error line says nothing declares, and where to look for the
+#: ones that are: a registry, or the spec's own ids.
+_UNKNOWN = (
+    (re.compile(r"Unknown asset registry_name '([^']*)'"), "asset"),
+    (re.compile(r"Unknown relation kind '([^']*)'"), "relation"),
+    (re.compile(r"Unknown task kind '([^']*)'"), "task"),
+    (re.compile(r"invalid parent '([^']*)'"), "object_references"),
+    (re.compile(r"non-swappable asset '([^']*)'"), "cli_override_specs"),
+    (re.compile(r"unknown (?:subject|reference|node) '([^']*)'"), "ids"),
+    # `_dangling`'s, whose path says which ids the slot takes.
+    (re.compile(r"(\w+)\.[\w.]+: '([^']*)' is not "), "slot"),
+)
+
+_IMPORT_HINT = (
+    "nothing registered is close. A module of the project that registers it has to be imported"
+    " first: `--import MODULE`, or ARENA_COMPOSER_IMPORTS in bin/arena-mcp"
+)
+
+
+def _hint(line: str, spec: Any) -> str:
+    """What to add to `line` about the name or id it says nothing declares."""
+    try:
+        for pattern, kind in _UNKNOWN:
+            if match := pattern.search(line):
+                break
+        else:
+            return ""
+        if kind == "slot":
+            section, value = match[1], match[2]
+        else:
+            section, value = kind, match[1]
+        registered = kind in ("asset", "relation", "task")
+        if registered:
+            from arena_composer import catalog
+
+            names = {
+                "asset": lambda: [asset.registry_name for asset in catalog.catalog()],
+                "relation": lambda: [relation.name for relation in catalog.relations()],
+                "task": lambda: [task.name for task in catalog.tasks()],
+            }[kind]()
+        else:
+            ids, allowed = _id_pools(spec)
+            names = allowed.get(section, (ids, ""))[0]
+        # The best and any nearly as good: a shared `_ycb_robolab` makes a
+        # distant name score well enough to bury the one meant.
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, value, name).ratio(), name) for name in names if isinstance(name, str)),
+            reverse=True,
+        )
+        close = [name for ratio, name in scored[:3] if ratio >= max(0.6, scored[0][0] - 0.1)]
+    except Exception:
+        # A hint is a nicety; the line it would have gone on is the answer.
+        return ""
+    if close:
+        quoted = [repr(name) for name in close]
+        either = quoted[0] if len(quoted) == 1 else f"{', '.join(quoted[:-1])} or {quoted[-1]}"
+        return f"did you mean {either}?"
+    return _IMPORT_HINT if registered else ""
 
 
 def _build_problems(spec: Any) -> list[str]:
@@ -334,6 +473,10 @@ def _message(entry: dict[str, Any]) -> str:
     # Arena's validators are bare `assert`s, which pydantic reports under this
     # prefix; the sentence after it is the one the author wrote.
     message = entry["msg"].removeprefix("Assertion failed, ")
+    if entry.get("type") == "string_type" and isinstance(entry.get("input"), bool):
+        message += (
+            "; Arena reads YAML 1.1, where a bare on, off, yes or no is a boolean, so quote it"
+        )
     location = ".".join(str(part) for part in entry["loc"])
     return f"{location}: {message}" if location else message
 
@@ -588,6 +731,19 @@ def _dangling(spec: Any) -> list[tuple[tuple[str, str], str]]:
     dangling id and stops, so fixing one surfaces the next as if the fix had
     introduced it.
     """
+    ids, allowed = _id_pools(spec)
+    found = []
+    for container, key, where in _id_slots(spec):
+        declared, expected = allowed.get(where.split(".")[0], (ids, "an id this spec declares"))
+        if (value := container[key]) not in declared:
+            found.append(((_normalised(where), value), f"{where}: {value!r} is not {expected}"))
+    return found
+
+
+def _id_pools(spec: Any) -> tuple[set[str], dict[str, tuple[set[str], str]]]:
+    """Every id `spec` declares, and the ones the slots under a section are
+    narrowed to, with how to say so: a reference's parent is the background
+    or an object, an override's target one of those or the embodiment."""
     singles = {
         role: spec[role].get("id")
         for role in ("embodiment", "background")
@@ -597,17 +753,11 @@ def _dangling(spec: Any) -> list[tuple[tuple[str, str], str]]:
         section: {entry["id"] for entry in _entries(spec, section) if isinstance(entry.get("id"), str)}
         for section in _ID_SECTIONS
     }
-    everything = set(singles.values()).union(*ids.values()), "an id this spec declares"
     allowed = {
         "object_references": ({singles.get("background")} | ids["objects"], "the background or an object"),
         "cli_override_specs": (set(singles.values()) | ids["objects"], "the embodiment, the background or an object"),
     }
-    found = []
-    for container, key, where in _id_slots(spec):
-        declared, expected = allowed.get(where.split(".")[0], everything)
-        if (value := container[key]) not in declared:
-            found.append(((_normalised(where), value), f"{where}: {value!r} is not {expected}"))
-    return found
+    return set(singles.values()).union(*ids.values()), allowed
 
 
 #: What Arena's cross-reference asserts say — see `ArenaEnvGraphSpec.validate`.
