@@ -861,6 +861,36 @@ def test_an_object_reference_is_checked_as_arena_builds_it(spec: Path):
     ]
 
 
+def test_a_reference_is_checked_against_the_class_its_affordance_makes_it(spec: Path):
+    """A turnable reference short of its levels, or any reference given what
+    Arena passes itself, is a `TypeError` once the sim has started."""
+    scene_of(spec).write_text(
+        SCENE + "object_references:\n"
+        f"- id: knob\n  parent_id: {TABLE}\n  prim_path: /knob\n  object_type: articulation\n"
+        "  params: {turnable_joint_name: knob_joint}\n"
+        f"- id: top\n  parent_id: {TABLE}\n  prim_path: /top\n  object_type: rigid\n"
+        "  params: {object_type: rigid}\n"
+    )
+    assert spec_edit.check(spec).errors == [
+        "../scenes/scene.yaml: object_references.0.params: a reference with turnable_joint_name needs"
+        " min_level_angle_deg, max_level_angle_deg, num_levels",
+        "../scenes/scene.yaml: object_references.1.params.object_type:"
+        " Arena passes a reference its 'object_type' itself; remove it",
+    ]
+
+
+def test_a_key_neither_file_has_goes_with_its_kin(spec: Path):
+    """A missing `task` is the task file's to fix, not the scene's because the
+    scene holds the lists; and a first `cli_override_specs` lands beside the
+    task, where the template keeps it."""
+    spec.write_text(TASK.split("task:")[0])
+    assert spec_edit.check(spec).errors[0].startswith("task.yaml: task:")
+
+    spec.write_text(TASK)
+    result = spec_edit.apply(spec, "insert", ["cli_override_specs"], {"arg": "background", "target_node_id": TABLE})
+    assert result.ok and result.wrote == [str(spec)], result
+
+
 def test_an_embodiment_param_it_does_not_take_is_named(spec: Path):
     errors = broken(spec, "registry_name: droid_abs_joint_pos\n  params: {}",
                     "registry_name: droid_abs_joint_pos\n  params: {stand_heigth_m: 0.8}")

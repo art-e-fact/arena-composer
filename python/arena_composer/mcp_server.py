@@ -316,7 +316,9 @@ async def describe_scene(
     `distinct_layouts`, since samples can converge on the same layout.
 
     A light or a ground plane has nothing to place: it stays where it is
-    configured, unsolved, with an empty box.
+    configured, unsolved, with an empty box. A scene where nothing has a
+    relation reports every sample passed and every check in `not_run`: there
+    was nothing to check.
 
     Takes seconds, and longer the first time an asset is downloaded; progress
     is reported every ten seconds meanwhile. Eight samples cost about what
@@ -560,8 +562,10 @@ def check_spec(spec: str) -> dict[str, Any]:
     loading: YAML that does not parse, a `registry_name` the registry lacks, a
     relation or task param naming an id the spec has not got, a bare `on` read
     as the boolean true. And what Arena only finds once it builds the scene,
-    after the sim has started: a param an asset, relation or subtask lacks or
-    does not take, an id in a list param the spec has not got, an atomic
+    after the sim has started: a param an asset, relation, subtask or object
+    reference lacks, or one a relation, subtask or embodiment does not take —
+    most objects and backgrounds take any, so a misspelt one there is the
+    build's to find — an id in a list param the spec has not got, an atomic
     task of a kind that builds only among other subtasks, an object reference
     with no `prim_path`, a misspelled field under `env_cfg_override.sim`.
 

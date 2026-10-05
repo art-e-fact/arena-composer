@@ -46,6 +46,10 @@ from ruamel.yaml.representer import RoundTripRepresenter
 #: Key through which a task spec includes its scene.
 INCLUDE = "external_yaml"
 
+#: The top-level keys that make up the scene; every other key is the task's or
+#: the run's. See :meth:`SpecFiles.owner`.
+_SCENE_KEYS = frozenset({"embodiment", "background", "objects", "object_sets", "object_references", "relations"})
+
 #: The placement seed every command and tool solves with unless told otherwise.
 DEFAULT_SEED = 42
 
@@ -201,14 +205,19 @@ class SpecFiles:
         """The file that holds `key`, or the one an edit should add it to.
 
         The include is a disjoint union — Arena refuses a key present in both —
-        so at most one file can own it. A key nobody has goes next to
-        ``objects``, which is where a scene's other lists already are.
+        so at most one file can own it. A key nobody has goes with its kin:
+        the scene's keys together, the task's with the run's settings — so a
+        missing ``task`` is the task file's to fix, and a first
+        ``cli_override_specs`` lands beside the task, where the template keeps
+        it. Arena's own gear specs put the scene in the entry file and the
+        include holds `env_cfg_override`, and this follows that layout too.
         """
         for path, document in self.documents.items():
             if key in document:
                 return path
-        if self.include_path and "objects" in self.documents[self.include_path]:
-            return self.include_path
+        for path, document in self.documents.items():
+            if any((other in _SCENE_KEYS) == (key in _SCENE_KEYS) for other in document if other != INCLUDE):
+                return path
         return self.path
 
     def section(self, key: str) -> list[Any]:
@@ -481,7 +490,10 @@ def _asset_problems(spec: Any) -> list[str]:
 
 
 def _reference_problems(spec: Any) -> list[str]:
-    """What Arena asserts as it builds each object reference."""
+    """What Arena asserts as it builds each object reference, and its params
+    against the class it builds: a plain reference, or the affordance its one
+    joint param makes it."""
+    from isaaclab_arena.assets.object_reference import ObjectReference
     from isaaclab_arena.assets.object_type import ObjectType
 
     # Private API: the params that make a reference an affordance, each its own class.
@@ -490,13 +502,20 @@ def _reference_problems(spec: Any) -> list[str]:
     errors = []
     for index, reference in _indexed(spec, "object_references"):
         where, params = f"object_references.{index}", reference.get("params")
+        params = params if isinstance(params, dict) else {}
         if not reference.get("prim_path"):
             errors.append(f"{where}.prim_path: a reference is built from the prim it names, and names none")
-        joints = [name for name in _AFFORDANCE_REFERENCE_CLASSES if isinstance(params, dict) and name in params]
+        joints = [name for name in _AFFORDANCE_REFERENCE_CLASSES if name in params]
         if len(joints) > 1:
             errors.append(f"{where}.params: a reference exposes one affordance, not {' and '.join(joints)}")
-        elif joints and reference.get("object_type") != ObjectType.ARTICULATION.value:
+            continue
+        if joints and reference.get("object_type") != ObjectType.ARTICULATION.value:
             errors.append(f"{where}.object_type: {joints[0]} makes it an articulation; set it to articulation")
+        # Arena passes a reference its id as `name`, its `prim_path`, its parent
+        # and its `object_type` — the affordance classes fix the last themselves.
+        cls = _AFFORDANCE_REFERENCE_CLASSES[joints[0]] if joints else ObjectReference
+        label = f"a reference with {joints[0]}" if joints else "a reference"
+        errors += _binding(f"{where}.params", label, cls, params, ("name", "prim_path", "parent_asset", "object_type"))
     return errors
 
 

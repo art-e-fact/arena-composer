@@ -42,8 +42,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   not run — the ones only the simulator decides, physics settling and IK reach, and the ones for
   relation kinds the spec does not use — so a dry pass reads as necessary, not sufficient.
 - `samples` on `describe_scene`, and `--samples N` on `arena-resolve-layout`, solve that many
-  layouts at once, as Arena draws one per reset, and report how many passed, which failed, how
-  often each check failed and how many of the layouts differ. The first is still the one described.
+  layouts at once, as Arena draws one per reset, and report how many passed, which failed, how often
+  each check failed and how many of the layouts differ. The first is still the one described. A
+  scene where nothing has a relation reports every sample passed and every check in `not_run`.
 - `get_prim_tree`, an MCP tool listing the prims in the background's or an object's USD that an
   object reference can name — a tabletop, a drawer — each with the `prim_path` to write, its
   physics type and, for a jointed body, its joint names. It filters by text and by type, since a
@@ -58,16 +59,19 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Changed
 
-- A refused edit and `check_spec` name the file to fix when the spec includes a scene, and an
-  asset name, relation or task kind, or id that nothing declares comes with the closest that do.
-  A name nothing registered is close to says how to import the module that registers it, and an
-  unquoted `on` says to quote it.
+- A refused edit and `check_spec` name the file to fix when the spec includes a scene — for a key
+  neither file has, the one holding its kin, so a missing `task` is the task file's — and an asset
+  name, relation or task kind, or id that nothing declares comes with the closest that do. A name
+  nothing registered is close to says how to import the module that registers it, and an unquoted
+  `on` says to quote it.
 - Edits and `check_spec` refuse what Arena only finds when it builds the scene, after the sim has
-  started: a param a subtask, relation, embodiment, background or object does not take, with the
-  one probably meant, or a required one it lacks; an id in a list param, `pick_up_object_list`
-  among them, that the spec does not declare; and an object reference with no `prim_path`, or an
-  affordance on one that is not an articulation; and an `env_cfg_override` Arena would refuse, a
-  field under `sim` its physics backend lacks among it. A spec that already has one is still edited.
+  started: a required param a subtask, relation, embodiment, background, object or object reference
+  lacks — `num_levels` on a turnable reference — and one a subtask, relation or embodiment does not
+  take, with the one probably meant; most objects and backgrounds take any param, so a misspelt one
+  there still reaches the build. An id in a list param, `pick_up_object_list` among them, that the
+  spec does not declare; an object reference with no `prim_path`, or an affordance on one that is
+  not an articulation; and an `env_cfg_override` Arena would refuse, a field under `sim` its physics
+  backend lacks among it. A spec that already has one is still edited.
 - So is an atomic task whose kind takes no description, which Arena passes every atomic task:
   `NoTask`, `LiftObjectTask`, `SortMultiObjectTask`, `GoalPoseTask` and two more build only as one
   of several subtasks, and stopped the sim with a `TypeError` as it started.
