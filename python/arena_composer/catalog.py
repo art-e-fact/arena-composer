@@ -76,6 +76,12 @@ def load_extensions(modules: tuple[str, ...] = ()) -> None:
                 importlib.import_module(module)
             except ImportError as error:
                 raise ImportError(f"{source} names {module}, which does not import: {error}") from error
+            except Exception as error:
+                # A project's own module: a syntax error, or one it raises as
+                # it registers, is the same refusal, and says which.
+                raise ImportError(
+                    f"{source} names {module}, which does not import: {type(error).__name__}: {error}"
+                ) from error
 
 
 @dataclass(frozen=True)

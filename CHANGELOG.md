@@ -28,11 +28,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - Every command registers the Isaac Cap assets and tasks Arena's own CLI registers, so its gear
   insertion and syringe sort specs open and describe, and `search_assets` and `list_kinds` find
   them. The `gear_insertion_v2` specs still name assets nothing registers.
-- `--import MODULE` on `arena-view` and `arena-resolve-layout`, and `ARENA_COMPOSER_IMPORTS` for
-  all three commands, import a project's own modules first, for the assets and kinds they register.
-  A module that does not import is named, with where it was named. `arena-composer init --import
-  MODULE` writes the variable into `bin/arena-mcp`, since an MCP client starts it with almost no
-  environment.
+- `--import MODULE` on `arena-view` and `arena-resolve-layout`, and `ARENA_COMPOSER_IMPORTS` for all
+  three commands, import a project's own modules first, for the assets and kinds they register. A
+  module that does not import, for whatever reason, is named, with where it was named.
+  `arena-composer init --import MODULE` writes the variable into `bin/arena-mcp`, since an MCP
+  client starts it with almost no environment.
 - `check_spec`, an MCP tool that validates a spec as Arena will read it — in milliseconds, with no
   solve and no asset read — and reports what the edit tools would refuse, for after a hand edit.
 - `list_kinds`, an MCP tool listing the relation and task kinds a spec can name: the params each
@@ -161,6 +161,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   the message of any exception but its own `ToolError`. `describe_scene` answers a spec that does
   not build as a refused edit does, `{"ok": false, "errors": [...]}`; `render_views` fails with the
   same lines.
+- Two MCP tool calls at once no longer write the solver's output into the protocol stream, or
+  refuse a valid spec with `Unknown task kind` on a server's first calls: the server runs one tool
+  at a time.
 
 ## [0.2.0] - 2026-09-28
 

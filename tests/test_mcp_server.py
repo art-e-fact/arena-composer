@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
+import time
 import warnings
 from pathlib import Path
 
@@ -38,7 +40,33 @@ def test_arena_chatter_never_reaches_stdout(capsys, monkeypatch):
 
     captured = capsys.readouterr()
     assert captured.out == "", f"reached the protocol stream: {captured.out!r}"
+
     assert "[placement]" in captured.err, "the progress line was dropped rather than diverted"
+
+
+def test_a_call_finishing_leaves_one_still_running_quiet():
+    """Each call runs on a worker thread. One that ends while another is still
+    solving must not hand the other's prints the real stdout."""
+    inside, finished, quiet = threading.Event(), threading.Event(), []
+
+    def first():
+        with mcp_server._quiet():
+            inside.set()
+            time.sleep(0.2)
+        finished.set()
+
+    def second():
+        with mcp_server._quiet():
+            finished.wait(5)
+            quiet.append(sys.stdout is sys.stderr)
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    threads[0].start()
+    inside.wait(5)
+    threads[1].start()
+    for thread in threads:
+        thread.join(10)
+    assert quiet == [True]
 
 
 def test_the_guard_puts_stdout_back(capsys):

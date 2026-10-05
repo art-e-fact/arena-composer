@@ -122,3 +122,10 @@ def test_a_module_that_does_not_import_is_named_with_where_it_was_named(fresh_ex
     assert str(refused.value) == (
         "ARENA_COMPOSER_IMPORTS names no_such_extension, which does not import: No module named 'no_such_extension'"
     )
+
+
+def test_a_module_that_raises_as_it_imports_is_named_too(fresh_extensions, tmp_path: Path, monkeypatch):
+    (tmp_path / "broken_extension.py").write_text("register(\n")
+    monkeypatch.syspath_prepend(tmp_path)
+    with pytest.raises(ImportError, match="^--import names broken_extension, which does not import: SyntaxError"):
+        catalog.load_extensions(("broken_extension",))
