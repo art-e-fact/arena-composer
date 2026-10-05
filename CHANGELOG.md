@@ -70,6 +70,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - So is an atomic task whose kind takes no description, which Arena passes every atomic task:
   `NoTask`, `LiftObjectTask`, `SortMultiObjectTask`, `GoalPoseTask` and two more build only as one
   of several subtasks, and stopped the sim with a `TypeError` as it started.
+- So is a param Arena passes itself — a relation's reference, as `parent` for `on`, or an atomic
+  task's `task_description` — which the build would get twice.
 - An edit replaces each file it changes whole, where it wrote into it, so `arena-view`, Arena or
   an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download
@@ -113,7 +115,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 ### Fixed
 
 - An edit on a spec that is already broken is refused only for the problems it introduces, and
-  reports what was wrong before as `remaining_errors` — on the refusal, and on the edit that landed.
+  reports what was wrong before as `remaining_errors` — on the refusal, and on the edit that landed;
+  `arena-view` prints it on stderr for an edit from the panel.
   Adding the first of two objects a task names no longer deadlocks on the second, from the panel or
   from `add_object`.
 - Renaming an id carries it into every slot Arena checks — an object reference's `parent_id`, a CLI
@@ -164,6 +167,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - Two MCP tool calls at once no longer write the solver's output into the protocol stream, or
   refuse a valid spec with `Unknown task kind` on a server's first calls: the server runs one tool
   at a time.
+- `add_object` and `remove_object` answer a spec a hand edit left misshapen — `embodiment: null`,
+  a `relations` that is not a list — with a refusal, where the agent got a bare
+  `Error executing tool`.
 
 ## [0.2.0] - 2026-09-28
 

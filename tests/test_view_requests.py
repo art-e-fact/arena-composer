@@ -82,7 +82,7 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
         return msgpack.packb({"assets": [], "spec": {"env_name": "solved"}}, use_bin_type=True)
 
     monkeypatch.setattr(view, "_resolve", resolve)
-    monkeypatch.setattr(view.spec_edit, "apply", lambda *_: SimpleNamespace(ok=True, errors=[], changed=["set"]))
+    monkeypatch.setattr(view.spec_edit, "apply", lambda *_: view.spec_edit.Result(ok=True, errors=[], changed=["set"]))
     monkeypatch.setattr(
         view,
         "encode_spec",
@@ -152,7 +152,7 @@ def test_a_refused_edit_is_answered_without_a_solve(monkeypatch, tmp_path: Path)
     """The spec did not change, so there is nothing to re-resolve — the answer
     is that same spec carrying the reason, and no solve is coming."""
     monkeypatch.setattr(
-        view.spec_edit, "apply", lambda *_: SimpleNamespace(ok=False, errors=["objects.0: named by a task"], changed=[])
+        view.spec_edit, "apply", lambda *_: view.spec_edit.Result(ok=False, errors=["objects.0: named by a task"], changed=[])
     )
     monkeypatch.setattr(
         view,
@@ -230,12 +230,12 @@ def test_an_edit_from_the_panel_is_not_solved_again_as_a_change_on_disk(monkeypa
     spec = tmp_path / "task.yaml"
     solves: list[str] = []
 
-    def apply(path: Path, op: str, steps: list, value: str) -> SimpleNamespace:
+    def apply(path: Path, op: str, steps: list, value: str) -> view.spec_edit.Result:
         _write(path, f"env_name: {value}\n", 2)
         # The write's tail, before the panel stamps it: the watcher polls in
         # here, and has to find it stamped once it has settled.
         time.sleep(0.03)
-        return SimpleNamespace(ok=True, errors=[], changed=["set"])
+        return view.spec_edit.Result(ok=True, errors=[], changed=["set"])
 
     def resolve(path: Path, seed: int) -> bytes:
         solves.append(path.read_text())
@@ -273,9 +273,9 @@ def test_a_change_on_disk_and_an_edit_from_the_panel_are_solved_in_turn(monkeypa
     solving = threading.Event()
     solves: list[str] = []
 
-    def apply(path: Path, op: str, steps: list, value: str) -> SimpleNamespace:
+    def apply(path: Path, op: str, steps: list, value: str) -> view.spec_edit.Result:
         _write(path, f"env_name: {value}\n", 3)
-        return SimpleNamespace(ok=True, errors=[], changed=["set"])
+        return view.spec_edit.Result(ok=True, errors=[], changed=["set"])
 
     def resolve(path: Path, seed: int) -> bytes:
         solves.append(path.read_text())

@@ -212,10 +212,14 @@ class SpecFiles:
         return self.path
 
     def section(self, key: str) -> list[Any]:
-        """The list stored under `key`, created in its owning file if absent."""
+        """The list stored under `key`, created in its owning file if absent.
+        A `TypeError` when a hand edit left something else there, which the
+        edits answer as a refusal."""
         document = self.documents[self.owner(key)]
         if not document.get(key):
             document[key] = []
+        if not isinstance(document[key], list):
+            raise TypeError(f"{key} is not a list, so nothing can be added to it")
         return document[key]
 
     def merged(self, documents: dict[Path, Any] | None = None) -> dict[str, Any]:
@@ -340,10 +344,10 @@ class SpecFiles:
     def asset_ids(self) -> list[str]:
         """Every id an edit can refer to, in the order the spec declares them."""
         spec = self.merged()
-        ids = [spec.get("embodiment", {}).get("id"), spec.get("background", {}).get("id")]
+        entries = [spec.get("embodiment"), spec.get("background")]
         for key in ("objects", "object_sets", "object_references"):
-            ids += [entry.get("id") for entry in (spec.get(key) or [])]
-        return [asset_id for asset_id in ids if asset_id]
+            entries += _entries(spec, key)
+        return [entry["id"] for entry in entries if isinstance(entry, dict) and entry.get("id")]
 
 
 def _replace(path: Path, text: str) -> None:
@@ -459,7 +463,8 @@ def _asset_problems(spec: Any) -> list[str]:
     from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
 
     registry = AssetRegistry()
-    # Arena fills an object's `instance_name` from its id, and nobody else's.
+    # Arena fills an object's `instance_name` from its id, and nobody else's —
+    # by `setdefault`, so one the params give is no clash.
     slots = [(role, spec.get(role) if isinstance(spec, dict) else None, ()) for role in ("embodiment", "background")]
     slots += [(f"objects.{index}", entry, ("instance_name",)) for index, entry in _indexed(spec, "objects")]
     errors = []
@@ -468,7 +473,8 @@ def _asset_problems(spec: Any) -> list[str]:
         if not isinstance(name, str) or not registry.is_registered(name):
             continue
         cls, params = registry.get_asset_by_name(name), entry.get("params")
-        errors += _binding(f"{where}.params", name, cls, params if isinstance(params, dict) else {}, given)
+        params = params if isinstance(params, dict) else {}
+        errors += _binding(f"{where}.params", name, cls, params, tuple(arg for arg in given if arg not in params))
         if where == "embodiment" and not issubclass(cls, EmbodimentBase):
             errors.append(f"embodiment.registry_name: {name} is not an embodiment")
     return errors
@@ -612,31 +618,45 @@ def _imported(target: Any) -> bool:
 
 def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: tuple[str, ...]) -> list[str]:
     """What passing `params` to `cls`, with Arena's `given`, would refuse: a
-    required parameter nobody supplies, and a key the constructor does not take."""
+    required parameter nobody supplies, a key the constructor does not take,
+    and a key Arena passes itself."""
     from arena_composer import catalog
 
     errors = []
     if missing := catalog.missing_params(cls, params, given):
         errors.append(f"{where}: {label} needs {', '.join(missing)}")
     taken = [name for name in inspect.signature(cls.__init__).parameters if name not in ("self", *given)]
-    for name in catalog.unexpected_params(cls, params):
+    unexpected = catalog.unexpected_params(cls, params)
+    for name in unexpected:
         close = difflib.get_close_matches(str(name), taken, n=1)
         errors.append(f"{where}.{name}: {label} takes no {name!r}" + (f"; did you mean {close[0]!r}?" if close else ""))
+    # Arena passes these whatever the params hold, so the build gets one twice.
+    for name in given:
+        if name in params and name not in unexpected:
+            errors.append(f"{where}.{name}: Arena passes {label} its {name!r} itself; remove it")
     return errors
 
 
 def _node_lists(kind: Any) -> set[str] | None:
     """The params of task `kind` that list node ids, or None when it is not
-    registered, and any list of strings may."""
-    from isaaclab_arena.assets.registries import TaskRegistry
-    from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
-        find_node_ref_params_in_signature,
-    )
+    registered, and any list of strings may.
 
-    registry = TaskRegistry()
-    if not isinstance(kind, str) or not registry.is_registered(kind):
+    None too when Arena's helper fails: renames and the before/after compare
+    reach it outside `_build_problems`, and fail open as its checks do.
+    """
+    try:
+        from isaaclab_arena.assets.registries import TaskRegistry
+        from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
+            find_node_ref_params_in_signature,
+        )
+
+        registry = TaskRegistry()
+        if not isinstance(kind, str) or not registry.is_registered(kind):
+            return None
+        found = find_node_ref_params_in_signature(registry.get_task_by_name(kind))
+    except Exception as error:
+        print(f"arena-composer: _node_lists skipped: {type(error).__name__}: {error}", file=sys.stderr)
         return None
-    found = find_node_ref_params_in_signature(registry.get_task_by_name(kind))
     return {name for name, listed in found.items() if listed}
 
 
@@ -695,11 +715,14 @@ def add_object(
     if on is not None and on not in known:
         return Result.failed(f"no asset {on!r} to put {node_id!r} on; this spec has {known}")
 
-    files.section("objects").append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
-    changed = [f"added object {node_id!r} ({registry_name})"]
-    if on is not None:
-        files.section("relations").append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
-        changed.append(f"added relation {node_id!r} on {on!r}")
+    try:
+        files.section("objects").append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
+        changed = [f"added object {node_id!r} ({registry_name})"]
+        if on is not None:
+            files.section("relations").append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
+            changed.append(f"added relation {node_id!r} on {on!r}")
+    except TypeError as error:
+        return Result.failed(str(error))
     return files.write(changed)
 
 
@@ -876,7 +899,9 @@ def _id_slots(spec: Any) -> Iterator[tuple[Any, Any, str]]:
     """
     for index, relation in _indexed(spec, "relations"):
         for slot in ("subject", "reference"):
-            if isinstance(relation.get(slot), str):
+            value = relation.get(slot)
+            # Arena reads a blank reference as none, as a unary relation has.
+            if isinstance(value, str) and (slot == "subject" or value.strip()):
                 yield relation, slot, f"relations.{index}.{slot}"
     for index, reference in _indexed(spec, "object_references"):
         if isinstance(reference.get("parent_id"), str):

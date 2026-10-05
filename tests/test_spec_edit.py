@@ -564,6 +564,43 @@ def test_a_cascade_tolerates_sections_a_hand_edit_left_null(spec: Path):
     assert spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain").ok is not None
 
 
+@pytest.mark.parametrize(
+    "scene",
+    [
+        SCENE.replace("embodiment:\n  id: droid\n  registry_name: droid_abs_joint_pos\n  params: {}\n", "embodiment: null\n"),
+        SCENE.split("relations:")[0] + "relations: 'on'\n",
+    ],
+)
+def test_an_add_or_remove_on_a_misshapen_spec_is_answered(spec: Path, scene: str):
+    """The MCP edit tools see what a hand edit left. A crash reaches the agent
+    as a bare `Error executing tool`; a result says what is wrong."""
+    assert scene != SCENE
+    scene_of(spec).write_text(scene)
+    assert isinstance(spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on="banana"), spec_edit.Result)
+    assert isinstance(spec_edit.remove_object(spec, "plantain"), spec_edit.Result)
+
+
+def test_a_blank_reference_names_nothing_as_arena_reads_it(spec: Path):
+    """Arena reads `reference: ''` as no reference, so it is not a dangling id
+    to report, or to refuse an edit for."""
+    broken(spec, "  reference: null", "  reference: ''")
+    broken(spec, "pick_up_object: banana", "pick_up_object: plantain", file=spec)
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert result.ok and [line for line in result.remaining_errors if "''" in line] == [], result
+
+
+def test_a_rename_lands_when_arenas_list_helper_fails(spec: Path, monkeypatch):
+    """A rename reaches Arena's helper outside the checks' fail-open wrapper,
+    so it has to fail open itself."""
+    import isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils as conversion
+
+    def moved(cls):
+        raise RuntimeError("moved")
+
+    monkeypatch.setattr(conversion, "find_node_ref_params_in_signature", moved)
+    assert spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain").ok
+
+
 def test_a_param_called_id_does_not_trigger_a_rename(spec: Path):
     """Only the embodiment's and background's own `id` renames — a param that
     happens to be called `id` a step further down must not. The background's,
@@ -772,6 +809,25 @@ def test_a_relation_param_is_checked_against_its_kind(spec: Path):
                     "  subject: banana\n  reference: maple_table_robolab\n  params: {clearence_m: 0.01}")
     assert errors == [
         "../scenes/scene.yaml: relations.1.params.clearence_m: on takes no 'clearence_m'; did you mean 'clearance_m'?"
+    ]
+
+
+def test_a_param_arena_passes_itself_is_refused(spec: Path):
+    """Arena passes a relation its reference and an atomic task its
+    description whatever the params hold, so one there too is a TypeError at
+    build. An object's `instance_name` it only defaults, so that one is fine."""
+    broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}",
+           "registry_name: bowl_ycb_robolab\n  params: {instance_name: my_bowl}")
+    broken(spec, "  subject: banana\n  reference: maple_table_robolab\n  params: {}",
+           "  subject: banana\n  reference: maple_table_robolab\n  params: {parent: bowl}")
+    errors = broken(spec, "      background_scene:", "      task_description: grab it\n      background_scene:", file=spec)
+    assert errors == [
+        # Arena takes any string task param for an id; the line after says why it is not one.
+        "task.yaml: Task 'PickAndPlaceTask' param 'task_description' references unknown node 'grab it'."
+        " Add it to 'objects' or 'object_references'.",
+        "../scenes/scene.yaml: relations.1.params.parent: Arena passes on its 'parent' itself; remove it",
+        "task.yaml: task.subtasks.0.params.task_description: Arena passes PickAndPlaceTask its 'task_description'"
+        " itself; remove it",
     ]
 
 
