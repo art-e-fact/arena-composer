@@ -20,7 +20,8 @@ Rules for changing it:
 - **No session.** Every tool takes a spec path and leaves its result on disk, so an `arena-view`
   window on the same spec redraws itself as the agent works.
 - **Failures are return values**, `{"ok": false, "errors": [...]}`, not exceptions. A spec an agent
-  got wrong is the normal case, and the errors are its repair loop.
+  got wrong is the normal case, and the errors are its repair loop. How they are found and worded
+  is [errors.md](errors.md).
 - **Edits go through [spec_edit.py](../python/arena_composer/spec_edit.py).** It writes with
   `ruamel.yaml`, so comments and key order survive, and validates by reading the text back with
   PyYAML — the reader Arena uses. PyYAML is YAML 1.1, where a bare `on` is `true`, so the `on`

@@ -73,6 +73,8 @@ skill for changing what they show.
 - [docs/editor.md](docs/editor.md) — the panel; read before touching the camera gate, framing, backdrop, gizmos or drag-and-drop
 - [docs/assets.md](docs/assets.md) — SimReady props, the index, pictures, reindexing
 - [docs/mcp.md](docs/mcp.md) — rules for the MCP server, and `arena-composer init`
+- [docs/errors.md](docs/errors.md) — how a wrong spec is found, how an edit on one is judged, where
+  the lines come out; read before adding a check
 - [docs/development.md](docs/development.md) — setup, iterating on a packed payload, tests, the wheel, releasing
 - [python/arena_composer/usd/AGENTS.md](python/arena_composer/usd/AGENTS.md) — how assets are read, and what does not render yet
 
