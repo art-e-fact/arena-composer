@@ -70,6 +70,10 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         if asset.get("role") in _UNDRAWN_ROLES:
             return None
         path = asset.get("local_usd_path")
+        if not path and asset["bbox_min"] == asset["bbox_max"]:
+            # A light or a ground plane: nothing to draw, and a degenerate box
+            # would still pull the camera's framing to where it sits.
+            return None
         if not path:
             # The box it was placed by. It already carries the asset's scale, and
             # the viewer applies that again.
@@ -83,6 +87,7 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         return by_usd[path]
 
     spec, owners = dump.get("spec") or {}, _owners(dump.get("spec_path"))
+    lighting = dump.get("lighting", {})
     if dump.get("spec_path"):
         # The first layout only: a later one's spec was read when its solve
         # began, and the panel may be edits past it by the time it lands.
@@ -104,7 +109,11 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             for asset in dump["assets"]
         ],
         "geometries": geometries,
-        "lighting": {"auto_injected_dome_light": bool(dump.get("lighting", {}).get("auto_injected_dome_light"))},
+        # The viewer's one stand-in light also stands in for a light the spec
+        # lists, which is not drawn either.
+        "lighting": {
+            "auto_injected_dome_light": bool(lighting.get("auto_injected_dome_light") or lighting.get("light_assets"))
+        },
         "viewer": _viewer(dump.get("viewer")),
         "spec": spec,
         "owners": owners,
@@ -146,18 +155,19 @@ def _vocabulary() -> dict[str, Any]:
     """
     from arena_composer import catalog
 
-    return {"assets": [_asset(asset) for asset in catalog.catalog()], **_kinds()}
+    return {"assets": [_asset(asset) for asset in catalog.catalog()], **kinds()}
 
 
 @cache
-def _kinds() -> dict[str, Any]:
+def kinds() -> dict[str, Any]:
     """The relation and task kinds, each with the form that edits it, and the
     task composition names Arena's ``CompositeTaskSpec`` accepts. Cached: a
     form is inferred by introspecting a constructor, and no registry changes
     while the process runs.
 
     The assets are not cached with them, because an asset's picture arrives
-    after the asset does — see :func:`_thumbnail`.
+    after the asset does — see :func:`_thumbnail`. The MCP server's
+    `list_kinds` returns this as it is.
     """
     from isaaclab_arena.environment_spec.arena_env_graph_types import TaskCompositionType
 

@@ -7,20 +7,27 @@ its own path and execs the server installed in the venv that ran `init`.
 
 `init` writes only the files that are missing, so a project's own edits survive
 a re-run. Delete a file to have it written again.
+
+`--import MODULE` bakes `ARENA_COMPOSER_IMPORTS` into the launcher: the one
+place a client's stripped environment can get it from.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
+
+from arena_composer.catalog import IMPORTS
 
 LAUNCHER_PATH = "bin/arena-mcp"
 
 #: `@SERVER@` becomes the venv's `arena-mcp`, relative to the project when the
 #: venv is inside it so the launcher can be checked in, else absolute.
+#: `@IMPORTS@` becomes `export_line()` under a comment, or nothing.
 LAUNCHER = """\
 #!/usr/bin/env bash
 # Start the arena_composer MCP server. Written by `arena-composer init`.
@@ -31,7 +38,7 @@ set -euo pipefail
 
 PROJECT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER=@SERVER@
-
+@IMPORTS@
 if [[ ! -x "${SERVER}" ]]; then
   # Only stderr: on stdio, stdout is the protocol, and a client reads a
   # non-JSON line there as a broken server rather than a missing install.
@@ -60,7 +67,12 @@ CONFIGS = {
 }
 
 
-def init(project: Path, venv: Path) -> list[tuple[Path, bool]]:
+def export_line(imports: tuple[str, ...]) -> str:
+    """The launcher's line that has the server import `imports` first."""
+    return f"export {IMPORTS}={shlex.quote(os.pathsep.join(imports))}"
+
+
+def init(project: Path, venv: Path, imports: tuple[str, ...] = ()) -> list[tuple[Path, bool]]:
     """Write the launcher and the client configs into `project`, keeping any
     that already exist. Returns each file with whether it was written."""
     server = venv / "bin" / "arena-mcp"
@@ -72,7 +84,12 @@ def init(project: Path, venv: Path) -> list[tuple[Path, bool]]:
     else:
         server_expr = shlex.quote(str(server))
 
-    files = {LAUNCHER_PATH: LAUNCHER.replace("@SERVER@", server_expr)}
+    exported = (
+        f"\n# Imported before any tool runs, for what they register with Arena.\n{export_line(imports)}\n"
+        if imports
+        else ""
+    )
+    files = {LAUNCHER_PATH: LAUNCHER.replace("@SERVER@", server_expr).replace("@IMPORTS@", exported)}
     files |= {name: json.dumps(config, indent=2) + "\n" for name, config in CONFIGS.items()}
 
     results = []
@@ -98,17 +115,33 @@ def main(argv: list[str] | None = None) -> int:
     init_parser.add_argument(
         "project", nargs="?", default=".", type=Path, help="The project root (default: the working directory)"
     )
+    init_parser.add_argument(
+        "--import",
+        dest="imports",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help="Have the server import MODULE first, for the assets and kinds it registers with Arena; repeatable",
+    )
     args = parser.parse_args(argv)
 
     project, venv = args.project.resolve(), Path(sys.prefix).resolve()
     if not (venv / "bin" / "arena-mcp").exists():
         print(f"arena-composer: {venv} has no arena-mcp; the launcher will not start", file=sys.stderr)
     try:
-        results = init(project, venv)
+        results = init(project, venv, tuple(args.imports))
     except (ValueError, OSError) as error:
         parser.error(str(error))
     for path, written in results:
         print(f"{'wrote' if written else 'kept '} {path.relative_to(project)}")
+    launcher = project / LAUNCHER_PATH
+    line = export_line(tuple(args.imports))
+    if args.imports and line not in launcher.read_text():
+        print(
+            f"arena-composer: kept {LAUNCHER_PATH}, which does not import {', '.join(args.imports)}; "
+            f"delete it and run init again, or add this line to it:\n  {line}",
+            file=sys.stderr,
+        )
     return 0
 
 

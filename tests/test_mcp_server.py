@@ -23,13 +23,13 @@ from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.shared.exceptions import MCPDeprecationWarning
 
-from arena_composer import mcp_server
+from arena_composer import mcp_server, spec_edit
 
 
 def test_arena_chatter_never_reaches_stdout(capsys, monkeypatch):
     """A resolve prints `[placement] Validated ...`; the tool has to swallow it."""
 
-    def noisy(path, seed):
+    def noisy(path, seed, samples):
         print("[placement] Validated 10 candidate layout(s)")
         return {"env_name": "t"}
 
@@ -119,3 +119,101 @@ def test_a_spec_that_does_not_read_is_described_as_a_result_and_refused_as_a_ren
         result = asyncio.run(rendered())
     assert result.is_error and "ParserError" in result.content[0].text and "task.yaml" in result.content[0].text, result
     assert progress == [f"resolving task.yaml (seed {mcp_server.DEFAULT_SEED})"], progress
+
+
+def test_a_long_solve_says_it_is_still_running(tmp_path: Path, monkeypatch):
+    """A first download or a mesh-heavy solve runs for minutes with nothing to
+    show. A heartbeat says it is still going, on one count that only climbs,
+    as the protocol asks of progress."""
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: [\n")
+    asked = []
+
+    def slow(path: Path, seed: int, samples: int) -> dict:
+        import time
+
+        asked.append(samples)
+        time.sleep(0.35)
+        return {"env_name": "e", "spec_path": str(path), "placement": {}, "assets": [], "relations": []}
+
+    monkeypatch.setattr(mcp_server, "HEARTBEAT", 0.1)
+    monkeypatch.setattr(mcp_server, "_resolve", slow)
+    progress: list[tuple[float, str | None]] = []
+
+    async def noted(value: float, _: float | None, message: str | None) -> None:
+        progress.append((value, message))
+
+    async def described():
+        async with Client(mcp_server.mcp) as client:
+            return await client.call_tool(
+                "describe_scene", {"spec": str(spec), "samples": 4}, progress_callback=noted
+            )
+
+    assert not asyncio.run(described()).is_error
+    assert asked == [4]
+    values, messages = zip(*progress)
+    assert list(values) == sorted(set(values)), "progress has to climb"
+    doing = f"resolving task.yaml (seed {mcp_server.DEFAULT_SEED})"
+    assert messages[0] == doing and len(messages) >= 3, messages
+    assert all(message.startswith(f"{doing}: ") and message.endswith(" s") for message in messages[1:]), messages
+
+
+def test_fewer_than_one_sample_is_refused(tmp_path: Path):
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: [\n")
+    assert "samples must be at least 1, got 0" in _refusal("describe_scene", spec=str(spec), samples=0)
+
+
+def test_the_cheap_tools_stay_off_stdout_too(capsys, monkeypatch, tmp_path: Path):
+    """`check_spec` and `list_kinds` import and populate Arena's registries,
+    which print while they do."""
+
+    def noisy_check(path):
+        print("[registry] populated")
+        return spec_edit.Result(ok=True)
+
+    empty = {"relations": [], "tasks": [], "compositions": []}
+
+    def noisy_kinds():
+        print("[registry] populated")
+        return empty
+
+    monkeypatch.setattr(spec_edit, "check", noisy_check)
+    monkeypatch.setattr("arena_composer.payload.kinds", noisy_kinds)
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: {}\n")
+
+    assert json.loads(_call("check_spec", spec=str(spec)).content[0].text)["ok"] is True
+    assert json.loads(_call("list_kinds").content[0].text) == empty
+    captured = capsys.readouterr()
+    assert captured.out == "", f"reached the protocol stream: {captured.out!r}"
+
+
+def test_an_import_that_fails_is_a_refusal_the_agent_reads(monkeypatch):
+    """Loaded on the first tool call, not at startup, so a bad
+    ARENA_COMPOSER_IMPORTS reaches the agent rather than a client's log."""
+
+    def failing(modules=()):
+        raise ImportError("ARENA_COMPOSER_IMPORTS names my_assets, which does not import: No module named 'my_assets'")
+
+    monkeypatch.setattr(mcp_server.catalog, "load_extensions", failing)
+    with pytest.raises(ToolError, match="^ARENA_COMPOSER_IMPORTS names my_assets, which does not import"):
+        mcp_server.list_kinds()
+
+
+def test_check_spec_answers_a_broken_spec_as_a_result(tmp_path: Path):
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: [\n")
+    checked = json.loads(_call("check_spec", spec=str(spec)).content[0].text)
+    assert checked["ok"] is False
+    assert "ParserError" in checked["errors"][0] and "task.yaml" in checked["errors"][0], checked
+
+
+def test_the_tools_that_write_nothing_say_so():
+    """A client may run a read-only tool without asking, so the hint has to
+    sit on exactly the tools that leave the spec alone — not the edits, and
+    not the reindex, which rewrites a shared file."""
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    read_only = {tool.name for tool in tools if tool.annotations and tool.annotations.read_only_hint}
+    assert read_only == {"search_assets", "describe_scene", "render_views", "check_spec", "list_kinds"}
+    assert len(tools) == 9

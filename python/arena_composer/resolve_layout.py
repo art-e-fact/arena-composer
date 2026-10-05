@@ -11,6 +11,8 @@ Two conventions worth matching in a viewer:
   default prim's own ``xformOp:scale`` is unbaked, only the reported ``scale`` applies.
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
+  ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first
+  is the one described.
 """
 
 from __future__ import annotations
@@ -18,13 +20,15 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from isaaclab.sim import CuboidCfg, SphereCfg
+from isaaclab.sim import CuboidCfg, GroundPlaneCfg, LightCfg, SphereCfg
 from isaaclab_arena.assets.background import Background
 from isaaclab_arena.assets.deformable_object import DeformableObject
 from isaaclab_arena.assets.object import Object
@@ -44,52 +48,51 @@ from isaaclab_arena.relations.object_placer_params import ObjectPlacerParams
 from isaaclab_arena.relations.passive_collision_objects import get_passive_collision_objects
 from isaaclab_arena.relations.placement_events import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
+from isaaclab_arena.relations.placement_validation import PlacementCheck
 from isaaclab_arena.relations.relations import get_anchor_objects
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 
-from arena_composer import spec_edit
+from arena_composer import catalog, spec_edit
+from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 from arena_composer.usd_assets import localize, use_local_asset_cache
 
-DEFAULT_SEED = 42
 
-
-class SpecError(Exception):
-    """A spec that validates but names an asset the sim could not use. One
-    line per asset, since a scene wrong in one place is often wrong in two."""
-
-    def __init__(self, errors: list[str]) -> None:
-        super().__init__("\n".join(errors))
-        self.errors = errors
-
-
-def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED) -> dict[str, Any]:
+def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED, samples: int = 1) -> dict[str, Any]:
     """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
 
+    `samples` layouts are solved in one batch, an env each; the first is the
+    one described, and the placement summary counts how many passed.
+
     Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
-    used, or that spawns neither a USD nor a shape to bound it by; anything
-    else Arena raises passes through.
+    used, that spawns neither a USD nor a shape to bound it by, or that is a
+    light or a ground plane a relation names; anything else Arena raises passes
+    through. A light or a ground plane no relation names is left where it is
+    configured, with an empty box, as the sim leaves it out of placement too.
     """
+    if samples < 1:
+        raise ValueError(f"samples must be at least 1, got {samples}")
     use_local_asset_cache()
     check_usd_params(spec.objects)
     assets = instantiate_assets_from_spec(spec, AssetRegistry())
-    bound_spawned_shapes(assets)
+    bound_spawned_shapes(assets, spec.relations)
     _attach_spatial_relations_to_assets(spec.relations, assets)
 
     # Assets without relations keep their configured pose; the rest are solved together.
     placeable = [asset for asset in assets.values() if asset.get_relations()]
-    layout: PlacementResult | None = None
+    layouts: list[PlacementResult] = []
     if placeable:
         params = replace(build_checks_for_placer_params(spec), placement_seed=seed)
-        layout = ObjectPlacer(params).place(
+        layouts = ObjectPlacer(params).place(
             placeable,
-            num_envs=1,
+            num_envs=samples,
             collision_objects=_collision_objects(assets, placeable, params),
-        )[0]
+        )
+    layout = layouts[0] if layouts else None
 
     return {
         "env_name": spec.env_name,
-        "placement": _placement_summary(layout, seed),
+        "placement": _placement_summary(layouts, seed),
         "assets": [_asset_entry(node_id, assets[node_id], meta, layout) for node_id, meta in _node_meta(spec).items()],
         # The spec as authored, beside the layout it resolved to. An editor
         # needs both: the layout says where the solver put things, this says
@@ -138,19 +141,27 @@ def check_usd_params(objects: Iterable[Any]) -> None:
         raise SpecError(errors)
 
 
-def bound_spawned_shapes(assets: dict[str, Any]) -> None:
+def bound_spawned_shapes(assets: dict[str, Any], relations: Iterable[Any] = ()) -> None:
     """Give each object spawned from a shape, not a USD, the bounding box of that shape.
 
     Arena's ``Object.get_bounding_box`` reads the box from ``usd_path``, which
     these leave unset, and returns one already set as it is. So the solver
     places them by this box, and the payload draws it.
+
+    A light or a ground plane has nothing to place and keeps its unset
+    ``usd_path``, which is what keeps Arena from taking it for an obstacle. A
+    relation naming one is refused here, by index: Arena would stop on a bare
+    assert inside the solver.
     """
-    errors = []
+    errors, unplaceable = [], {}
     for node_id, asset in assets.items():
         # An object set names no USD of its own either, but bounds itself by its members'.
         if not isinstance(asset, Object) or isinstance(asset, RigidObjectSet) or asset.usd_path:
             continue
         spawn = asset.object_cfg.spawn
+        if isinstance(spawn, (LightCfg, GroundPlaneCfg)):
+            unplaceable[node_id] = type(spawn).__name__
+            continue
         if isinstance(spawn, CuboidCfg):
             half_size = [size / 2 for size in spawn.size]
         elif isinstance(spawn, SphereCfg):
@@ -164,15 +175,22 @@ def bound_spawned_shapes(assets: dict[str, Any]) -> None:
         # get_bounding_box asserts usd_path is not None before reading the box, and an object
         # built from a spawner_cfg (`sphere`) has None where the procedural ones have "".
         asset.usd_path = ""
+    for index, relation in enumerate(relations):
+        for node_id in (relation.subject, relation.reference):
+            if node_id in unplaceable:
+                errors.append(
+                    f"relations.{index}: {relation.kind} names {node_id!r}, a {unplaceable[node_id]} with"
+                    " nothing to place; it takes no relation"
+                )
     if errors:
         raise SpecError(errors)
 
 
-def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED) -> dict[str, Any]:
+def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED, samples: int = 1) -> dict[str, Any]:
     """Load an env graph spec YAML and resolve it."""
     spec_edit.check_entry(path)
     spec = ArenaEnvGraphSpec.from_yaml(path)
-    return {"spec_path": str(Path(path).resolve()), **resolve_layout(spec, seed=seed)}
+    return {"spec_path": str(Path(path).resolve()), **resolve_layout(spec, seed=seed, samples=samples)}
 
 
 def _collision_objects(assets: dict[str, Any], placeable: list[Any], params: ObjectPlacerParams) -> list[Any]:
@@ -263,7 +281,13 @@ def _geometry(asset: Any) -> dict[str, Any]:
 def _bounding_box(asset: Any) -> Any:
     """Local bounds, using the variant this env actually spawns for an object set."""
     if isinstance(asset, RigidObjectSet) and asset.variant_indices_by_env:
-        return asset.get_bounding_box_per_env(num_envs=1)
+        # Env 0's variant, the one the described layout was solved with. Asked
+        # for every env assigned, since Arena asserts the count matches.
+        per_env = asset.get_bounding_box_per_env(num_envs=len(asset.variant_indices_by_env))
+        return AxisAlignedBoundingBox(min_point=per_env.min_point[:1], max_point=per_env.max_point[:1])
+    if isinstance(asset, Object) and asset.usd_path is None:
+        # A light or a ground plane (bound_spawned_shapes): an empty box, drawn as nothing.
+        return AxisAlignedBoundingBox(min_point=(0.0, 0.0, 0.0), max_point=(0.0, 0.0, 0.0))
     return asset.get_bounding_box()
 
 
@@ -284,19 +308,50 @@ def _pose(asset: Any, layout: PlacementResult | None) -> Pose:
     return pose or Pose.identity()
 
 
-def _placement_summary(layout: PlacementResult | None, seed: int) -> dict[str, Any]:
-    """Whether this sample is a layout the sim would accept, and which checks decided that."""
-    if layout is None:
+def _placement_summary(layouts: list[PlacementResult], seed: int) -> dict[str, Any]:
+    """Whether the first sample passed the checks a dry solve can run, which it
+    could not, and how the rest fared.
+
+    A pass here is necessary for the sim to accept the layout, not sufficient,
+    since physics settling and IK reach are the simulator's to decide and
+    `not_run` says so. The samples are the layouts Arena would draw on as many
+    resets; they can converge on the same one, so `distinct_layouts` counts
+    them rather than taking `samples` for it.
+    """
+    if not layouts:
         return {"seed": seed, "solved_assets": 0}
+    layout = layouts[0]
+    checks = layout.validation_results.validation_results
+    failed = [index for index, sample in enumerate(layouts) if not sample.success]
     return {
         "seed": seed,
         "solved_assets": len(layout.positions),
         "success": layout.success,
         "final_loss": layout.final_loss,
         "attempts": layout.attempts,
-        "checks": {str(check): passed for check, passed in layout.validation_results.validation_results.items()},
+        "checks": {str(check): passed for check, passed in checks.items()},
         "failed_checks": layout.validation_results.get_failed_validation_check_names,
+        "not_run": [str(check) for check in PlacementCheck if check not in checks],
+        "samples": len(layouts),
+        "passed": len(layouts) - len(failed),
+        "failed_samples": failed,
+        "distinct_layouts": len({_rounded(sample) for sample in layouts}),
+        "check_failures": dict(
+            Counter(name for sample in layouts for name in sample.validation_results.get_failed_validation_check_names)
+        ),
     }
+
+
+def _rounded(layout: PlacementResult) -> frozenset[tuple[Any, ...]]:
+    """A layout to the millimetre and the milliradian: two closer than that are one."""
+    return frozenset(
+        (
+            asset.name,
+            tuple(round(float(value), 3) for value in position),
+            round(float(layout.orientations.get(asset, 0.0)), 3),
+        )
+        for asset, position in layout.positions.items()
+    )
 
 
 def _lighting(spec: ArenaEnvGraphSpec, assets: dict[str, Any]) -> dict[str, Any]:
@@ -347,6 +402,11 @@ def _format_text(dump: dict[str, Any]) -> str:
         status = "valid layout"
     else:
         status = "INVALID layout, failed: " + ", ".join(placement["failed_checks"])
+    if placement.get("samples", 1) > 1:
+        status += f"; {placement['passed']}/{placement['samples']} samples passed"
+        status += f", {placement['distinct_layouts']} distinct"
+    if placement.get("not_run"):
+        status += "; not run dry: " + ", ".join(placement["not_run"])
     lines = [f"{dump['env_name']}  (seed {placement['seed']}, {status})"]
     for asset in dump["assets"]:
         position = ", ".join(f"{value:+.3f}" for value in asset["position_xyz"])
@@ -376,6 +436,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("spec", type=Path, help="Path to an ArenaEnvGraphSpec YAML")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"Placement seed (default: {DEFAULT_SEED})")
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=1,
+        help="Solve this many layouts at once, an env each, and count how many pass; the first is described",
+    )
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format (default: json)")
     parser.add_argument("--output", type=Path, help="Write to this file instead of stdout")
     parser.add_argument(
@@ -388,12 +454,26 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
     )
+    parser.add_argument(
+        "--import",
+        dest="imports",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help=f"Import MODULE first, for the assets and kinds it registers with Arena; repeatable. "
+        f"${catalog.IMPORTS} names more, separated by '{os.pathsep}'",
+    )
     args = parser.parse_args(argv)
 
+    try:
+        catalog.load_extensions(tuple(args.imports))
+    except ImportError as error:
+        print(f"{parser.prog}: {error}", file=sys.stderr)
+        return 1
     use_local_asset_cache(args.asset_cache)
     # Arena and the solver print progress to stdout; keep it off the machine-readable output.
     with contextlib.redirect_stdout(sys.stderr):
-        dump = resolve_layout_from_yaml(args.spec, seed=args.seed)
+        dump = resolve_layout_from_yaml(args.spec, seed=args.seed, samples=args.samples)
 
     text = json.dumps(dump, indent=2) if args.format == "json" else _format_text(dump)
     if args.output:

@@ -3,12 +3,13 @@ Against files authored here, so no asset is downloaded and no solve runs."""
 
 from __future__ import annotations
 
+from collections import namedtuple
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from arena_composer.resolve_layout import SpecError, check_usd_params
+from arena_composer.resolve_layout import SpecError, _placement_summary, check_usd_params
 
 SIMREADY = "simready_usd_object"
 
@@ -55,3 +56,52 @@ def test_a_file_that_is_not_there_is_named(tmp_path: Path):
 
 def test_an_entry_without_a_usd_path_is_not_checked():
     check_usd_params([SimpleNamespace(id="bowl", registry_name="bowl_ycb_robolab", params={})])
+
+
+Asset = namedtuple("Asset", "name")
+
+
+def sample(banana_x: float, failed: list[str]) -> SimpleNamespace:
+    """A solved layout with a banana at `banana_x`, failing `failed`."""
+    banana = Asset("banana")
+    return SimpleNamespace(
+        positions={banana: (banana_x, 0.0, 0.8)},
+        orientations={banana: 0.5},
+        success=not failed,
+        final_loss=0.0,
+        attempts=1,
+        validation_results=SimpleNamespace(
+            validation_results={"no_overlap": "no_overlap" not in failed}, get_failed_validation_check_names=failed
+        ),
+    )
+
+
+def test_the_summary_names_the_checks_a_dry_solve_cannot_run():
+    """A pass here is necessary, not sufficient: physics settling and IK reach
+    are the simulator's to decide, and the summary has to say they were not."""
+    from isaaclab_arena.relations.placement_validation import PlacementCheck
+
+    ran = {check: True for check in PlacementCheck if check not in (PlacementCheck.PHYSICS_SETTLED, PlacementCheck.IK_REACHABLE)}
+    layout = sample(0.1, [])
+    layout.validation_results.validation_results = ran
+    summary = _placement_summary([layout], seed=7)
+    assert summary["checks"]["on_relation"] is True
+    assert summary["not_run"] == ["physics_settled", "ik_reachable"]
+    assert _placement_summary([], seed=7) == {"seed": 7, "solved_assets": 0}
+
+
+def test_the_summary_counts_the_samples_that_passed_and_the_layouts_they_were():
+    """The first sample is the one described; the others are the layouts Arena
+    would draw on as many resets. Two within a millimetre are one layout."""
+    summary = _placement_summary(
+        [sample(0.1, []), sample(0.3, ["no_overlap"]), sample(0.1002, [])],
+        seed=7,
+    )
+    assert summary["success"] is True
+    assert {key: summary[key] for key in ("samples", "passed", "failed_samples", "distinct_layouts")} == {
+        "samples": 3,
+        "passed": 2,
+        "failed_samples": [1],
+        "distinct_layouts": 2,
+    }
+    assert summary["check_failures"] == {"no_overlap": 1}

@@ -52,7 +52,8 @@ What currently doesn't draw. Check here before treating a render bug as new.
   extracted mesh would be drawn at 1/100 size. Any asset authored in non-metre units is exposed to this.
 - Objects spawned from a shape config instead of a USD (`procedural_cube`, `procedural_table`,
   `sphere`). `resolve_layout.bound_spawned_shapes` bounds them by the shape and the payload draws that
-  box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape, and the resolver refuses them.
+  box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape: they keep their configured pose
+  and an empty box, the payload draws nothing for them, and a relation naming one is refused.
 - The separate single-channel OmniPBR `metallic_texture`/`reflectionroughness_texture` pair, read as its
   scalar constants instead. Packing the two into one image needs a texture cache.
 

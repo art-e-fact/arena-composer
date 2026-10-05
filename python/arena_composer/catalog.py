@@ -15,20 +15,67 @@ agent only ever needs the handful matching what it is looking for — hence
 The kinds carry the form that edits them. Every parameter is inferred from the
 constructor rather than listed here, so a relation somebody registers
 themselves gets a form with no change to this file.
+
+What is registered depends on what has been imported, so every command calls
+:func:`load_extensions` before anything here is first asked.
 """
 
 from __future__ import annotations
 
+import contextlib
 import enum
+import importlib
 import inspect
+import os
+import re
 import sys
 import types
 import typing
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 from urllib.parse import urlparse
+
+#: Modules every command imports before it reads a spec, separated by
+#: `os.pathsep`: a project's own assets and kinds, registered as a side effect.
+IMPORTS = "ARENA_COMPOSER_IMPORTS"
+
+
+@cache
+def load_extensions(modules: tuple[str, ...] = ()) -> None:
+    """Register what Arena's own CLI registers, then import `modules` and the
+    ones `ARENA_COMPOSER_IMPORTS` names, for what they register.
+
+    Before the first :func:`catalog`, :func:`relations`, :func:`tasks` or
+    ``payload.kinds``: those are cached, and keep what was registered when
+    they were first asked. Raises an `ImportError` naming the module and
+    where it was named, for a command to print; a failure is not cached, so
+    the next call tries again.
+    """
+    # Arena and its registries print as they populate.
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            # Private API, the body of Arena's ensure_environments_registered().
+            # That function's module imports isaacsim, through AppLauncher, and
+            # Kit's EULA prompt then waits on a terminal there is none of.
+            from isaaclab_arena_environments.isaac_cap import register_components
+        except ModuleNotFoundError as error:
+            # An Arena without the environments package; a dependency missing
+            # from inside it is not that, and says so.
+            if not (error.name or "").startswith("isaaclab_arena_environments"):
+                raise
+        else:
+            register_components()
+
+        named = [(module, "--import") for module in modules]
+        named += [(module, IMPORTS) for module in os.environ.get(IMPORTS, "").split(os.pathsep) if module]
+        for module, source in named:
+            try:
+                importlib.import_module(module)
+            except ImportError as error:
+                raise ImportError(f"{source} names {module}, which does not import: {error}") from error
 
 
 @dataclass(frozen=True)
@@ -158,38 +205,37 @@ def search(query: str = "", role: str | None = None, limit: int = 20) -> list[As
     return found[:limit]
 
 
-def missing_params(registry_name: str, params: dict[str, Any]) -> list[str]:
-    """Constructor parameters of the asset with no default that `params` does
-    not supply — what makes a spec entry fail to build after it validated.
+def missing_params(cls: type, params: dict[str, Any], given: Iterable[str] = ()) -> list[str]:
+    """Constructor parameters of `cls` with no default that neither `params`
+    nor `given`, what Arena passes itself, supplies — what makes a spec entry
+    fail to build after it validated.
 
-    Arena checks that a registry name exists, not what the asset behind it
+    Arena checks that a registry name exists, not what the class behind it
     takes: a ``simready_usd_object`` without its ``usd_path`` is a valid spec
-    that asserts when instantiated. `instance_name` is filled in from the
-    entry's id and not counted.
+    that asserts when instantiated.
     """
-    from isaaclab_arena.assets.registries import AssetRegistry
-
-    cls = AssetRegistry().get_asset_by_name(registry_name)
     return [
         param.name
-        for param in inspect.signature(cls.__init__).parameters.values()
-        if param.name not in ("self", "instance_name")
-        and param.default is inspect.Parameter.empty
+        for param in _signature(cls)
+        if param.default is inspect.Parameter.empty
         and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
         and param.name not in params
+        and param.name not in given
     ]
 
 
-def unexpected_params(registry_name: str, params: dict[str, Any]) -> list[str]:
-    """Keys of `params` the asset's constructor does not take — what an entry
-    carries over from the asset it named before, and what fails the build with
-    a TypeError. None for a constructor that takes ``**kwargs``."""
-    from isaaclab_arena.assets.registries import AssetRegistry
-
-    taken = inspect.signature(AssetRegistry().get_asset_by_name(registry_name).__init__).parameters
-    if any(param.kind is param.VAR_KEYWORD for param in taken.values()):
+def unexpected_params(cls: type, params: dict[str, Any]) -> list[str]:
+    """Keys of `params` that `cls`'s constructor does not take — what an entry
+    carries over from the asset it named before, or a typo, and what fails the
+    build with a TypeError. None for a constructor that takes ``**kwargs``."""
+    taken = _signature(cls)
+    if any(param.kind is param.VAR_KEYWORD for param in taken):
         return []
-    return [name for name in params if name not in taken]
+    return [name for name in params if name not in {param.name for param in taken}]
+
+
+def _signature(cls: type) -> list[inspect.Parameter]:
+    return [param for param in inspect.signature(cls.__init__).parameters.values() if param.name != "self"]
 
 
 #: Modules whose classes name a node in the graph rather than a value. A
@@ -231,6 +277,14 @@ class Kind:
     summary: str
     #: Relations only: a unary relation takes no `reference`.
     unary: bool | None = None
+    #: Marked by Arena as one its own spec-writing agent may use. The rest are
+    #: registered all the same, and a spec may name them.
+    agent_ready: bool = False
+    #: The parameters no control edits — a tuple, a list of assets, a Literal,
+    #: a callable — by name: their annotated `type`, whether one is `required`
+    #: and the `default`. A text edit can still set what a form cannot, so the
+    #: kind's whole signature stays readable.
+    other_params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @cache
@@ -255,16 +309,39 @@ def tasks() -> tuple[Kind, ...]:
 
 def _kind(cls: type, name: str, unary: bool | None = None) -> Kind:
     hints = _hints(cls)
-    fields = []
+    fields, other = [], {}
     for param in inspect.signature(cls.__init__).parameters.values():
         if param.name in _NOT_PARAMS or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
         # A parameter no control can edit — a callable factory, a list of
-        # assets — is left out. Edits address one leaf at a time, so a value
-        # the form never shows still survives a write.
-        if (field := _field(param, hints.get(param.name, param.annotation))) is not None:
+        # assets — gets no field, only a line under `other_params`. Edits
+        # address one leaf at a time, so a value the form never shows still
+        # survives a write.
+        annotation = hints.get(param.name, param.annotation)
+        if (field := _field(param, annotation)) is not None:
             fields.append(field)
-    return Kind(name=name, fields=tuple(fields), summary=_summary(cls), unary=unary)
+        else:
+            required = param.default is inspect.Parameter.empty
+            other[param.name] = {
+                "type": _type_name(annotation),
+                "required": required,
+                "default": None if required else _plain(param.default),
+            }
+    return Kind(
+        name=name,
+        fields=tuple(fields),
+        summary=_summary(cls),
+        unary=unary,
+        agent_ready=bool(getattr(cls, "agent_ready", False)),
+        other_params=other,
+    )
+
+
+def _type_name(annotation: Any) -> str:
+    """An annotation as the signature reads, without module paths:
+    ``tuple[float, float] | None``, ``list[Asset]``."""
+    text = annotation.__qualname__ if isinstance(annotation, type) else repr(annotation)
+    return re.sub(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.([A-Za-z_]\w*)", r"\1", text)
 
 
 def _field(param: inspect.Parameter, annotation: Any) -> Field | None:

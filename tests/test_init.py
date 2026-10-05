@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from arena_composer.cli import init
+from arena_composer.cli import init, main
 
 VENV = Path(sys.prefix)
 # The server imports Arena as it starts.
@@ -55,6 +56,29 @@ def test_a_venv_inside_the_project_moves_with_it(tmp_path: Path):
     assert result.returncode == 1
     assert not result.stdout
     assert f"no server at {tmp_path / 'b' / 'my env' / 'bin' / 'arena-mcp'}\n".encode() in result.stderr
+
+
+def test_an_import_reaches_the_server_through_a_stripped_environment(tmp_path: Path):
+    """A client starts the launcher with next to no environment, so the
+    launcher is where the imports have to come from. The space is there to be
+    quoted."""
+    server = tmp_path / "venv" / "bin" / "arena-mcp"
+    server.parent.mkdir(parents=True)
+    server.write_text('#!/usr/bin/env bash\necho "${ARENA_COMPOSER_IMPORTS}" >&2\n')
+    server.chmod(0o755)
+    init(tmp_path / "project", tmp_path / "venv", ("my_assets", "my tasks"))
+    result = subprocess.run(
+        [tmp_path / "project" / "bin" / "arena-mcp"], input=b"", capture_output=True, env={"PATH": os.environ["PATH"]}
+    )
+    assert result.returncode == 0, result.stderr.decode()
+    assert result.stderr == f"my_assets{os.pathsep}my tasks\n".encode()
+
+
+def test_an_import_a_kept_launcher_lacks_says_how_to_add_it(tmp_path: Path, capsys):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "arena-mcp").write_text("#!/usr/bin/env bash\n")
+    assert main(["init", str(tmp_path), "--import", "my_assets"]) == 0
+    assert "add this line to it:\n  export ARENA_COMPOSER_IMPORTS=my_assets\n" in capsys.readouterr().err
 
 
 def test_a_venv_at_the_project_root_is_refused(tmp_path: Path):
