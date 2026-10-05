@@ -280,15 +280,21 @@ class SpecFiles:
             # Arena asserts outside pydantic too, e.g. on a duplicate key
             # across the include.
             errors = [f"{type(error).__name__}: {error}"]
-        return errors + _build_problems(merged)
+        # Arena's after-validators run only once every field is right, and stop
+        # at the first failure: `_assert_problems` finds what they would, on
+        # any spec, each at the entry to fix, and stands in for their lines.
+        errors = [line for line in errors if not any(mark in line for mark in _ASSERTS)]
+        return errors + _assert_problems(merged) + _build_problems(merged)
 
-    def write(self, changed: list[str]) -> Result:
+    def write(self, changed: list[str], touched: tuple[str, ...] = ()) -> Result:
         """Validate the text an edit produced, then write the files it changes.
 
         A spec that was good before is refused for anything wrong after. One
         that was already broken is refused only for what the edit introduces,
         and what was wrong before travels as `remaining_errors` — on the
-        refusal, and on the edit that landed.
+        refusal, and on the edit that landed. `touched` names the paths the
+        edit wrote, ``objects.3``, for :func:`_introduced` to tell its problems
+        from older ones that read the same.
         """
         texts = {path: self._dump(document) for path, document in self.documents.items()}
         after_spec = self._read_back(texts)
@@ -297,9 +303,13 @@ class SpecFiles:
         introduced, remaining = self._problems(after_spec), []
         if introduced:
             before_spec = self._read_back({path: path.read_text(encoding="utf-8") for path in self.documents})
-            before = [] if isinstance(before_spec, list) else self._problems(before_spec)
-            if before:
-                introduced, remaining = _introduced(before_spec, after_spec, before, introduced)
+            if isinstance(before_spec, list):
+                # The pair on disk does not read — a hand edit left a key in
+                # both files — so there is nothing to compare with: an edit
+                # that makes it read lands, and all that is wrong remains.
+                introduced, remaining = [], introduced
+            elif before := self._problems(before_spec):
+                introduced, remaining = _introduced(before_spec, after_spec, before, introduced, touched)
         remaining = self.explain(remaining, after_spec)
         if introduced:
             return Result(ok=False, errors=self.explain(introduced, after_spec), remaining_errors=remaining)
@@ -351,8 +361,11 @@ class SpecFiles:
         return buffer.getvalue()
 
     def asset_ids(self) -> list[str]:
-        """Every id an edit can refer to, in the order the spec declares them."""
-        spec = self.merged()
+        """Every id an edit can refer to, in the order the spec declares them.
+        Off the documents as they are, not merged: a pair a hand edit left
+        with a key in both files still has ids, and the write says what is
+        wrong with the pair."""
+        spec = {key: value for document in self.documents.values() for key, value in document.items()}
         entries = [spec.get("embodiment"), spec.get("background")]
         for key in ("objects", "object_sets", "object_references"):
             entries += _entries(spec, key)
@@ -379,7 +392,7 @@ _SECTIONS = (
     (re.compile(r"Relation\["), "relations"),
     (re.compile(r"Object reference '"), "object_references"),
     (re.compile(r"Task '"), "task"),
-    (re.compile(r"CLI override '|Duplicate cli_override"), "cli_override_specs"),
+    (re.compile(r"CLI override '"), "cli_override_specs"),
 )
 
 #: A name or id an error line says nothing declares, and where to look for the
@@ -440,6 +453,54 @@ def _hint(line: str, spec: Any) -> str:
         either = quoted[0] if len(quoted) == 1 else f"{', '.join(quoted[:-1])} or {quoted[-1]}"
         return f"did you mean {either}?"
     return _IMPORT_HINT if registered else ""
+
+
+#: What Arena's after-validators say — `ArenaEnvGraphSpec.validate`'s and
+#: `CompositeTaskSpec`'s — and `_assert_problems` says in their place. A
+#: wording Arena changes falls through, and is reported twice at worst.
+_ASSERTS = (
+    "Duplicate graph asset ids found",
+    "Duplicate cli_override arg",
+    "requires exactly one atomic task",
+    "requires at least two atomic tasks",
+)
+
+
+def _assert_problems(spec: Any) -> list[str]:
+    """What Arena asserts of the spec as a whole — a duplicate id, a duplicate
+    CLI arg, a composition that does not fit its subtask count — off the
+    merged dict, for the reason :func:`_dangling` is: pydantic runs those
+    asserts only once every field is right, and they stop at the first, so
+    fixing a field error surfaced one as if the fix had introduced it. Here
+    they show on any spec, at the entry to fix, and the compare sees them on
+    both sides.
+    """
+    errors: list[str] = []
+    nodes = [(role, spec.get(role)) for role in ("embodiment", "background")] if isinstance(spec, dict) else []
+    nodes += [(f"{section}.{index}", entry) for section in _ID_SECTIONS for index, entry in _indexed(spec, section)]
+    overrides = [(f"cli_override_specs.{index}", entry) for index, entry in _indexed(spec, "cli_override_specs")]
+    for slots, key in ((nodes, "id"), (overrides, "arg")):
+        first: dict[str, str] = {}
+        for where, entry in slots:
+            value = entry.get(key) if isinstance(entry, dict) else None
+            if isinstance(value, str) and value in first:
+                errors.append(f"{where}.{key}: {value!r} is already the {key} of {first[value]}")
+            elif isinstance(value, str):
+                first[value] = where
+    task = spec.get("task") if isinstance(spec, dict) else None
+    composition = task.get("composition") if isinstance(task, dict) else None
+    subtasks = task.get("subtasks") if isinstance(task, dict) else None
+    if isinstance(subtasks, list) and composition == "atomic" and len(subtasks) != 1:
+        errors.append(
+            f"task.composition: 'atomic' holds exactly one subtask; this task has {len(subtasks)},"
+            " so use sequential or parallel"
+        )
+    elif isinstance(subtasks, list) and composition in ("sequential", "parallel") and len(subtasks) < 2:
+        errors.append(
+            f"task.composition: {composition!r} holds at least two subtasks; this task has {len(subtasks)},"
+            " so use atomic"
+        )
+    return errors
 
 
 def _build_problems(spec: Any) -> list[str]:
@@ -735,14 +796,17 @@ def add_object(
         return Result.failed(f"no asset {on!r} to put {node_id!r} on; this spec has {known}")
 
     try:
-        files.section("objects").append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
-        changed = [f"added object {node_id!r} ({registry_name})"]
+        objects = files.section("objects")
+        objects.append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
+        changed, touched = [f"added object {node_id!r} ({registry_name})"], [f"objects.{len(objects) - 1}"]
         if on is not None:
-            files.section("relations").append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
+            relations = files.section("relations")
+            relations.append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
             changed.append(f"added relation {node_id!r} on {on!r}")
+            touched.append(f"relations.{len(relations) - 1}")
     except TypeError as error:
         return Result.failed(str(error))
-    return files.write(changed)
+    return files.write(changed, tuple(touched))
 
 
 #: Sections whose entries own an id a relation may name. Removing from one of
@@ -793,13 +857,11 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             changed = [f"added an entry to {_label(steps)}"]
             if steps == ["task", "subtasks"] and (bumped := _keep_composition_valid(files)):
                 changed.append(bumped)
-            return files.write(changed)
+            return files.write(changed, (f"{_label(steps)}.{len(target) - 1}",))
 
         parent, last = _walk(document, steps[:-1]), steps[-1]
         if op == "set":
             previous = parent.get(last) if isinstance(parent, dict) else None
-            parent[last] = value
-            changed = [f"set {_label(steps)} to {value!r}"]
             # An id is a name other entries hold, so renaming it has to carry
             # them — the same reason removing it has to drop them. An object's
             # id sits under a list entry (`objects.2.id`); the embodiment's and
@@ -810,6 +872,12 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
                 ["embodiment", "id"],
                 ["background", "id"],
             )
+            # Said plainly here, as `add_object` says it: validation would
+            # report the duplicate at the other entry.
+            if renames_id and previous != value and value in files.asset_ids():
+                return Result.failed(f"id {value!r} is already used in this spec")
+            parent[last] = value
+            changed = [f"set {_label(steps)} to {value!r}"]
             if renames_id and previous and previous != value:
                 if renamed := _rename_node(files, previous, value):
                     changed.append(f"renamed {previous!r} in {renamed} place(s)")
@@ -817,7 +885,7 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
                 dropped := _drop_params_not_taken(parent, value)
             ):
                 changed.append(f"dropped {key}.params {', '.join(dropped)}, which {value} does not take")
-            return files.write(changed)
+            return files.write(changed, (_label(steps),))
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
             # Capture the id before the entry goes, so the cascade can find the
@@ -999,7 +1067,7 @@ _CROSS_REFERENCE = ("references unknown", "references invalid parent", "targets 
 
 
 def _introduced(
-    before_spec: Any, after_spec: Any, before: list[str], after: list[str]
+    before_spec: Any, after_spec: Any, before: list[str], after: list[str], touched: tuple[str, ...] = ()
 ) -> tuple[list[str], list[str]]:
     """Split `after`, the problems with the edited spec, into the ones the edit
     introduced and the ones `before` already had, as ``(introduced, remaining)``.
@@ -1008,13 +1076,20 @@ def _introduced(
     names only the first; everything else as lines, with list indices
     normalised so an entry inserted or removed above does not make every line
     below it read as new, and as a multiset, so a second entry wrong in the
-    same way as a first is still new.
+    same way as a first is still new. Of two wrong the same way, the one at a
+    path the edit `touched` is the new one; failing that, the later.
     """
+
+    def touched_by(line: str) -> bool:
+        return any(line.startswith((f"{path}.", f"{path}:")) for path in touched)
+
     was = Counter(key for key, _ in _dangling(before_spec))
-    now = Counter(key for key, _ in _dangling(after_spec))
-    lines = dict(_dangling(after_spec))
-    introduced = [lines[key] for key in now if now[key] > was[key]]
-    remaining = [lines[key] for key in now if now[key] <= was[key]]
+    seen: Counter = Counter()
+    introduced, remaining = [], []
+    # The first `was` slots of a kind are the old ones; the edit's own sort last.
+    for key, line in sorted(_dangling(after_spec), key=lambda found: touched_by(found[1])):
+        seen[key] += 1
+        (introduced if seen[key] > was[key] else remaining).append(line)
 
     def rest(problems: list[str], spec: Any) -> list[str]:
         # `_build_problems` names a list param's dangling ids as `_dangling` does.
@@ -1025,7 +1100,8 @@ def _introduced(
 
     after_rest, before_rest = rest(after, after_spec), rest(before, before_spec)
     new = Counter(_normalised(line) for line in after_rest) - Counter(_normalised(line) for line in before_rest)
-    for line in after_rest:
+    # The edit's own lines take the new count first.
+    for line in sorted(after_rest, key=lambda line: not touched_by(line)):
         if new[_normalised(line)] > 0:
             new[_normalised(line)] -= 1
             introduced.append(line)

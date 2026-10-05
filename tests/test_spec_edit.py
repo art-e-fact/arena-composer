@@ -200,6 +200,77 @@ def test_a_good_spec_is_refused_for_anything_wrong_after(spec: Path):
     assert any("ghost" in line for line in result.errors), result.errors
 
 
+def test_a_refusal_names_the_entry_the_edit_touched(spec: Path):
+    """Two slots dangling on the same id read the same once their indices are
+    normalised, and the refusal named the later one — the old entry, when the
+    edit set the earlier. The edit's own path breaks the tie."""
+    scene_of(spec).write_text(
+        SCENE + "- kind: next_to\n  subject: banana\n  reference: ghost\n  params:\n    side: positive_y\n"
+    )
+    result = spec_edit.apply(spec, "set", ["relations", 1, "reference"], "ghost")
+    assert result.errors == ["../scenes/scene.yaml: relations.1.reference: 'ghost' is not an id this spec declares"], result.errors
+    assert result.remaining_errors == ["../scenes/scene.yaml: relations.3.reference: 'ghost' is not an id this spec declares"], result.remaining_errors
+
+
+def test_a_fix_that_uncovers_what_arena_asserts_later_is_not_blamed_for_it(spec: Path):
+    """Arena's duplicate-id assert runs only once every field is right, so
+    fixing a misspelt asset name surfaced the duplicate as if the fix had
+    introduced it, and `check` never showed it. Computed here, both show up
+    front, and the fix lands with the duplicate as what remains."""
+    second = "- id: banana\n  registry_name: apple_01_objaverse_robolab\n  params: {}\n"
+    scene_of(spec).write_text(SCENE.replace("apple_02", "aple_02").replace("relations:", second + "relations:"))
+    duplicate = "../scenes/scene.yaml: objects.3.id: 'banana' is already the id of objects.0"
+    errors = spec_edit.check(spec).errors
+    assert len(errors) == 2 and duplicate in errors, errors
+
+    result = spec_edit.apply(spec, "set", ["objects", 2, "registry_name"], "apple_02_objaverse_robolab")
+    assert result.ok and result.remaining_errors == [duplicate], result
+    # Which `banana` the relations and the task mean is the author's call,
+    # so a duplicate is renamed by hand.
+    assert broken(spec, "- id: banana\n  registry_name: apple_01", "- id: plantain\n  registry_name: apple_01") == []
+
+
+def test_check_lists_what_arena_asserts_only_once_every_field_is_right(spec: Path):
+    """A duplicate CLI arg and a composition that does not fit its subtasks,
+    beside the field error that hid the first and would have hidden the
+    duplicate id behind the second — each at the entry to fix, and in place
+    of Arena's own line where it did report one."""
+    overrides = "cli_override_specs:\n- arg: robot\n  target_node_id: droid\n- arg: robot\n  target_node_id: bowl\n"
+    spec.write_text(TASK.replace("composition: atomic", "composition: sequential").replace("external_yaml", overrides + "external_yaml"))
+    errors = broken(spec, "apple_02", "aple_02")
+    assert [line for line in errors if "aple_02" not in line] == [
+        "task.yaml: cli_override_specs.1.arg: 'robot' is already the arg of cli_override_specs.0",
+        "task.yaml: task.composition: 'sequential' holds at least two subtasks; this task has 1, so use atomic",
+    ], errors
+
+
+def test_a_rename_onto_an_id_in_use_is_refused_on_a_broken_spec_too(spec: Path):
+    """Arena's duplicate-id assert is skipped while any field is wrong, and the
+    rename carried every slot naming the old id over to the other entry: two
+    objects merged into one, and renaming back could not part them."""
+    broken(spec, "apple_02", "aple_02")
+    before = scene_of(spec).read_text()
+    result = spec_edit.apply(spec, "set", ["objects", 0, "id"], "bowl")
+    assert not result.ok and "already used" in result.errors[0], result
+    assert scene_of(spec).read_text() == before
+
+
+def test_an_edit_that_makes_the_pair_read_lands_with_the_rest_remaining(spec: Path):
+    """A key in both files is Arena's to refuse, so there was no before to
+    compare with, and every edit was refused for what was wrong already — the
+    fix for the other problem first too. The edit that makes the pair read
+    lands, with all that is wrong as what remains; and `add_object` answers
+    such a pair with a refusal, not a crash."""
+    broken(spec, "pick_up_object: banana", "pick_up_object: plantain", file=spec)
+    spec.write_text(spec.read_text() + "relations: []\n")
+    assert "Duplicate env graph spec key" in spec_edit.check(spec).errors[0]
+    assert "Duplicate env graph spec key" in spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab").errors[0]
+
+    result = spec_edit.apply(spec, "remove", ["relations"])
+    assert result.ok and result.wrote == [str(spec)], result
+    assert result.remaining_errors and "plantain" in result.remaining_errors[0], result
+
+
 def test_an_unregistered_asset_is_refused(spec: Path):
     before = scene_of(spec).read_text()
     result = spec_edit.add_object(spec, "apple", "not_a_real_asset", on=TABLE)
