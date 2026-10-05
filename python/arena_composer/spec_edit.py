@@ -1077,7 +1077,8 @@ def _introduced(
     normalised so an entry inserted or removed above does not make every line
     below it read as new, and as a multiset, so a second entry wrong in the
     same way as a first is still new. Of two wrong the same way, the one at a
-    path the edit `touched` is the new one; failing that, the later.
+    path the edit `touched` is the new one; failing that, the later of two
+    dangling slots and the earlier of two lines.
     """
 
     def touched_by(line: str) -> bool:

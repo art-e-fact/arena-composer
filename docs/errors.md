@@ -38,8 +38,8 @@ reports the checks, and a pass there is necessary for the sim to accept the layo
   `_assert_problems` finds the duplicate ids, the duplicate args and the composition count on any
   spec, at the entry to fix. Arena's own lines stand down by a mark in their text — `_ASSERTS`
   everywhere, `_CROSS_REFERENCE` in the compare. A wording Arena changes falls through and is
-  compared as text, which can refuse an edit it should have let through, never the reverse. That is
-  the rule for every check here: **a blind spot refuses, it does not allow.**
+  compared as text, which can refuse an edit it should have let through, never the reverse: **the
+  compare fails closed.** The checks themselves fail open, below.
 - **The build is bound to signatures.** `_build_problems` runs five groups over the merged dict.
   Four take `inspect.signature` of the class Arena will construct — the asset behind a
   `registry_name`, a relation kind, a task kind, an object reference's class by its one joint param
@@ -76,7 +76,8 @@ edit that landed. `_introduced` decides what is the same problem:
   not make every line below it read as new, and as a multiset, so a second entry wrong the same way
   as a first is new;
 - of two lines that read the same, the one at a path the edit `touched` is the new one — `apply`
-  and `add_object` pass the paths they wrote — and failing that, the later.
+  and `add_object` pass the paths they wrote — and failing that, the later of two dangling slots
+  and the earlier of two lines.
 
 A pair on disk that does not read at all — a hand edit left a key in both files — has nothing to
 compare with, so an edit that makes it read lands, with everything wrong as `remaining_errors`. Two
