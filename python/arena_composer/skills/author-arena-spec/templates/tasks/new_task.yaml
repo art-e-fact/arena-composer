@@ -1,0 +1,13 @@
+# Written by `arena-composer new`: a pick-and-place that validates, solves and builds, to start from.
+# Rename it, then make the objects, relations and task the ones this spec is for.
+env_name: new_task
+external_yaml: ../scenes/new_scene.yaml
+task:
+  composition: atomic
+  description: pick up the banana and place it in the bowl
+  subtasks:
+  - kind: PickAndPlaceTask
+    params:
+      pick_up_object: banana
+      destination_location: bowl
+      background_scene: table

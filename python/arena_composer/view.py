@@ -213,6 +213,8 @@ async def _serve_requests(
                 print(f"{spec}: {'; '.join(result.changed)}", file=sys.stderr)
             else:
                 print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
+            if result.remaining_errors:
+                print(f"{spec}: still wrong from before: {'; '.join(result.remaining_errors)}", file=sys.stderr)
             await _send(proc, encode_spec(spec, result.errors, solving=result.ok))
     finally:
         for helper in helpers:

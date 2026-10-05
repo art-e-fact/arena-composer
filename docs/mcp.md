@@ -3,7 +3,9 @@
 [mcp_server.py](../python/arena_composer/mcp_server.py) is a stdio MCP server for authoring specs.
 Its module docstring explains which tools exist and why. What each tool does lives in its own
 docstring and in `INSTRUCTIONS`, because that is what the client shows the model. **Document the
-tools there and nowhere else.**
+tools there and nowhere else.** The `author-arena-spec` skill, under
+[skills/](../python/arena_composer/skills/), names tools and their result fields but defines none.
+It is the procedure for writing a spec with them, and a test fails when it misses a tool.
 
 Rules for changing it:
 
@@ -18,7 +20,8 @@ Rules for changing it:
 - **No session.** Every tool takes a spec path and leaves its result on disk, so an `arena-view`
   window on the same spec redraws itself as the agent works.
 - **Failures are return values**, `{"ok": false, "errors": [...]}`, not exceptions. A spec an agent
-  got wrong is the normal case, and the errors are its repair loop.
+  got wrong is the normal case, and the errors are its repair loop. How they are found and worded
+  is [errors.md](errors.md).
 - **Edits go through [spec_edit.py](../python/arena_composer/spec_edit.py).** It writes with
   `ruamel.yaml`, so comments and key order survive, and validates by reading the text back with
   PyYAML — the reader Arena uses. PyYAML is YAML 1.1, where a bare `on` is `true`, so the `on`
@@ -36,3 +39,10 @@ how each client finds it, and why the launcher prints only to stderr are the com
 [cli.py](../python/arena_composer/cli.py). `--import MODULE` writes `ARENA_COMPOSER_IMPORTS` into
 the launcher, the only place a client's stripped environment can get it from. A kept launcher is
 not rewritten, so `init` prints the line to add instead.
+
+`init` also links each skill under `skills/` into `.agents/skills/` and `.claude/skills/`, the
+directories clients read skills from. A symlink rather than a copy, so a new release updates the
+skill. It is relative when the install is inside the project, as the launcher's server path is. A
+link left pointing at another install, from a switch between a release and an editable checkout, is
+re-pointed. That is the one exception to keeping what exists. `arena-composer new` copies the
+skill's own templates, so the scaffold and the skill describing it cannot drift.

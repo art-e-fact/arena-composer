@@ -93,7 +93,7 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED, samples: i
 
     return {
         "env_name": spec.env_name,
-        "placement": _placement_summary(layouts, seed),
+        "placement": _placement_summary(layouts, seed, samples),
         "assets": [_asset_entry(node_id, assets[node_id], meta, layout) for node_id, meta in _node_meta(spec).items()],
         # The spec as authored, beside the layout it resolved to. An editor
         # needs both: the layout says where the solver put things, this says
@@ -333,7 +333,7 @@ def _pose(asset: Any, layout: PlacementResult | None) -> Pose:
     return pose or Pose.identity()
 
 
-def _placement_summary(layouts: list[PlacementResult], seed: int) -> dict[str, Any]:
+def _placement_summary(layouts: list[PlacementResult], seed: int, samples: int) -> dict[str, Any]:
     """Whether the first sample passed the checks a dry solve can run, which it
     could not, and how the rest fared.
 
@@ -342,9 +342,25 @@ def _placement_summary(layouts: list[PlacementResult], seed: int) -> dict[str, A
     `not_run` says so. The samples are the layouts Arena would draw on as many
     resets; they can converge on the same one, so `distinct_layouts` counts
     them rather than taking `samples` for it.
+
+    With nothing to place — no relation — every sample is the configured poses,
+    no check ran and none failed: `passed` of `samples`, since a scene of fixed
+    props is done as it is, and no `success`, which is the first sample's
+    verdict, where there is none.
     """
     if not layouts:
-        return {"seed": seed, "solved_assets": 0}
+        return {
+            "seed": seed,
+            "solved_assets": 0,
+            "checks": {},
+            "failed_checks": [],
+            "not_run": [str(check) for check in PlacementCheck],
+            "samples": samples,
+            "passed": samples,
+            "failed_samples": [],
+            "distinct_layouts": 1,
+            "check_failures": {},
+        }
     layout = layouts[0]
     checks = layout.validation_results.validation_results
     failed = [index for index, sample in enumerate(layouts) if not sample.success]
@@ -431,7 +447,9 @@ def _format_text(dump: dict[str, Any]) -> str:
         status += f"; {placement['passed']}/{placement['samples']} samples passed"
         status += f", {placement['distinct_layouts']} distinct"
     if placement.get("not_run"):
-        status += "; not run dry: " + ", ".join(placement["not_run"])
+        # Not "not run dry": a check for a relation kind the spec does not use
+        # has nothing to check, in the sim either.
+        status += "; not run: " + ", ".join(placement["not_run"])
     lines = [f"{dump['env_name']}  (seed {placement['seed']}, {status})"]
     for asset in dump["assets"]:
         position = ", ".join(f"{value:+.3f}" for value in asset["position_xyz"])

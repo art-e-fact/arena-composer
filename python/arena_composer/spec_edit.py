@@ -46,6 +46,10 @@ from ruamel.yaml.representer import RoundTripRepresenter
 #: Key through which a task spec includes its scene.
 INCLUDE = "external_yaml"
 
+#: The top-level keys that make up the scene; every other key is the task's or
+#: the run's. See :meth:`SpecFiles.owner`.
+_SCENE_KEYS = frozenset({"embodiment", "background", "objects", "object_sets", "object_references", "relations"})
+
 #: The placement seed every command and tool solves with unless told otherwise.
 DEFAULT_SEED = 42
 
@@ -201,21 +205,30 @@ class SpecFiles:
         """The file that holds `key`, or the one an edit should add it to.
 
         The include is a disjoint union — Arena refuses a key present in both —
-        so at most one file can own it. A key nobody has goes next to
-        ``objects``, which is where a scene's other lists already are.
+        so at most one file can own it. A key nobody has goes with its kin:
+        the scene's keys together, the task's with the run's settings — so a
+        missing ``task`` is the task file's to fix, and a first
+        ``cli_override_specs`` lands beside the task, where the template keeps
+        it. Arena's own gear specs put the scene in the entry file and the
+        include holds `env_cfg_override`, and this follows that layout too.
         """
         for path, document in self.documents.items():
             if key in document:
                 return path
-        if self.include_path and "objects" in self.documents[self.include_path]:
-            return self.include_path
+        for path, document in self.documents.items():
+            if any((other in _SCENE_KEYS) == (key in _SCENE_KEYS) for other in document if other != INCLUDE):
+                return path
         return self.path
 
     def section(self, key: str) -> list[Any]:
-        """The list stored under `key`, created in its owning file if absent."""
+        """The list stored under `key`, created in its owning file if absent.
+        A `TypeError` when a hand edit left something else there, which the
+        edits answer as a refusal."""
         document = self.documents[self.owner(key)]
         if not document.get(key):
             document[key] = []
+        if not isinstance(document[key], list):
+            raise TypeError(f"{key} is not a list, so nothing can be added to it")
         return document[key]
 
     def merged(self, documents: dict[Path, Any] | None = None) -> dict[str, Any]:
@@ -267,15 +280,21 @@ class SpecFiles:
             # Arena asserts outside pydantic too, e.g. on a duplicate key
             # across the include.
             errors = [f"{type(error).__name__}: {error}"]
-        return errors + _build_problems(merged)
+        # Arena's after-validators run only once every field is right, and stop
+        # at the first failure: `_assert_problems` finds what they would, on
+        # any spec, each at the entry to fix, and stands in for their lines.
+        errors = [line for line in errors if not any(mark in line for mark in _ASSERTS)]
+        return errors + _assert_problems(merged) + _build_problems(merged)
 
-    def write(self, changed: list[str]) -> Result:
+    def write(self, changed: list[str], touched: tuple[str, ...] = ()) -> Result:
         """Validate the text an edit produced, then write the files it changes.
 
         A spec that was good before is refused for anything wrong after. One
         that was already broken is refused only for what the edit introduces,
         and what was wrong before travels as `remaining_errors` — on the
-        refusal, and on the edit that landed.
+        refusal, and on the edit that landed. `touched` names the paths the
+        edit wrote, ``objects.3``, for :func:`_introduced` to tell its problems
+        from older ones that read the same.
         """
         texts = {path: self._dump(document) for path, document in self.documents.items()}
         after_spec = self._read_back(texts)
@@ -284,9 +303,13 @@ class SpecFiles:
         introduced, remaining = self._problems(after_spec), []
         if introduced:
             before_spec = self._read_back({path: path.read_text(encoding="utf-8") for path in self.documents})
-            before = [] if isinstance(before_spec, list) else self._problems(before_spec)
-            if before:
-                introduced, remaining = _introduced(before_spec, after_spec, before, introduced)
+            if isinstance(before_spec, list):
+                # The pair on disk does not read — a hand edit left a key in
+                # both files — so there is nothing to compare with: an edit
+                # that makes it read lands, and all that is wrong remains.
+                introduced, remaining = [], introduced
+            elif before := self._problems(before_spec):
+                introduced, remaining = _introduced(before_spec, after_spec, before, introduced, touched)
         remaining = self.explain(remaining, after_spec)
         if introduced:
             return Result(ok=False, errors=self.explain(introduced, after_spec), remaining_errors=remaining)
@@ -338,12 +361,15 @@ class SpecFiles:
         return buffer.getvalue()
 
     def asset_ids(self) -> list[str]:
-        """Every id an edit can refer to, in the order the spec declares them."""
-        spec = self.merged()
-        ids = [spec.get("embodiment", {}).get("id"), spec.get("background", {}).get("id")]
+        """Every id an edit can refer to, in the order the spec declares them.
+        Off the documents as they are, not merged: a pair a hand edit left
+        with a key in both files still has ids, and the write says what is
+        wrong with the pair."""
+        spec = {key: value for document in self.documents.values() for key, value in document.items()}
+        entries = [spec.get("embodiment"), spec.get("background")]
         for key in ("objects", "object_sets", "object_references"):
-            ids += [entry.get("id") for entry in (spec.get(key) or [])]
-        return [asset_id for asset_id in ids if asset_id]
+            entries += _entries(spec, key)
+        return [entry["id"] for entry in entries if isinstance(entry, dict) and entry.get("id")]
 
 
 def _replace(path: Path, text: str) -> None:
@@ -366,7 +392,7 @@ _SECTIONS = (
     (re.compile(r"Relation\["), "relations"),
     (re.compile(r"Object reference '"), "object_references"),
     (re.compile(r"Task '"), "task"),
-    (re.compile(r"CLI override '|Duplicate cli_override"), "cli_override_specs"),
+    (re.compile(r"CLI override '"), "cli_override_specs"),
 )
 
 #: A name or id an error line says nothing declares, and where to look for the
@@ -429,6 +455,54 @@ def _hint(line: str, spec: Any) -> str:
     return _IMPORT_HINT if registered else ""
 
 
+#: What Arena's after-validators say — `ArenaEnvGraphSpec.validate`'s and
+#: `CompositeTaskSpec`'s — and `_assert_problems` says in their place. A
+#: wording Arena changes falls through, and is reported twice at worst.
+_ASSERTS = (
+    "Duplicate graph asset ids found",
+    "Duplicate cli_override arg",
+    "requires exactly one atomic task",
+    "requires at least two atomic tasks",
+)
+
+
+def _assert_problems(spec: Any) -> list[str]:
+    """What Arena asserts of the spec as a whole — a duplicate id, a duplicate
+    CLI arg, a composition that does not fit its subtask count — off the
+    merged dict, for the reason :func:`_dangling` is: pydantic runs those
+    asserts only once every field is right, and they stop at the first, so
+    fixing a field error surfaced one as if the fix had introduced it. Here
+    they show on any spec, at the entry to fix, and the compare sees them on
+    both sides.
+    """
+    errors: list[str] = []
+    nodes = [(role, spec.get(role)) for role in ("embodiment", "background")] if isinstance(spec, dict) else []
+    nodes += [(f"{section}.{index}", entry) for section in _ID_SECTIONS for index, entry in _indexed(spec, section)]
+    overrides = [(f"cli_override_specs.{index}", entry) for index, entry in _indexed(spec, "cli_override_specs")]
+    for slots, key in ((nodes, "id"), (overrides, "arg")):
+        first: dict[str, str] = {}
+        for where, entry in slots:
+            value = entry.get(key) if isinstance(entry, dict) else None
+            if isinstance(value, str) and value in first:
+                errors.append(f"{where}.{key}: {value!r} is already the {key} of {first[value]}")
+            elif isinstance(value, str):
+                first[value] = where
+    task = spec.get("task") if isinstance(spec, dict) else None
+    composition = task.get("composition") if isinstance(task, dict) else None
+    subtasks = task.get("subtasks") if isinstance(task, dict) else None
+    if isinstance(subtasks, list) and composition == "atomic" and len(subtasks) != 1:
+        errors.append(
+            f"task.composition: 'atomic' holds exactly one subtask; this task has {len(subtasks)},"
+            " so use sequential or parallel"
+        )
+    elif isinstance(subtasks, list) and composition in ("sequential", "parallel") and len(subtasks) < 2:
+        errors.append(
+            f"task.composition: {composition!r} holds at least two subtasks; this task has {len(subtasks)},"
+            " so use atomic"
+        )
+    return errors
+
+
 def _build_problems(spec: Any) -> list[str]:
     """What fails only when the scene is built, in the merged spec `spec`.
 
@@ -459,7 +533,8 @@ def _asset_problems(spec: Any) -> list[str]:
     from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
 
     registry = AssetRegistry()
-    # Arena fills an object's `instance_name` from its id, and nobody else's.
+    # Arena fills an object's `instance_name` from its id, and nobody else's —
+    # by `setdefault`, so one the params give is no clash.
     slots = [(role, spec.get(role) if isinstance(spec, dict) else None, ()) for role in ("embodiment", "background")]
     slots += [(f"objects.{index}", entry, ("instance_name",)) for index, entry in _indexed(spec, "objects")]
     errors = []
@@ -468,14 +543,18 @@ def _asset_problems(spec: Any) -> list[str]:
         if not isinstance(name, str) or not registry.is_registered(name):
             continue
         cls, params = registry.get_asset_by_name(name), entry.get("params")
-        errors += _binding(f"{where}.params", name, cls, params if isinstance(params, dict) else {}, given)
+        params = params if isinstance(params, dict) else {}
+        errors += _binding(f"{where}.params", name, cls, params, tuple(arg for arg in given if arg not in params))
         if where == "embodiment" and not issubclass(cls, EmbodimentBase):
             errors.append(f"embodiment.registry_name: {name} is not an embodiment")
     return errors
 
 
 def _reference_problems(spec: Any) -> list[str]:
-    """What Arena asserts as it builds each object reference."""
+    """What Arena asserts as it builds each object reference, and its params
+    against the class it builds: a plain reference, or the affordance its one
+    joint param makes it."""
+    from isaaclab_arena.assets.object_reference import ObjectReference
     from isaaclab_arena.assets.object_type import ObjectType
 
     # Private API: the params that make a reference an affordance, each its own class.
@@ -484,13 +563,20 @@ def _reference_problems(spec: Any) -> list[str]:
     errors = []
     for index, reference in _indexed(spec, "object_references"):
         where, params = f"object_references.{index}", reference.get("params")
+        params = params if isinstance(params, dict) else {}
         if not reference.get("prim_path"):
             errors.append(f"{where}.prim_path: a reference is built from the prim it names, and names none")
-        joints = [name for name in _AFFORDANCE_REFERENCE_CLASSES if isinstance(params, dict) and name in params]
+        joints = [name for name in _AFFORDANCE_REFERENCE_CLASSES if name in params]
         if len(joints) > 1:
             errors.append(f"{where}.params: a reference exposes one affordance, not {' and '.join(joints)}")
-        elif joints and reference.get("object_type") != ObjectType.ARTICULATION.value:
+            continue
+        if joints and reference.get("object_type") != ObjectType.ARTICULATION.value:
             errors.append(f"{where}.object_type: {joints[0]} makes it an articulation; set it to articulation")
+        # Arena passes a reference its id as `name`, its `prim_path`, its parent
+        # and its `object_type` — the affordance classes fix the last themselves.
+        cls = _AFFORDANCE_REFERENCE_CLASSES[joints[0]] if joints else ObjectReference
+        label = f"a reference with {joints[0]}" if joints else "a reference"
+        errors += _binding(f"{where}.params", label, cls, params, ("name", "prim_path", "parent_asset", "object_type"))
     return errors
 
 
@@ -516,6 +602,8 @@ def _subtask_problems(spec: Any) -> list[str]:
     list params hold, which Arena's validator skips and its builder looks up."""
     from isaaclab_arena.assets.registries import TaskRegistry
 
+    from arena_composer import catalog
+
     registry = TaskRegistry()
     task = spec.get("task") if isinstance(spec, dict) else None
     # Arena passes the task's description to an atomic task only.
@@ -527,7 +615,13 @@ def _subtask_problems(spec: Any) -> list[str]:
         if not isinstance(kind, str) or not registry.is_registered(kind):
             continue
         params, where = params if isinstance(params, dict) else {}, f"task.subtasks.{index}.params"
-        errors += _binding(where, kind, registry.get_task_by_name(kind), params, given)
+        cls = registry.get_task_by_name(kind)
+        errors += _binding(where, kind, cls, params, given)
+        if given and catalog.unexpected_params(cls, dict.fromkeys(given)):
+            errors.append(
+                f"task.subtasks.{index}.kind: {kind} takes no task_description, which Arena passes an atomic"
+                " task, so it does not build alone; it builds as one of several sequential or parallel subtasks"
+            )
         for name in _node_lists(kind) or ():
             value = params.get(name)
             if value is not None and not isinstance(value, list):
@@ -604,31 +698,45 @@ def _imported(target: Any) -> bool:
 
 def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: tuple[str, ...]) -> list[str]:
     """What passing `params` to `cls`, with Arena's `given`, would refuse: a
-    required parameter nobody supplies, and a key the constructor does not take."""
+    required parameter nobody supplies, a key the constructor does not take,
+    and a key Arena passes itself."""
     from arena_composer import catalog
 
     errors = []
     if missing := catalog.missing_params(cls, params, given):
         errors.append(f"{where}: {label} needs {', '.join(missing)}")
     taken = [name for name in inspect.signature(cls.__init__).parameters if name not in ("self", *given)]
-    for name in catalog.unexpected_params(cls, params):
+    unexpected = catalog.unexpected_params(cls, params)
+    for name in unexpected:
         close = difflib.get_close_matches(str(name), taken, n=1)
         errors.append(f"{where}.{name}: {label} takes no {name!r}" + (f"; did you mean {close[0]!r}?" if close else ""))
+    # Arena passes these whatever the params hold, so the build gets one twice.
+    for name in given:
+        if name in params and name not in unexpected:
+            errors.append(f"{where}.{name}: Arena passes {label} its {name!r} itself; remove it")
     return errors
 
 
 def _node_lists(kind: Any) -> set[str] | None:
     """The params of task `kind` that list node ids, or None when it is not
-    registered, and any list of strings may."""
-    from isaaclab_arena.assets.registries import TaskRegistry
-    from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
-        find_node_ref_params_in_signature,
-    )
+    registered, and any list of strings may.
 
-    registry = TaskRegistry()
-    if not isinstance(kind, str) or not registry.is_registered(kind):
+    None too when Arena's helper fails: renames and the before/after compare
+    reach it outside `_build_problems`, and fail open as its checks do.
+    """
+    try:
+        from isaaclab_arena.assets.registries import TaskRegistry
+        from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
+            find_node_ref_params_in_signature,
+        )
+
+        registry = TaskRegistry()
+        if not isinstance(kind, str) or not registry.is_registered(kind):
+            return None
+        found = find_node_ref_params_in_signature(registry.get_task_by_name(kind))
+    except Exception as error:
+        print(f"arena-composer: _node_lists skipped: {type(error).__name__}: {error}", file=sys.stderr)
         return None
-    found = find_node_ref_params_in_signature(registry.get_task_by_name(kind))
     return {name for name, listed in found.items() if listed}
 
 
@@ -687,12 +795,18 @@ def add_object(
     if on is not None and on not in known:
         return Result.failed(f"no asset {on!r} to put {node_id!r} on; this spec has {known}")
 
-    files.section("objects").append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
-    changed = [f"added object {node_id!r} ({registry_name})"]
-    if on is not None:
-        files.section("relations").append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
-        changed.append(f"added relation {node_id!r} on {on!r}")
-    return files.write(changed)
+    try:
+        objects = files.section("objects")
+        objects.append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
+        changed, touched = [f"added object {node_id!r} ({registry_name})"], [f"objects.{len(objects) - 1}"]
+        if on is not None:
+            relations = files.section("relations")
+            relations.append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
+            changed.append(f"added relation {node_id!r} on {on!r}")
+            touched.append(f"relations.{len(relations) - 1}")
+    except TypeError as error:
+        return Result.failed(str(error))
+    return files.write(changed, tuple(touched))
 
 
 #: Sections whose entries own an id a relation may name. Removing from one of
@@ -743,13 +857,11 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             changed = [f"added an entry to {_label(steps)}"]
             if steps == ["task", "subtasks"] and (bumped := _keep_composition_valid(files)):
                 changed.append(bumped)
-            return files.write(changed)
+            return files.write(changed, (f"{_label(steps)}.{len(target) - 1}",))
 
         parent, last = _walk(document, steps[:-1]), steps[-1]
         if op == "set":
             previous = parent.get(last) if isinstance(parent, dict) else None
-            parent[last] = value
-            changed = [f"set {_label(steps)} to {value!r}"]
             # An id is a name other entries hold, so renaming it has to carry
             # them — the same reason removing it has to drop them. An object's
             # id sits under a list entry (`objects.2.id`); the embodiment's and
@@ -760,6 +872,12 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
                 ["embodiment", "id"],
                 ["background", "id"],
             )
+            # Said plainly here, as `add_object` says it: validation would
+            # report the duplicate at the other entry.
+            if renames_id and previous != value and value in files.asset_ids():
+                return Result.failed(f"id {value!r} is already used in this spec")
+            parent[last] = value
+            changed = [f"set {_label(steps)} to {value!r}"]
             if renames_id and previous and previous != value:
                 if renamed := _rename_node(files, previous, value):
                     changed.append(f"renamed {previous!r} in {renamed} place(s)")
@@ -767,7 +885,7 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
                 dropped := _drop_params_not_taken(parent, value)
             ):
                 changed.append(f"dropped {key}.params {', '.join(dropped)}, which {value} does not take")
-            return files.write(changed)
+            return files.write(changed, (_label(steps),))
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
             # Capture the id before the entry goes, so the cascade can find the
@@ -868,7 +986,9 @@ def _id_slots(spec: Any) -> Iterator[tuple[Any, Any, str]]:
     """
     for index, relation in _indexed(spec, "relations"):
         for slot in ("subject", "reference"):
-            if isinstance(relation.get(slot), str):
+            value = relation.get(slot)
+            # Arena reads a blank reference as none, as a unary relation has.
+            if isinstance(value, str) and (slot == "subject" or value.strip()):
                 yield relation, slot, f"relations.{index}.{slot}"
     for index, reference in _indexed(spec, "object_references"):
         if isinstance(reference.get("parent_id"), str):
@@ -947,7 +1067,7 @@ _CROSS_REFERENCE = ("references unknown", "references invalid parent", "targets 
 
 
 def _introduced(
-    before_spec: Any, after_spec: Any, before: list[str], after: list[str]
+    before_spec: Any, after_spec: Any, before: list[str], after: list[str], touched: tuple[str, ...] = ()
 ) -> tuple[list[str], list[str]]:
     """Split `after`, the problems with the edited spec, into the ones the edit
     introduced and the ones `before` already had, as ``(introduced, remaining)``.
@@ -956,13 +1076,21 @@ def _introduced(
     names only the first; everything else as lines, with list indices
     normalised so an entry inserted or removed above does not make every line
     below it read as new, and as a multiset, so a second entry wrong in the
-    same way as a first is still new.
+    same way as a first is still new. Of two wrong the same way, the one at a
+    path the edit `touched` is the new one; failing that, the later of two
+    dangling slots and the earlier of two lines.
     """
+
+    def touched_by(line: str) -> bool:
+        return any(line.startswith((f"{path}.", f"{path}:")) for path in touched)
+
     was = Counter(key for key, _ in _dangling(before_spec))
-    now = Counter(key for key, _ in _dangling(after_spec))
-    lines = dict(_dangling(after_spec))
-    introduced = [lines[key] for key in now if now[key] > was[key]]
-    remaining = [lines[key] for key in now if now[key] <= was[key]]
+    seen: Counter = Counter()
+    introduced, remaining = [], []
+    # The first `was` slots of a kind are the old ones; the edit's own sort last.
+    for key, line in sorted(_dangling(after_spec), key=lambda found: touched_by(found[1])):
+        seen[key] += 1
+        (introduced if seen[key] > was[key] else remaining).append(line)
 
     def rest(problems: list[str], spec: Any) -> list[str]:
         # `_build_problems` names a list param's dangling ids as `_dangling` does.
@@ -973,7 +1101,8 @@ def _introduced(
 
     after_rest, before_rest = rest(after, after_spec), rest(before, before_spec)
     new = Counter(_normalised(line) for line in after_rest) - Counter(_normalised(line) for line in before_rest)
-    for line in after_rest:
+    # The edit's own lines take the new count first.
+    for line in sorted(after_rest, key=lambda line: not touched_by(line)):
         if new[_normalised(line)] > 0:
             new[_normalised(line)] -= 1
             introduced.append(line)

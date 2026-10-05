@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
+import time
 import warnings
 from pathlib import Path
 
@@ -23,7 +25,7 @@ from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.shared.exceptions import MCPDeprecationWarning
 
-from arena_composer import mcp_server, spec_edit
+from arena_composer import cli, mcp_server, spec_edit
 
 
 def test_arena_chatter_never_reaches_stdout(capsys, monkeypatch):
@@ -38,7 +40,33 @@ def test_arena_chatter_never_reaches_stdout(capsys, monkeypatch):
 
     captured = capsys.readouterr()
     assert captured.out == "", f"reached the protocol stream: {captured.out!r}"
+
     assert "[placement]" in captured.err, "the progress line was dropped rather than diverted"
+
+
+def test_a_call_finishing_leaves_one_still_running_quiet():
+    """Each call runs on a worker thread. One that ends while another is still
+    solving must not hand the other's prints the real stdout."""
+    inside, finished, quiet = threading.Event(), threading.Event(), []
+
+    def first():
+        with mcp_server._quiet():
+            inside.set()
+            time.sleep(0.2)
+        finished.set()
+
+    def second():
+        with mcp_server._quiet():
+            finished.wait(5)
+            quiet.append(sys.stdout is sys.stderr)
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    threads[0].start()
+    inside.wait(5)
+    threads[1].start()
+    for thread in threads:
+        thread.join(10)
+    assert quiet == [True]
 
 
 def test_the_guard_puts_stdout_back(capsys):
@@ -217,3 +245,17 @@ def test_the_tools_that_write_nothing_say_so():
     read_only = {tool.name for tool in tools if tool.annotations and tool.annotations.read_only_hint}
     assert read_only == {"search_assets", "describe_scene", "get_prim_tree", "render_views", "check_spec", "list_kinds"}
     assert len(tools) == 10
+
+
+def test_the_skill_names_every_tool_the_server_has():
+    """A tool renamed or added is a skill out of step with the server."""
+    skill = (cli.SKILLS / "author-arena-spec" / "SKILL.md").read_text()
+    tools = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    assert {tool for tool in tools if f"`{tool}`" not in skill} == set()
+
+
+def test_a_new_spec_validates(tmp_path: Path):
+    """The skill starts every spec from it."""
+    task = tmp_path / "tasks" / "new.yaml"
+    cli.new(task)
+    assert json.loads(_call("check_spec", spec=str(task)).content[0].text)["ok"] is True

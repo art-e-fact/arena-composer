@@ -50,7 +50,8 @@ The module docstrings above give the reasoning. The parent polls the spec and th
 `external_yaml` includes, re-resolves on change, and sends the result down the child's stdin; the
 viewer swaps the layout without dropping the window or moving the camera. A change that will not
 build is answered as an edit from the panel that will not solve: the layout stays, and the reason
-comes with the spec (`view._reload_on_change`, `payload.encode_spec`).
+comes with the spec (`view._reload_on_change`, `payload.encode_spec`;
+[errors.md](errors.md#where-a-problem-comes-out)).
 
 ### Headless renders
 

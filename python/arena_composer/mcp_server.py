@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -70,10 +71,10 @@ How the tools fit together:
    layout passed the checks a dry solve can run.
 4. `render_views` to look at it.
 
-Steps 1 and 2 and `check_spec` return in milliseconds, but `get_prim_tree`,
-which reads a USD. Steps 3 and 4 re-run
-the placement solver and read every asset's USD, so they take seconds — make a
-run of edits, then check once.
+Steps 1 and 2 and `check_spec` return in milliseconds, once the server's
+first call has imported Arena, which takes a few seconds. `get_prim_tree`
+reads a USD, and steps 3 and 4 re-run the placement solver and read every
+asset's USD, so they take seconds — make a run of edits, then check once.
 
 A failed edit is a normal result, not an error: it comes back as
 `{"ok": false, "errors": [...]}` with both files untouched, and so does a
@@ -108,6 +109,15 @@ _READ_ONLY = ToolAnnotations(read_only_hint=True)
 #: replaces its picture rather than filling the disk with a history of them.
 _RENDERS = Path(tempfile.gettempdir()) / "arena-composer-renders"
 
+#: Held by `_quiet`, so one tool body runs at a time. The SDK runs each call on
+#: a worker thread, and `redirect_stdout` swaps the process's `sys.stdout`: two
+#: calls in there at once restore each other's, and the solver's prints from
+#: the one still running reach the wire. Arena's registries, filled on first
+#: use, are not safe to fill from two threads either.
+#: ponytail: a long solve holds back a `check_spec` sent beside it; a stdout
+#: redirected once for the life of the process, if that wait matters.
+_ONE_AT_A_TIME = threading.RLock()
+
 
 @contextlib.contextmanager
 def _quiet():
@@ -123,7 +133,7 @@ def _quiet():
     would wait for and the first tool pays for anyway. A module that does not
     import is a refusal the agent can read and pass on.
     """
-    with contextlib.redirect_stdout(sys.stderr):
+    with _ONE_AT_A_TIME, contextlib.redirect_stdout(sys.stderr):
         try:
             catalog.load_extensions()
         except ImportError as error:
@@ -306,7 +316,9 @@ async def describe_scene(
     `distinct_layouts`, since samples can converge on the same layout.
 
     A light or a ground plane has nothing to place: it stays where it is
-    configured, unsolved, with an empty box.
+    configured, unsolved, with an empty box. A scene where nothing has a
+    relation reports every sample passed and every check in `not_run`: there
+    was nothing to check.
 
     Takes seconds, and longer the first time an asset is downloaded; progress
     is reported every ten seconds meanwhile. Eight samples cost about what
@@ -550,10 +562,12 @@ def check_spec(spec: str) -> dict[str, Any]:
     loading: YAML that does not parse, a `registry_name` the registry lacks, a
     relation or task param naming an id the spec has not got, a bare `on` read
     as the boolean true. And what Arena only finds once it builds the scene,
-    after the sim has started: a param an asset, relation or subtask lacks or
-    does not take, an id in a list param the spec has not got, an object
-    reference with no `prim_path`, a misspelled field under
-    `env_cfg_override.sim`.
+    after the sim has started: a param an asset, relation, subtask or object
+    reference lacks, or one a relation, subtask or embodiment does not take —
+    most objects and backgrounds take any, so a misspelt one there is the
+    build's to find — an id in a list param the spec has not got, an atomic
+    task of a kind that builds only among other subtasks, an object reference
+    with no `prim_path`, a misspelled field under `env_cfg_override.sim`.
 
     Whether the layout solves it cannot see; that is `describe_scene`.
 
@@ -582,8 +596,7 @@ def list_kinds() -> dict[str, Any]:
     registered all the same. A `unary` relation takes no `reference`.
     `compositions` is what `task.composition` may be.
 
-    Milliseconds, about 16 kB, and the same for the life of the server, so
-    once is enough.
+    About 30 kB, and the same for the life of the server, so once is enough.
     """
     with _quiet():
         # Imported here, as `_pack` does: the payload module pulls in numpy

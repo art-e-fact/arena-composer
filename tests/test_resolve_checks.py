@@ -84,10 +84,19 @@ def test_the_summary_names_the_checks_a_dry_solve_cannot_run():
     ran = {check: True for check in PlacementCheck if check not in (PlacementCheck.PHYSICS_SETTLED, PlacementCheck.IK_REACHABLE)}
     layout = sample(0.1, [])
     layout.validation_results.validation_results = ran
-    summary = _placement_summary([layout], seed=7)
+    summary = _placement_summary([layout], seed=7, samples=1)
     assert summary["checks"]["on_relation"] is True
     assert summary["not_run"] == ["physics_settled", "ik_reachable"]
-    assert _placement_summary([], seed=7) == {"seed": 7, "solved_assets": 0}
+
+
+def test_nothing_to_place_is_every_sample_passed_with_nothing_checked():
+    """A scene of fixed props — no relation — is done as it is, so the skill's
+    `passed` of `samples` has to read as done; and `not_run` has to say that
+    no check ran, overlap included."""
+    summary = _placement_summary([], seed=7, samples=8)
+    assert "success" not in summary and summary["solved_assets"] == 0
+    assert (summary["samples"], summary["passed"], summary["distinct_layouts"]) == (8, 8, 1)
+    assert "no_overlap" in summary["not_run"] and summary["check_failures"] == {}
 
 
 def test_the_summary_counts_the_samples_that_passed_and_the_layouts_they_were():
@@ -96,6 +105,7 @@ def test_the_summary_counts_the_samples_that_passed_and_the_layouts_they_were():
     summary = _placement_summary(
         [sample(0.1, []), sample(0.3, ["no_overlap"]), sample(0.1002, [])],
         seed=7,
+        samples=3,
     )
     assert summary["success"] is True
     assert {key: summary[key] for key in ("samples", "passed", "failed_samples", "distinct_layouts")} == {

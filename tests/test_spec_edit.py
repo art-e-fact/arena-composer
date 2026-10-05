@@ -200,6 +200,77 @@ def test_a_good_spec_is_refused_for_anything_wrong_after(spec: Path):
     assert any("ghost" in line for line in result.errors), result.errors
 
 
+def test_a_refusal_names_the_entry_the_edit_touched(spec: Path):
+    """Two slots dangling on the same id read the same once their indices are
+    normalised, and the refusal named the later one — the old entry, when the
+    edit set the earlier. The edit's own path breaks the tie."""
+    scene_of(spec).write_text(
+        SCENE + "- kind: next_to\n  subject: banana\n  reference: ghost\n  params:\n    side: positive_y\n"
+    )
+    result = spec_edit.apply(spec, "set", ["relations", 1, "reference"], "ghost")
+    assert result.errors == ["../scenes/scene.yaml: relations.1.reference: 'ghost' is not an id this spec declares"], result.errors
+    assert result.remaining_errors == ["../scenes/scene.yaml: relations.3.reference: 'ghost' is not an id this spec declares"], result.remaining_errors
+
+
+def test_a_fix_that_uncovers_what_arena_asserts_later_is_not_blamed_for_it(spec: Path):
+    """Arena's duplicate-id assert runs only once every field is right, so
+    fixing a misspelt asset name surfaced the duplicate as if the fix had
+    introduced it, and `check` never showed it. Computed here, both show up
+    front, and the fix lands with the duplicate as what remains."""
+    second = "- id: banana\n  registry_name: apple_01_objaverse_robolab\n  params: {}\n"
+    scene_of(spec).write_text(SCENE.replace("apple_02", "aple_02").replace("relations:", second + "relations:"))
+    duplicate = "../scenes/scene.yaml: objects.3.id: 'banana' is already the id of objects.0"
+    errors = spec_edit.check(spec).errors
+    assert len(errors) == 2 and duplicate in errors, errors
+
+    result = spec_edit.apply(spec, "set", ["objects", 2, "registry_name"], "apple_02_objaverse_robolab")
+    assert result.ok and result.remaining_errors == [duplicate], result
+    # Which `banana` the relations and the task mean is the author's call,
+    # so a duplicate is renamed by hand.
+    assert broken(spec, "- id: banana\n  registry_name: apple_01", "- id: plantain\n  registry_name: apple_01") == []
+
+
+def test_check_lists_what_arena_asserts_only_once_every_field_is_right(spec: Path):
+    """A duplicate CLI arg and a composition that does not fit its subtasks,
+    beside the field error that hid the first and would have hidden the
+    duplicate id behind the second — each at the entry to fix, and in place
+    of Arena's own line where it did report one."""
+    overrides = "cli_override_specs:\n- arg: robot\n  target_node_id: droid\n- arg: robot\n  target_node_id: bowl\n"
+    spec.write_text(TASK.replace("composition: atomic", "composition: sequential").replace("external_yaml", overrides + "external_yaml"))
+    errors = broken(spec, "apple_02", "aple_02")
+    assert [line for line in errors if "aple_02" not in line] == [
+        "task.yaml: cli_override_specs.1.arg: 'robot' is already the arg of cli_override_specs.0",
+        "task.yaml: task.composition: 'sequential' holds at least two subtasks; this task has 1, so use atomic",
+    ], errors
+
+
+def test_a_rename_onto_an_id_in_use_is_refused_on_a_broken_spec_too(spec: Path):
+    """Arena's duplicate-id assert is skipped while any field is wrong, and the
+    rename carried every slot naming the old id over to the other entry: two
+    objects merged into one, and renaming back could not part them."""
+    broken(spec, "apple_02", "aple_02")
+    before = scene_of(spec).read_text()
+    result = spec_edit.apply(spec, "set", ["objects", 0, "id"], "bowl")
+    assert not result.ok and "already used" in result.errors[0], result
+    assert scene_of(spec).read_text() == before
+
+
+def test_an_edit_that_makes_the_pair_read_lands_with_the_rest_remaining(spec: Path):
+    """A key in both files is Arena's to refuse, so there was no before to
+    compare with, and every edit was refused for what was wrong already — the
+    fix for the other problem first too. The edit that makes the pair read
+    lands, with all that is wrong as what remains; and `add_object` answers
+    such a pair with a refusal, not a crash."""
+    broken(spec, "pick_up_object: banana", "pick_up_object: plantain", file=spec)
+    spec.write_text(spec.read_text() + "relations: []\n")
+    assert "Duplicate env graph spec key" in spec_edit.check(spec).errors[0]
+    assert "Duplicate env graph spec key" in spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab").errors[0]
+
+    result = spec_edit.apply(spec, "remove", ["relations"])
+    assert result.ok and result.wrote == [str(spec)], result
+    assert result.remaining_errors and "plantain" in result.remaining_errors[0], result
+
+
 def test_an_unregistered_asset_is_refused(spec: Path):
     before = scene_of(spec).read_text()
     result = spec_edit.add_object(spec, "apple", "not_a_real_asset", on=TABLE)
@@ -564,6 +635,43 @@ def test_a_cascade_tolerates_sections_a_hand_edit_left_null(spec: Path):
     assert spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain").ok is not None
 
 
+@pytest.mark.parametrize(
+    "scene",
+    [
+        SCENE.replace("embodiment:\n  id: droid\n  registry_name: droid_abs_joint_pos\n  params: {}\n", "embodiment: null\n"),
+        SCENE.split("relations:")[0] + "relations: 'on'\n",
+    ],
+)
+def test_an_add_or_remove_on_a_misshapen_spec_is_answered(spec: Path, scene: str):
+    """The MCP edit tools see what a hand edit left. A crash reaches the agent
+    as a bare `Error executing tool`; a result says what is wrong."""
+    assert scene != SCENE
+    scene_of(spec).write_text(scene)
+    assert isinstance(spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on="banana"), spec_edit.Result)
+    assert isinstance(spec_edit.remove_object(spec, "plantain"), spec_edit.Result)
+
+
+def test_a_blank_reference_names_nothing_as_arena_reads_it(spec: Path):
+    """Arena reads `reference: ''` as no reference, so it is not a dangling id
+    to report, or to refuse an edit for."""
+    broken(spec, "  reference: null", "  reference: ''")
+    broken(spec, "pick_up_object: banana", "pick_up_object: plantain", file=spec)
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert result.ok and [line for line in result.remaining_errors if "''" in line] == [], result
+
+
+def test_a_rename_lands_when_arenas_list_helper_fails(spec: Path, monkeypatch):
+    """A rename reaches Arena's helper outside the checks' fail-open wrapper,
+    so it has to fail open itself."""
+    import isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils as conversion
+
+    def moved(cls):
+        raise RuntimeError("moved")
+
+    monkeypatch.setattr(conversion, "find_node_ref_params_in_signature", moved)
+    assert spec_edit.apply(spec, "set", ["objects", 0, "id"], "plantain").ok
+
+
 def test_a_param_called_id_does_not_trigger_a_rename(spec: Path):
     """Only the embodiment's and background's own `id` renames — a param that
     happens to be called `id` a step further down must not. The background's,
@@ -775,6 +883,25 @@ def test_a_relation_param_is_checked_against_its_kind(spec: Path):
     ]
 
 
+def test_a_param_arena_passes_itself_is_refused(spec: Path):
+    """Arena passes a relation its reference and an atomic task its
+    description whatever the params hold, so one there too is a TypeError at
+    build. An object's `instance_name` it only defaults, so that one is fine."""
+    broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}",
+           "registry_name: bowl_ycb_robolab\n  params: {instance_name: my_bowl}")
+    broken(spec, "  subject: banana\n  reference: maple_table_robolab\n  params: {}",
+           "  subject: banana\n  reference: maple_table_robolab\n  params: {parent: bowl}")
+    errors = broken(spec, "      background_scene:", "      task_description: grab it\n      background_scene:", file=spec)
+    assert errors == [
+        # Arena takes any string task param for an id; the line after says why it is not one.
+        "task.yaml: Task 'PickAndPlaceTask' param 'task_description' references unknown node 'grab it'."
+        " Add it to 'objects' or 'object_references'.",
+        "../scenes/scene.yaml: relations.1.params.parent: Arena passes on its 'parent' itself; remove it",
+        "task.yaml: task.subtasks.0.params.task_description: Arena passes PickAndPlaceTask its 'task_description'"
+        " itself; remove it",
+    ]
+
+
 def test_the_ids_in_a_list_param_are_checked_where_arena_skips_them(spec: Path):
     sort = TASK.replace(
         "  - kind: PickAndPlaceTask\n    params:\n      pick_up_object: banana\n      destination_location: bowl\n",
@@ -783,6 +910,9 @@ def test_the_ids_in_a_list_param_are_checked_where_arena_skips_them(spec: Path):
     )
     spec.write_text(sort)
     assert spec_edit.check(spec).errors == [
+        # Arena's builder passes an atomic task its description, which SortMultiObjectTask does not take.
+        "task.yaml: task.subtasks.0.kind: SortMultiObjectTask takes no task_description, which Arena passes an"
+        " atomic task, so it does not build alone; it builds as one of several sequential or parallel subtasks",
         "task.yaml: task.subtasks.0.params.pick_up_object_list.1: 'ghost' is not an id this spec declares",
         "task.yaml: task.subtasks.0.params: SortMultiObjectTask pairs each pick_up_object_list entry with a"
         " destination_location_list one, and has 2 and 1",
@@ -800,6 +930,36 @@ def test_an_object_reference_is_checked_as_arena_builds_it(spec: Path):
         "../scenes/scene.yaml: object_references.0.object_type: openable_joint_name makes it an articulation;"
         " set it to articulation",
     ]
+
+
+def test_a_reference_is_checked_against_the_class_its_affordance_makes_it(spec: Path):
+    """A turnable reference short of its levels, or any reference given what
+    Arena passes itself, is a `TypeError` once the sim has started."""
+    scene_of(spec).write_text(
+        SCENE + "object_references:\n"
+        f"- id: knob\n  parent_id: {TABLE}\n  prim_path: /knob\n  object_type: articulation\n"
+        "  params: {turnable_joint_name: knob_joint}\n"
+        f"- id: top\n  parent_id: {TABLE}\n  prim_path: /top\n  object_type: rigid\n"
+        "  params: {object_type: rigid}\n"
+    )
+    assert spec_edit.check(spec).errors == [
+        "../scenes/scene.yaml: object_references.0.params: a reference with turnable_joint_name needs"
+        " min_level_angle_deg, max_level_angle_deg, num_levels",
+        "../scenes/scene.yaml: object_references.1.params.object_type:"
+        " Arena passes a reference its 'object_type' itself; remove it",
+    ]
+
+
+def test_a_key_neither_file_has_goes_with_its_kin(spec: Path):
+    """A missing `task` is the task file's to fix, not the scene's because the
+    scene holds the lists; and a first `cli_override_specs` lands beside the
+    task, where the template keeps it."""
+    spec.write_text(TASK.split("task:")[0])
+    assert spec_edit.check(spec).errors[0].startswith("task.yaml: task:")
+
+    spec.write_text(TASK)
+    result = spec_edit.apply(spec, "insert", ["cli_override_specs"], {"arg": "background", "target_node_id": TABLE})
+    assert result.ok and result.wrote == [str(spec)], result
 
 
 def test_an_embodiment_param_it_does_not_take_is_named(spec: Path):

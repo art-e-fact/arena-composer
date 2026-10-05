@@ -28,48 +28,69 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - Every command registers the Isaac Cap assets and tasks Arena's own CLI registers, so its gear
   insertion and syringe sort specs open and describe, and `search_assets` and `list_kinds` find
   them. The `gear_insertion_v2` specs still name assets nothing registers.
-- `--import MODULE` on `arena-view` and `arena-resolve-layout`, and `ARENA_COMPOSER_IMPORTS` for
-  all three commands, import a project's own modules first, for the assets and kinds they register.
-  A module that does not import is named, with where it was named. `arena-composer init --import
-  MODULE` writes the variable into `bin/arena-mcp`, since an MCP client starts it with almost no
-  environment.
+- `--import MODULE` on `arena-view` and `arena-resolve-layout`, and `ARENA_COMPOSER_IMPORTS` for all
+  three commands, import a project's own modules first, for the assets and kinds they register. A
+  module that does not import, for whatever reason, is named, with where it was named.
+  `arena-composer init --import MODULE` writes the variable into `bin/arena-mcp`, since an MCP
+  client starts it with almost no environment.
 - `check_spec`, an MCP tool that validates a spec as Arena will read it — in milliseconds, with no
   solve and no asset read — and reports what the edit tools would refuse, for after a hand edit.
 - `list_kinds`, an MCP tool listing the relation and task kinds a spec can name: the params each
   takes, the ones no form edits — a tuple range, a list of ids — by type, and which Arena marks
   `agent_ready`.
-- `describe_scene` and `arena-resolve-layout` report `placement.not_run`: the checks only the
-  simulator decides — physics settling, IK reach — so a dry pass reads as necessary, not sufficient.
+- `describe_scene` and `arena-resolve-layout` report `placement.not_run`: the checks a solve did
+  not run — the ones only the simulator decides, physics settling and IK reach, and the ones for
+  relation kinds the spec does not use — so a dry pass reads as necessary, not sufficient.
 - `samples` on `describe_scene`, and `--samples N` on `arena-resolve-layout`, solve that many
-  layouts at once, as Arena draws one per reset, and report how many passed, which failed, how
-  often each check failed and how many of the layouts differ. The first is still the one described.
+  layouts at once, as Arena draws one per reset, and report how many passed, which failed, how often
+  each check failed and how many of the layouts differ. The first is still the one described. A
+  scene where nothing has a relation reports every sample passed and every check in `not_run`.
 - `get_prim_tree`, an MCP tool listing the prims in the background's or an object's USD that an
   object reference can name — a tabletop, a drawer — each with the `prim_path` to write, its
   physics type and, for a jointed body, its joint names. It filters by text and by type, since a
   kitchen has a thousand.
+- `arena-composer init` links the `author-arena-spec` skill into `.agents/skills/` and
+  `.claude/skills/`. It is the procedure an agent follows to write a spec with the MCP tools, from
+  the scaffold to every sampled layout passing, with a playbook for the errors and failed checks it
+  meets on the way. The link follows the install, so a new release updates it.
+- `arena-composer new PATH` writes a task YAML at `PATH`, and the scene it includes, holding a
+  pick-and-place that validates, solves and builds. The scene goes in the `scenes` beside a `tasks`
+  directory, else beside the task.
 
 ### Changed
 
-- A refused edit and `check_spec` name the file to fix when the spec includes a scene, and an
-  asset name, relation or task kind, or id that nothing declares comes with the closest that do.
-  A name nothing registered is close to says how to import the module that registers it, and an
-  unquoted `on` says to quote it.
+- A refused edit and `check_spec` name the file to fix when the spec includes a scene — for a key
+  neither file has, the one holding its kin, so a missing `task` is the task file's — and an asset
+  name, relation or task kind, or id that nothing declares comes with the closest that do. A name
+  nothing registered is close to says how to import the module that registers it, and an unquoted
+  `on` says to quote it.
 - Edits and `check_spec` refuse what Arena only finds when it builds the scene, after the sim has
-  started: a param a subtask, relation, embodiment, background or object does not take, with the
-  one probably meant, or a required one it lacks; an id in a list param, `pick_up_object_list`
-  among them, that the spec does not declare; and an object reference with no `prim_path`, or an
-  affordance on one that is not an articulation; and an `env_cfg_override` Arena would refuse, a
-  field under `sim` its physics backend lacks among it. A spec that already has one is still edited.
+  started: a required param a subtask, relation, embodiment, background, object or object reference
+  lacks — `num_levels` on a turnable reference — and one a subtask, relation or embodiment does not
+  take, with the one probably meant; most objects and backgrounds take any param, so a misspelt one
+  there still reaches the build. An id in a list param, `pick_up_object_list` among them, that the
+  spec does not declare; an object reference with no `prim_path`, or an affordance on one that is
+  not an articulation; and an `env_cfg_override` Arena would refuse, a field under `sim` its physics
+  backend lacks among it. A spec that already has one is still edited.
+- So is an atomic task whose kind takes no description, which Arena passes every atomic task:
+  `NoTask`, `LiftObjectTask`, `SortMultiObjectTask`, `GoalPoseTask` and two more build only as one
+  of several subtasks, and stopped the sim with a `TypeError` as it started.
+- So is a param Arena passes itself — a relation's reference, as `parent` for `on`, or an atomic
+  task's `task_description` — which the build would get twice.
+- `check_spec` and a refused edit list a duplicate id, a duplicate `cli_override_specs` arg and a
+  `task.composition` that does not fit its subtask count beside the spec's other problems, each at
+  the entry to fix, where Arena reports them only once every other problem is fixed, and stops at
+  the first. A rename to an id in use is refused on a spec with other problems too, where it merged
+  the two entries.
 - An edit replaces each file it changes whole, where it wrote into it, so `arena-view`, Arena or
   an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download
   or a render runs, where a long one looked frozen.
-
 - The MCP tools that write nothing — `search_assets`, `describe_scene`, `render_views`, `check_spec`,
-  `list_kinds` — declare themselves read-only, so a client may run them without asking.
+  `list_kinds`, `get_prim_tree` — declare themselves read-only, so a client may run them without
+  asking.
 - `arena-mcp` answers its handshake about two seconds sooner: Arena's solver is imported by the first
   tool that needs it, not at start.
-
 - Every entry in the editor panel is a card, after Blender's modifier stack: it folds, its header
   names it, and its × removes it. A folded card sums up its entry beside the name, and an object's
   card shows its asset's picture.
@@ -103,9 +124,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 ### Fixed
 
 - An edit on a spec that is already broken is refused only for the problems it introduces, and
-  reports what was wrong before as `remaining_errors` — on the refusal, and on the edit that landed.
-  Adding the first of two objects a task names no longer deadlocks on the second, from the panel or
-  from `add_object`.
+  reports what was wrong before as `remaining_errors` — on the refusal, and on the edit that landed;
+  `arena-view` prints it on stderr for an edit from the panel. Adding the first of two objects a
+  task names no longer deadlocks on the second, from the panel or from `add_object`. An edit that
+  makes a pair read again — a hand edit left a key in both files — lands, with all that is wrong as
+  `remaining_errors`; and of two entries wrong the same way, the refusal names the one the edit
+  touched.
 - Renaming an id carries it into every slot Arena checks — an object reference's `parent_id`, a CLI
   override's target, a task param that lists ids — and into the prim path of a reference inside a
   renamed object, where the spec went on naming the old id and stopped loading.
@@ -151,6 +175,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   the message of any exception but its own `ToolError`. `describe_scene` answers a spec that does
   not build as a refused edit does, `{"ok": false, "errors": [...]}`; `render_views` fails with the
   same lines.
+- Two MCP tool calls at once no longer write the solver's output into the protocol stream, or
+  refuse a valid spec with `Unknown task kind` on a server's first calls: the server runs one tool
+  at a time.
+- `add_object` and `remove_object` answer a spec a hand edit left misshapen — `embodiment: null`,
+  a `relations` that is not a list — with a refusal, where the agent got a bare
+  `Error executing tool`.
 
 ## [0.2.0] - 2026-09-28
 
