@@ -431,7 +431,9 @@ def _format_text(dump: dict[str, Any]) -> str:
         status += f"; {placement['passed']}/{placement['samples']} samples passed"
         status += f", {placement['distinct_layouts']} distinct"
     if placement.get("not_run"):
-        status += "; not run dry: " + ", ".join(placement["not_run"])
+        # Not "not run dry": a check for a relation kind the spec does not use
+        # has nothing to check, in the sim either.
+        status += "; not run: " + ", ".join(placement["not_run"])
     lines = [f"{dump['env_name']}  (seed {placement['seed']}, {status})"]
     for asset in dump["assets"]:
         position = ", ".join(f"{value:+.3f}" for value in asset["position_xyz"])

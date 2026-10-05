@@ -51,3 +51,11 @@ def test_new_elsewhere_puts_the_scene_beside_the_task_and_overwrites_nothing(tmp
     assert yaml.safe_load((tmp_path / "pick.yaml").read_text())["external_yaml"] == "pick_scene.yaml"
     with pytest.raises(FileExistsError):
         new(tmp_path / "pick.yaml")
+
+
+@pytest.mark.parametrize("name", ["tasks/a #b.yaml", "*star.yaml", "&anchor.yaml"])
+def test_new_writes_an_include_any_file_name_reads_back_as(tmp_path: Path, name: str):
+    """A ` #` would start a comment, a leading `*` or `&` an alias."""
+    task = tmp_path / name
+    scene = new(task)
+    assert (task.parent / yaml.safe_load(task.read_text())["external_yaml"]).resolve() == scene.resolve()

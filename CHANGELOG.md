@@ -38,8 +38,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `list_kinds`, an MCP tool listing the relation and task kinds a spec can name: the params each
   takes, the ones no form edits — a tuple range, a list of ids — by type, and which Arena marks
   `agent_ready`.
-- `describe_scene` and `arena-resolve-layout` report `placement.not_run`: the checks only the
-  simulator decides — physics settling, IK reach — so a dry pass reads as necessary, not sufficient.
+- `describe_scene` and `arena-resolve-layout` report `placement.not_run`: the checks a solve did
+  not run — the ones only the simulator decides, physics settling and IK reach, and the ones for
+  relation kinds the spec does not use — so a dry pass reads as necessary, not sufficient.
 - `samples` on `describe_scene`, and `--samples N` on `arena-resolve-layout`, solve that many
   layouts at once, as Arena draws one per reset, and report how many passed, which failed, how
   often each check failed and how many of the layouts differ. The first is still the one described.
@@ -76,12 +77,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   an editor never reads half a file. A write that fails, a full disk, is a refusal.
 - `describe_scene` and `render_views` report progress every ten seconds while a solve, a download
   or a render runs, where a long one looked frozen.
-
 - The MCP tools that write nothing — `search_assets`, `describe_scene`, `render_views`, `check_spec`,
-  `list_kinds` — declare themselves read-only, so a client may run them without asking.
+  `list_kinds`, `get_prim_tree` — declare themselves read-only, so a client may run them without
+  asking.
 - `arena-mcp` answers its handshake about two seconds sooner: Arena's solver is imported by the first
   tool that needs it, not at start.
-
 - Every entry in the editor panel is a card, after Blender's modifier stack: it folds, its header
   names it, and its × removes it. A folded card sums up its entry beside the name, and an object's
   card shows its asset's picture.

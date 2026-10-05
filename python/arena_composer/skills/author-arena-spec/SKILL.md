@@ -82,4 +82,5 @@ the conventions of a spec, and what to do when a check fails.
 ## Report
 
 End by listing the files written, `passed` of `samples`, `distinct_layouts`, and the checks in
-`not_run`. A dry solve cannot decide those; the simulator does, when the spec runs.
+`not_run` that only the simulator decides, such as `physics_settled` and `ik_reachable`. The
+others in it check relation kinds the spec does not use.

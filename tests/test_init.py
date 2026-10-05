@@ -82,6 +82,13 @@ def test_an_import_a_kept_launcher_lacks_says_how_to_add_it(tmp_path: Path, caps
     assert "add this line to it:\n  export ARENA_COMPOSER_IMPORTS=my_assets\n" in capsys.readouterr().err
 
 
+def test_a_kept_launcher_that_links_nowhere_gets_the_same_advice(tmp_path: Path, capsys):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "arena-mcp").symlink_to(tmp_path / "gone")
+    assert main(["init", str(tmp_path), "--import", "my_assets"]) == 0
+    assert "add this line to it:" in capsys.readouterr().err
+
+
 def test_the_skills_are_linked_where_clients_look(tmp_path: Path):
     written = dict(init(tmp_path, VENV))
     for directory in (".agents/skills", ".claude/skills"):
@@ -118,6 +125,22 @@ def test_an_install_inside_the_project_is_linked_relative_to_it(tmp_path: Path, 
     init(tmp_path / "a", tmp_path / "a" / "venv")
     (tmp_path / "a").rename(tmp_path / "b")
     assert (tmp_path / "b" / ".agents" / "skills" / "mine" / "SKILL.md").is_file()
+
+
+def test_a_skills_directory_linked_out_of_the_project_still_reaches_the_skill(tmp_path: Path, monkeypatch):
+    """A shared `.claude/skills` elsewhere: the link lands there, and is
+    relative from there."""
+    skills = tmp_path / "project" / "venv" / "skills"
+    (skills / "mine").mkdir(parents=True)
+    (skills / "mine" / "SKILL.md").write_text("---\nname: mine\n---\n")
+    monkeypatch.setattr(cli, "SKILLS", skills)
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "project" / ".claude").mkdir()
+    (tmp_path / "project" / ".claude" / "skills").symlink_to(tmp_path / "shared")
+    init(tmp_path / "project", tmp_path / "project" / "venv")
+    assert (tmp_path / "shared" / "mine" / "SKILL.md").is_file()
+    # A second run finds it current, rather than stale.
+    assert not dict(init(tmp_path / "project", tmp_path / "project" / "venv"))[tmp_path / "project/.claude/skills/mine"]
 
 
 def test_a_venv_at_the_project_root_is_refused(tmp_path: Path):

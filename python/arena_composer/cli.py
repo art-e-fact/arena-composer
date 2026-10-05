@@ -131,7 +131,9 @@ def link_skills(project: Path) -> list[tuple[Path, bool]]:
                 results.append((link, False))
                 continue
             link.parent.mkdir(parents=True, exist_ok=True)
-            link.symlink_to(os.path.relpath(skill, link.parent) if skill.is_relative_to(project) else skill)
+            # From the directory the link lands in, which a skills directory
+            # linked out of the project moves.
+            link.symlink_to(os.path.relpath(skill, link.parent.resolve()) if skill.is_relative_to(project) else skill)
             results.append((link, True))
     return results
 
@@ -146,9 +148,10 @@ def new(task: Path) -> Path:
         if path.exists():
             raise FileExistsError(f"{path} exists")
     text = (TEMPLATES / "tasks" / "new_task.yaml").read_text()
-    # Quoted, as JSON: a bare `on` or `yes` is a boolean to the YAML 1.1 Arena reads.
+    # Quoted, as JSON: a bare `on` or `yes` is a boolean to the YAML 1.1 Arena
+    # reads, a ` #` starts a comment, and a leading `*` or `&` is an alias.
     text = text.replace("env_name: new_task", f"env_name: {json.dumps(task.stem)}")
-    text = text.replace("../scenes/new_scene.yaml", os.path.relpath(scene, task.parent))
+    text = text.replace("../scenes/new_scene.yaml", json.dumps(os.path.relpath(scene, task.parent)))
     for path, body in ((scene, (TEMPLATES / "scenes" / "new_scene.yaml").read_text()), (task, text)):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
@@ -199,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{'wrote' if written else 'kept '} {path.relative_to(project)}")
     launcher = project / LAUNCHER_PATH
     line = export_line(tuple(args.imports))
-    if args.imports and line not in launcher.read_text():
+    if args.imports and not (launcher.is_file() and line in launcher.read_text()):
         print(
             f"arena-composer: kept {LAUNCHER_PATH}, which does not import {', '.join(args.imports)}; "
             f"delete it and run init again, or add this line to it:\n  {line}",
