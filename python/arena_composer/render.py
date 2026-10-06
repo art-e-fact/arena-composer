@@ -161,8 +161,12 @@ def main(argv: list[str] | None = None) -> int:
     # rather than after the seconds Arena takes to import.
     if args.size < 1:
         parser.error(f"--size must be at least 1, got {args.size}")
-    # One spec named twice, by a glob and by hand, is drawn once.
-    args.specs = list(dict.fromkeys(args.specs))
+    # One spec named twice — by a glob and by hand, or by two spellings of its
+    # path — is drawn once, as first named.
+    first: dict[Path, Path] = {}
+    for spec in args.specs:
+        first.setdefault(spec.resolve(), spec)
+    args.specs = list(first.values())
     for spec in args.specs:
         if not spec.is_file():
             parser.error(f"no spec at {spec}")
@@ -175,11 +179,10 @@ def main(argv: list[str] | None = None) -> int:
 
     views = list(dict.fromkeys(args.views or ["default"]))
     shots = {spec: {view: args.out_dir / f"{spec.stem}-{view}.png" for view in views} for spec in args.specs}
-    # A spec that fails this run must not leave the last run's picture of it
-    # where a glob over the directory picks it up as current.
+    # Made now, so a path that is no directory is refused before Arena is
+    # imported rather than by the first render.
     try:
-        for path in (path for paths in shots.values() for path in paths.values()):
-            path.unlink(missing_ok=True)
+        args.out_dir.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         parser.error(f"cannot write to --out-dir {args.out_dir}: {error}")
 
@@ -201,6 +204,10 @@ def main(argv: list[str] | None = None) -> int:
             render(payload, paths, args.size)
         except Exception as error:
             failed += 1
+            # The last run's pictures of it go too, or a glob over the
+            # directory would take them for this run's.
+            for path in paths.values():
+                path.unlink(missing_ok=True)
             for line in spec_edit.reasons(error):
                 print(f"{spec}: {line}", file=sys.stderr)
             continue

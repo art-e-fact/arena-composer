@@ -126,7 +126,8 @@ def test_a_spec_that_does_not_build_is_reported_and_the_rest_are_drawn(tmp_path,
     """Several specs share one run, so one broken spec costs its own pictures
     and no one else's: its reasons on stderr, the others' paths on stdout, and
     exit 1. Its picture from an earlier run goes too, or a glob over the
-    directory would take it for this run's. A spec named twice is drawn once."""
+    directory would take it for this run's. A spec named twice, in two spellings,
+    is drawn once."""
     good, broken = _spec(tmp_path / "good.yaml"), _spec(tmp_path / "broken.yaml")
     out = tmp_path / "renders"
     out.mkdir()
@@ -152,7 +153,9 @@ def test_a_spec_that_does_not_build_is_reported_and_the_rest_are_drawn(tmp_path,
     monkeypatch.setitem(sys.modules, "arena_composer.payload", SimpleNamespace(encode=lambda dump, remote: b"png"))
     monkeypatch.setattr(render, "render", drawn)
 
-    argv = [str(good), str(broken), str(good), "--view", "top", "--view", "front", "-o", str(out)]
+    # `good` again, spelled through `renders/..`: the same file, drawn once.
+    again = out / ".." / "good.yaml"
+    argv = [str(good), str(broken), str(again), "--view", "top", "--view", "front", "-o", str(out)]
     assert render.main(argv) == 1
     stdout, stderr = capsys.readouterr()
     assert stdout.splitlines() == [str(out / "good-top.png"), str(out / "good-front.png")]
@@ -160,6 +163,18 @@ def test_a_spec_that_does_not_build_is_reported_and_the_rest_are_drawn(tmp_path,
     assert f"{good}: good solved" in stderr
     assert "[placement] Validated 1 layout" in stderr
     assert sorted(path.name for path in out.iterdir()) == ["good-front.png", "good-top.png"]
+
+
+def test_a_module_that_does_not_import_leaves_the_last_pictures(tmp_path, monkeypatch):
+    """Nothing was attempted, so nothing of the last run is stale: only a spec
+    this run fails on loses its pictures."""
+    spec = _spec(tmp_path / "good.yaml")
+    (tmp_path / "good-default.png").write_bytes(b"an earlier render")
+
+    monkeypatch.setattr(cli, "apply_spec_options", lambda parser, args: parser.exit(1, "no my_assets\n"))
+    with pytest.raises(SystemExit):
+        render.main([str(spec), "-o", str(tmp_path)])
+    assert (tmp_path / "good-default.png").read_bytes() == b"an earlier render"
 
 
 @pytest.mark.skipif(not PAYLOAD, reason="needs ARENA_COMPOSER_PAYLOAD and a GPU")
