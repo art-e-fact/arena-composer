@@ -17,7 +17,7 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
   </tr>
 </table>
 
-https://github.com/user-attachments/assets/48f940f4-f77d-4e99-accf-d9a22b009524
+https://github.com/user-attachments/assets/b069bedf-5977-42f0-a335-4526127f0119
 
 ## Highlights
 
