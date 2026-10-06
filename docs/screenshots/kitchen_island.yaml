@@ -14,7 +14,10 @@ embodiment:
 background:
   id: kitchen
   registry_name: lightwheel_kitchen_l_shaped_with_island_industrial
-  params: {}
+  params:
+    # Keeps the objects off the kitchen's own props, the plant on the island among them, which the
+    # spec does not name. The default, bbox, cannot: the kitchen's box holds everything.
+    collision_mode: mesh
 objects:
 - id: plate
   registry_name: plate_large_vomp_robolab
