@@ -56,6 +56,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `arena-composer new PATH` writes a task YAML at `PATH`, and the scene it includes, holding a
   pick-and-place that validates, solves and builds. The scene goes in the `scenes` beside a `tasks`
   directory, else beside the task.
+- `arena-render SPEC...` draws specs with no window and no display: it solves each layout and
+  writes a PNG per `--view` — `default`, the perspective the window opens on, and the orthographic
+  `top`, `front` and `side` — as `<spec>-<view>.png` under `--out-dir`, printing each path. Several
+  specs share one import of Arena. One that does not build is skipped with its reasons, the rest are
+  drawn, and the run exits 1; a layout that fails placement is drawn all the same, with the checks
+  it failed.
 
 ### Changed
 

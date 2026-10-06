@@ -1,7 +1,7 @@
 //! PyO3 wrapper. Deliberately thin: Python's job is to resolve layouts and read
 //! the USD, this crate's job is to draw what comes out, and the packed payload
-//! is the whole contract between them — the same one `arena-viewer` and
-//! `arena-render` read off disk.
+//! is the whole contract between them — the same one `arena-viewer` reads off
+//! disk.
 
 use std::path::PathBuf;
 

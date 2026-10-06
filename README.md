@@ -37,6 +37,9 @@ https://github.com/user-attachments/assets/b069bedf-5977-42f0-a335-4526127f0119
   spec in 3D, beside a form that edits the spec.
 - `arena-mcp` is an MCP server whose tools search assets, add and remove objects, and describe and
   render the solved layout.
+- `arena-render <spec>.yaml...` draws the solved layout headless, a PNG per `--view`: `default`
+  (perspective), or orthographic `top`, `front` and `side`. It needs no display, and a machine
+  with no GPU draws through Mesa's lavapipe.
 - `arena-resolve-layout <spec>.yaml` prints the solved layout as JSON or text.
 - `arena-composer new environments/tasks/<name>.yaml` starts a spec: a task, and the scene it
   includes, holding a pick-and-place that validates, solves and builds.

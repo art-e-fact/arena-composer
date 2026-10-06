@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import os
 import signal
 import sys
 from pathlib import Path
@@ -28,10 +27,9 @@ from pathlib import Path
 import msgpack
 import yaml
 
-from arena_composer import catalog, simready, spec_edit, viewer_process
+from arena_composer import catalog, cli, simready, spec_edit, viewer_process
 from arena_composer.payload import encode, encode_spec
-from arena_composer.resolve_layout import DEFAULT_SEED, resolve_layout_from_yaml
-from arena_composer.usd_assets import use_local_asset_cache
+from arena_composer.resolve_layout import resolve_layout_from_yaml
 
 # A spec is one or two small files, so they are polled rather than watched
 # through inotify: two stats twice a second cost nothing and add no dependency.
@@ -54,30 +52,11 @@ ANSWER_TRIES = 3
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("spec", type=Path, help="Path to an ArenaEnvGraphSpec YAML")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"Placement seed (default: {DEFAULT_SEED})")
+    cli.add_spec_options(parser)
     parser.add_argument("--payload", type=Path, help="Also write the packed scene here, for `arena-viewer`")
-    parser.add_argument(
-        "--asset-cache",
-        type=Path,
-        help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
-    )
-    parser.add_argument(
-        "--import",
-        dest="imports",
-        action="append",
-        default=[],
-        metavar="MODULE",
-        help=f"Import MODULE first, for the assets and kinds it registers with Arena; repeatable. "
-        f"${catalog.IMPORTS} names more, separated by '{os.pathsep}'",
-    )
     args = parser.parse_args(argv)
 
-    try:
-        catalog.load_extensions(tuple(args.imports))
-    except ImportError as error:
-        print(f"{parser.prog}: {error}", file=sys.stderr)
-        return 1
-    use_local_asset_cache(args.asset_cache)
+    cli.apply_spec_options(parser, args)
     # Stamped before the first solve, so a change made during those seconds is
     # noticed for what it is rather than taken for the file that was solved.
     stamps = _watched(args.spec)

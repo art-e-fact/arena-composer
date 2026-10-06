@@ -8,11 +8,12 @@ They meet in one MessagePack payload:
 spec.yaml ─▶ resolve_layout.py ─▶ payload.py ──MessagePack──▶ scene.rs + spec.rs
              (Arena, the solver)   (+ usd/: geometry)             │
                                                                   ├─▶ viewer.rs + editor/   a window   (arena-view)
-                                                                  └─▶ render.rs             PNGs       (render_views)
+                                                                  └─▶ render.rs             PNGs       (arena-render, render_views)
 ```
 
-The same payload runs through `arena-viewer` and `arena-render` straight off disk, which is how the
-Rust side is iterated on without Arena ([development.md](development.md#iterating-on-the-rust-side)).
+The same payload runs through the dev `arena-viewer` straight off disk, in the window or drawn
+headless, which is how the Rust side is iterated on without Arena
+([development.md](development.md#iterating-on-the-rust-side)).
 
 ## The payload
 
@@ -57,7 +58,8 @@ comes with the spec (`view._reload_on_change`, `payload.encode_spec`;
 
 [render.py](../python/arena_composer/render.py) draws a packed scene from named views — `default`
 (perspective, framed like the window) and orthographic `top`, `front`, `side` — with no window and
-no display server. [render.rs](../src/render.rs) runs Bevy with `synchronous_pipeline_compilation`,
+no display server. `arena-render` is its command, and `render_views` its MCP tool; each names the
+file every view goes to. [render.rs](../src/render.rs) runs Bevy with `synchronous_pipeline_compilation`,
 without which the first frames come back empty.
 
 An asset Bevy cannot load does not stop it drawing: it writes the picture around the gap, so a

@@ -38,7 +38,7 @@ from arena_composer import catalog, render, simready, spec_edit, usd_assets
 # From `spec_edit`, not `resolve_layout`: importing the latter imports Arena's
 # solver, two seconds the client spends waiting on the handshake. The first
 # tool that solves pays for it instead — see `_resolve`.
-from arena_composer.spec_edit import DEFAULT_SEED, SpecError
+from arena_composer.spec_edit import DEFAULT_SEED
 
 #: Sent to the client at handshake, as the model's orientation to this server.
 #: Per-tool detail lives in the tool docstrings; this is what ties them into an
@@ -212,15 +212,6 @@ class _Progress:
                 await self.report(f"{doing}: {time.monotonic() - started:.0f} s")
 
 
-def _reasons(error: Exception) -> list[str]:
-    """What stopped a resolve, as lines the agent can act on: `SpecError`'s
-    own, one per object, and for anything else Arena raises on a spec that
-    does not read, validate or build — not YAML, a name the registry does not
-    know, a placement that fails — its type and message, as `arena-view`'s
-    toast gives them."""
-    return error.errors if isinstance(error, SpecError) else [f"{type(error).__name__}: {error}"]
-
-
 async def _or_refused(progress: _Progress, doing: str, work: Callable[..., Any], *args: Any) -> Any:
     """`work(*args)` off the event loop — a resolve or a render blocks for
     seconds — or what stopped it as a `ToolError`. Pictures or a reason, never
@@ -229,7 +220,7 @@ async def _or_refused(progress: _Progress, doing: str, work: Callable[..., Any],
     try:
         return await progress.run(doing, work, *args)
     except Exception as error:
-        raise ToolError("\n".join(_reasons(error))) from error
+        raise ToolError("\n".join(spec_edit.reasons(error))) from error
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -350,7 +341,7 @@ async def describe_scene(
         # A spec that does not read, validate or build is the same normal case
         # as a refused edit, and reads the same way. Returned rather than
         # raised: the SDK withholds any exception's message but `ToolError`'s.
-        return {"ok": False, "errors": _reasons(error)}
+        return {"ok": False, "errors": spec_edit.reasons(error)}
     return {
         "env_name": dump["env_name"],
         "spec_path": dump["spec_path"],
@@ -548,8 +539,10 @@ async def render_views(
     progress = _Progress(ctx)
     payload = await _or_refused(progress, f"resolving {path.name} (seed {seed})", _pack, path, seed)
     out_dir = _RENDERS / hashlib.sha256(str(path).encode()).hexdigest()[:16]
-    paths = await _or_refused(progress, f"drawing {', '.join(views)}", render.render, payload, out_dir, views, size)
-    return [Image(path=path) for path in paths]
+    # A view asked for twice is drawn once.
+    shots = {view: out_dir / f"{view}.png" for view in views}
+    await _or_refused(progress, f"drawing {', '.join(shots)}", render.render, payload, shots, size)
+    return [Image(path=path) for path in shots.values()]
 
 
 @mcp.tool(annotations=_READ_ONLY)

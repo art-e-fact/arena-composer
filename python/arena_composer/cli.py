@@ -16,6 +16,9 @@ pointed at this one.
 
 `--import MODULE` bakes `ARENA_COMPOSER_IMPORTS` into the launcher: the one
 place a client's stripped environment can get it from.
+
+Also the options the commands that solve a spec share: `add_spec_options` and
+`apply_spec_options`.
 """
 
 from __future__ import annotations
@@ -27,7 +30,8 @@ import shlex
 import sys
 from pathlib import Path
 
-from arena_composer.catalog import IMPORTS
+from arena_composer import catalog
+from arena_composer.spec_edit import DEFAULT_SEED
 
 LAUNCHER_PATH = "bin/arena-mcp"
 SKILLS = Path(__file__).parent / "skills"
@@ -79,7 +83,7 @@ CONFIGS = {
 
 def export_line(imports: tuple[str, ...]) -> str:
     """The launcher's line that has the server import `imports` first."""
-    return f"export {IMPORTS}={shlex.quote(os.pathsep.join(imports))}"
+    return f"export {catalog.IMPORTS}={shlex.quote(os.pathsep.join(imports))}"
 
 
 def init(project: Path, venv: Path, imports: tuple[str, ...] = ()) -> list[tuple[Path, bool]]:
@@ -156,6 +160,43 @@ def new(task: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
     return scene
+
+
+def add_spec_options(parser: argparse.ArgumentParser) -> None:
+    """`--seed`, `--asset-cache` and `--import`, which `arena-view`,
+    `arena-resolve-layout` and `arena-render` take alike."""
+    parser.add_argument(
+        "--seed", type=int, default=DEFAULT_SEED, metavar="N", help=f"Placement seed (default: {DEFAULT_SEED})"
+    )
+    parser.add_argument(
+        "--asset-cache",
+        type=Path,
+        metavar="DIR",
+        help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
+    )
+    parser.add_argument(
+        "--import",
+        dest="imports",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help=f"Import MODULE first, for the assets and kinds it registers with Arena; repeatable. "
+        f"${catalog.IMPORTS} names more, separated by '{os.pathsep}'",
+    )
+
+
+def apply_spec_options(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Import the modules `--import` and `ARENA_COMPOSER_IMPORTS` name, and
+    read USDs through `--asset-cache`. A module that does not import is one
+    line on stderr and exit 1."""
+    try:
+        catalog.load_extensions(tuple(args.imports))
+    except ImportError as error:
+        parser.exit(1, f"{parser.prog}: {error}\n")
+    # Imported here: it imports pxr, which `init` and `new` have no use for.
+    from arena_composer.usd_assets import use_local_asset_cache
+
+    use_local_asset_cache(args.asset_cache)
 
 
 def main(argv: list[str] | None = None) -> int:

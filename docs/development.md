@@ -26,15 +26,17 @@ A packed payload skips Arena's import, the solve and the USD reads. Pack one in 
 arena-resolve-layout environments/tasks/banana_in_bowl.yaml --payload /tmp/scene.msgpack
 ```
 
-Then run the binaries here. `arena-viewer` is `src/main.rs`. `arena-render` has no `[[bin]]` entry:
-cargo finds it at `src/bin/arena-render.rs`.
+Then run the dev binary here, `arena-viewer` (`src/main.rs`). On its own it opens the window:
 
 ```bash
 cargo run --bin arena-viewer -- /tmp/scene.msgpack
 ```
 
+Given `VIEW=PNG` pairs it draws them headless and exits, through the same `render.rs` that
+`arena-render` and `render_views` run:
+
 ```bash
-cargo run --bin arena-render -- /tmp/scene.msgpack top=top.png front=front.png
+cargo run --bin arena-viewer -- /tmp/scene.msgpack top=top.png front=front.png
 ```
 
 To see the window without a person at the keyboard:

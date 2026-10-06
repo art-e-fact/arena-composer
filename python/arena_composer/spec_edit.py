@@ -68,6 +68,15 @@ class SpecError(Exception):
         self.errors = errors
 
 
+def reasons(error: Exception) -> list[str]:
+    """What stopped a resolve, as lines to act on: `SpecError`'s own, one per
+    object, and for anything else Arena raises on a spec that does not read,
+    validate or build — not YAML, a name the registry does not know, a
+    placement that fails — its type and message, as `arena-view`'s toast
+    gives them."""
+    return error.errors if isinstance(error, SpecError) else [f"{type(error).__name__}: {error}"]
+
+
 #: Strings that have to go out quoted.
 #:
 #: Arena loads these files with PyYAML, which reads YAML 1.1, where a bare
