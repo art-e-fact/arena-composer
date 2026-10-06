@@ -15,8 +15,12 @@ cargo build --quiet --bin arena-viewer
 logs=$(mktemp -d)
 Xephyr -displayfd 3 -screen 1600x1000 -ac -br -noreset 3>"$logs/display" 2>"$logs/xephyr.log" &
 xephyr=$!
-trap 'kill $xephyr; rm -rf "$logs"' EXIT
-until [[ -s $logs/display ]]; do sleep 0.1; done
+trap 'kill $xephyr 2>/dev/null || true; rm -rf "$logs"' EXIT
+until [[ -s $logs/display ]]; do
+    # It exits, rather than says, when there is no display to open its window on.
+    kill -0 $xephyr 2>/dev/null || { cat "$logs/xephyr.log" >&2; exit 1; }
+    sleep 0.1
+done
 display=:$(<"$logs/display")
 
 # shoot <png> <scene> [VAR=value ...]: open <scene>.yaml in that state, and
