@@ -62,6 +62,9 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
         // In `run` and not in `setup`: the editor needs a render context to
         // draw into, and `setup`'s tests build a world without one.
         .add_plugins(crate::editor::plugin)
+        // Nothing unless `ARENA_VIEWER_TOUR` names a storyboard. After the
+        // window is set up, which a tour resizes.
+        .add_plugins(crate::tour::plugin)
         .insert_resource(ResolvedScene(scene))
         .insert_resource(SceneUpdates(Mutex::new(updates)))
         .add_systems(Startup, setup)
@@ -75,7 +78,12 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
             .add_systems(Update, screenshot);
     }
 
-    app.run();
+    // A tour that cannot be played says so in the exit code, which is what
+    // `docs/video/record.sh` stops on. The app, and the recording with it, is
+    // finished by the time `run` returns.
+    if let AppExit::Error(code) = app.run() {
+        std::process::exit(code.get().into());
+    }
 }
 
 /// `ARENA_VIEWER_SIZE=1440x900` opens the window that size, for a screenshot

@@ -7,14 +7,17 @@
 //! [`render`], which writes a PNG per view and exits.
 //!
 //! Each has a Python front end (the [`python`] module, behind the `python`
-//! feature) and a `[[bin]]` that reads the same payload off disk.
+//! feature) and a `[[bin]]` that reads the same payload off disk. The window
+//! can also play a storyboard, and record it: the README's video ([`tour`]).
 
 pub mod editor;
 pub mod layout;
+pub mod record;
 pub mod render;
 pub mod scene;
 pub mod spawn;
 pub mod spec;
+pub mod tour;
 pub mod viewer;
 pub mod wire;
 

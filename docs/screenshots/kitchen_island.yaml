@@ -2,7 +2,8 @@
 # editor off: a kitchen that fills the view from the background's own camera, objects nested on an
 # object reference, and relations of several kinds, unary ones among them for the graph's chips.
 # The position limits keep the objects inside that camera's frame. Relations are named by position
-# in shoot.sh: move one and update it there.
+# in shoot.sh: move one and update it there. The README's video plays in this scene too, and
+# docs/video/tour.json names its objects, and the next_to between the bowl and the plate.
 env_name: kitchen_island
 embodiment:
   id: droid
