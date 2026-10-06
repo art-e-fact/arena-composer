@@ -48,10 +48,18 @@ To see the window without a person at the keyboard:
 | `ARENA_VIEWER_DOCK_HEIGHT=420` | open the dock that tall | [dock.rs](../src/editor/dock.rs) `Dock` |
 | `ARENA_VIEWER_SHOW_RELATIONS=all` or `=2,5` | open with those relations' gizmos drawn | [form.rs](../src/editor/form.rs) `PanelState` |
 | `ARENA_VIEWER_PICK=bowl` or `=3` | open with that node, or the relation at that position, picked in the graph and its card open | [form.rs](../src/editor/form.rs) `PanelState` |
+| `ARENA_VIEWER_TOUR=tour.json` | play a storyboard with a pointer of the tour's own, and close the window after it | [tour.rs](../src/tour.rs) |
+| `ARENA_VIEWER_RECORD=raw.mp4` | record the tour, a video frame per update, with `ffmpeg` | [record.rs](../src/record.rs) |
 
 The README's screenshots are taken this way, by [docs/screenshots/shoot.sh](screenshots/shoot.sh):
 run it after changing what they show. The
 [readme-screenshots](../.claude/skills/readme-screenshots/SKILL.md) skill says how to change a shot.
+
+Its video is a tour played in a real `arena-view`, so the edits it makes are solved:
+[docs/video/record.sh](video/record.sh) records it, and the
+[readme-video](../.claude/skills/readme-video/SKILL.md) skill says how to change it. Neither the
+shots nor the video are committed: [docs/publish.sh](publish.sh) uploads them to the pull request
+and points the README at them.
 
 ## Tests
 

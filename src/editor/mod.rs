@@ -130,6 +130,9 @@ pub struct Form {
     /// Whether a crawl of the bucket is running. Python's answer, kept from
     /// whichever message last carried one.
     pub indexing: bool,
+    /// How many messages have carried errors. The same error again opens no
+    /// second toast, so this is what says it came again.
+    pub failures: u64,
 }
 
 impl Form {
@@ -188,6 +191,7 @@ impl Form {
         let Some(errors) = scene.errors.as_ref().filter(|errors| !errors.is_empty()) else {
             return;
         };
+        self.failures += 1;
         let error = errors.join("\n");
         if !self.errors.contains(&error) {
             self.errors.push(error);
@@ -452,6 +456,7 @@ mod tests {
         form.take_errors(&with_errors(&["SpecError: no bowl"]));
         form.take_errors(&with_errors(&["SpecError: no bowl"]));
         assert_eq!(form.errors.len(), 2, "a repeated failure piled up: {:?}", form.errors);
+        assert_eq!(form.failures, 3, "a repeated failure went uncounted");
 
         for index in 0..super::MAX_TOASTS {
             form.take_errors(&with_errors(&[&format!("error {index}")]));

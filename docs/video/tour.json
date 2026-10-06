@@ -1,0 +1,39 @@
+{
+  "size": [1600, 900],
+  "scale": 1.25,
+  "fps": 30,
+  "warmup": 6,
+  "steps": [
+    {"note": "The spec as it opens: the layout Arena solved for it, a card per entry down the panel, and the asset browser under the view.",
+     "pause": 1.2},
+
+    {"note": "Round the island a little. The camera turns about a point well behind the island, so a little goes a long way.",
+     "drag": {"in": "view"}, "by": [-25, 0], "secs": 1.4, "pause": 0.8},
+
+    {"note": "One search over Arena's assets and NVIDIA's SimReady props.",
+     "click": "search name and tags"},
+    {"type": "pear", "pause": 0.8},
+    {"note": "The tree narrows it to the props.",
+     "click": {"text": "SimReady", "in": "dock"}, "pause": 0.8},
+
+    {"note": "A prop dragged onto the plate: the surface it would stand on lights up, and letting go adds it, standing `on` the plate.",
+     "drag": {"text": "Pear_A01", "in": "dock"}, "to": {"object": "plate", "offset": [-28, 8]}, "secs": 1.4},
+    {"until": "solved", "pause": 1.5},
+
+    {"note": "The spatial graph: a node per object, an edge per relation.",
+     "click": "graph", "pause": 0.8},
+    {"note": "Hovering a node outlines its object in the view: the pear, standing on the plate.",
+     "move": {"text": "pear_a01", "in": "dock"}, "pause": 1.2},
+    {"note": "A click on an edge opens the relation's card, and draws what it asks for over the layout.",
+     "click": {"text": "next_to", "in": "dock", "near": {"text": "wooden_bowl", "in": "dock"}}, "pause": 1.4},
+
+    {"note": "Its side, from the menu: the bowl goes round behind the plate. Of the menu's entries and the same text elsewhere, the one nearest the pointer.",
+     "click": {"text": "positive_x", "in": "panel"}, "pause": 0.5},
+    {"click": {"text": "positive_y", "near": {"pointer": true}}},
+    {"until": "solved", "pause": 1.2},
+
+    {"note": "Its distance dragged out: the shape follows the drag, the solve the release.",
+     "drag": {"text": "0.100", "in": "panel", "near": {"text": "distance_m", "in": "panel"}}, "by": [50, 0], "secs": 1.5},
+    {"until": "solved", "pause": 2.0}
+  ]
+}

@@ -53,12 +53,9 @@ rmp-serde = "1"
 serde_bytes = "0.11"
 bytemuck = "1"
 anyhow = "1"
-pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
-
-[dev-dependencies]
-# Writing a payload fixture as a literal. The tests pack it to MessagePack the
-# way Python does; nothing outside a test reads or writes JSON.
+# The demo video's storyboard (`src/tour.rs`).
 serde_json = "1"
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
 
 [features]
 # Compiles the PyO3 wrapper (src/python.rs). Safe for a normal `cargo build`,

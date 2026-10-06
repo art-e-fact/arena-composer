@@ -22,7 +22,11 @@ PNG. A few seconds a shot. Arena's venv has to be active only when a scene has t
 1. Run `docs/screenshots/shoot.sh`, from any directory.
 2. Read every PNG it names, and check it against the list below. A shot that fails one is not done:
    change the state or the scene, never the picture.
-3. Commit the PNGs with the change that altered the window.
+3. Run `docs/publish.sh docs/screenshots/*.png` on the branch whose pull request changes the
+   window. The PNGs stay out of git, so that a retake does not grow the clone: it uploads them in a
+   comment on the pull request, where reviewers see them, and puts the URL GitHub gives each on the
+   README line under its marker, `<!-- graph.png -->`. Commit README.md with the change. It needs
+   gh 2.102 or later, for `--attach`, and push access; it posts, so run it once the shots are right.
 
 A shot is right when:
 
@@ -40,7 +44,9 @@ A shot is right when:
 A shot is one line at the foot of `shoot.sh`: the PNG, the scene, and the `ARENA_VIEWER_*` variables
 that set the window's state, listed in the table in
 [docs/development.md](../../../docs/development.md#iterating-on-the-rust-side). Every shot opens at
-1440×900. A new shot is a new line, and a new cell in the README's table.
+1440×900. A new shot is a new line, and a new cell in the README's table under a marker naming its
+PNG, with any `https://github.com/user-attachments/assets/…` URL in it for `docs/publish.sh` to
+replace.
 
 Relations are named by position in the spec's `relations:` list, from 0, in both `ARENA_VIEWER_PICK`
 and `ARENA_VIEWER_SHOW_RELATIONS`. Editing that list moves them.

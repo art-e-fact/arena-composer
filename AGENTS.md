@@ -26,7 +26,8 @@ wheel and releasing are in [docs/development.md](docs/development.md).
 
 A change to what the window looks like retakes the README's screenshots:
 `docs/screenshots/shoot.sh`, and the [readme-screenshots](.claude/skills/readme-screenshots/SKILL.md)
-skill for changing what they show.
+skill for changing what they show. One to how it is used re-records its video:
+`docs/video/record.sh`, and the [readme-video](.claude/skills/readme-video/SKILL.md) skill.
 
 ## Where things are
 
@@ -62,6 +63,7 @@ skill for changing what they show.
 | [viewer.rs](src/viewer.rs) | the windowed app: applies incoming messages, draws the status line (`hud_line`) |
 | [editor/](src/editor/) | the panel: a card per spec entry, the dock with the asset browser and the spatial graph, drag-and-drop, relation gizmos |
 | [render.rs](src/render.rs) | headless renders, a PNG per view |
+| [tour.rs](src/tour.rs), [record.rs](src/record.rs) | the README's video: a storyboard played with a pointer of its own, and recorded |
 | [python.rs](src/python.rs) | the PyO3 wrapper, behind the `python` feature |
 | [main.rs](src/main.rs), [bin/arena-render.rs](src/bin/arena-render.rs) | `arena-viewer` and `arena-render`, reading a packed payload off disk |
 
@@ -98,8 +100,9 @@ skill for changing what they show.
 - **Bevy's default features stay off.** Its audio and gamepad support link libasound and libudev,
   which a manylinux wheel may not. Name each feature you need in [Cargo.toml](Cargo.toml).
 - **The `python` feature is off by default**, so plain `cargo check`/`clippy`/`test` never compile
-  `src/python.rs`: pass `--features python`. `extension-module` is maturin's alone. It unlinks
-  libpython and breaks `cargo run` and `cargo test`.
+  `src/python.rs`: pass `--features python`. `extension-module` is for building the extension
+  alone, as maturin and `docs/video/record.sh` do. It unlinks libpython and breaks `cargo run` and
+  `cargo test`.
 - **CI has no Arena.** A test file that imports it goes in `collect_ignore` in
   [tests/conftest.py](tests/conftest.py), or CI fails.
 - **A change people using the package can see goes in [CHANGELOG.md](CHANGELOG.md)**, in the same

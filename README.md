@@ -8,14 +8,19 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/screenshots/assets.png"><img src="docs/screenshots/assets.png" alt="The visual editor with the asset browser searched"></a></td>
-    <td width="50%"><a href="docs/screenshots/graph.png"><img src="docs/screenshots/graph.png" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <!-- assets.png -->
+    <td width="50%"><a href="https://github.com/user-attachments/assets/32319398-aeb2-40b0-acaa-001a202fe33a"><img src="https://github.com/user-attachments/assets/32319398-aeb2-40b0-acaa-001a202fe33a" alt="The visual editor with the asset browser searched"></a></td>
+    <!-- graph.png -->
+    <td width="50%"><a href="https://github.com/user-attachments/assets/67e256a6-51b9-4f0e-aee7-2c13b08a2173"><img src="https://github.com/user-attachments/assets/67e256a6-51b9-4f0e-aee7-2c13b08a2173" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
     <td>The spatial graph: a node per object, an edge per relation. A click opens its card, and the view draws the relation's shape over the layout.</td>
   </tr>
 </table>
+
+<!-- arena-composer.mp4 -->
+https://github.com/user-attachments/assets/b069bedf-5977-42f0-a335-4526127f0119
 
 ## Highlights
 
