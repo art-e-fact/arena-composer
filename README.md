@@ -17,6 +17,8 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
   </tr>
 </table>
 
+https://github.com/user-attachments/assets/48f940f4-f77d-4e99-accf-d9a22b009524
+
 ## Highlights
 
 - **Kit-less scene renderer.** Arena's solved layouts, drawn live and headless without Isaac Sim;

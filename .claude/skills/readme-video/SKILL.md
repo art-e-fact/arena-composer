@@ -1,6 +1,6 @@
 ---
 name: readme-video
-description: Re-records the README's demo video of the visual editor with docs/video/record.sh, and changes what it shows — the clicks, drags, typing and edits a pointer makes in arena-view's window, and their timing — by editing the storyboard docs/video/tour.json. Use after a change to how the panel, the dock, the browser, the graph or the 3D view look or are used, when a new feature should be shown in the video, or when asked to update, re-record or re-cut it. Not for still screenshots (readme-screenshots).
+description: Re-records the README's demo video of the visual editor with docs/video/record.sh, publishes it with docs/video/publish.sh, and changes what it shows — the clicks, drags, typing and edits a pointer makes in arena-view's window, and their timing — by editing the storyboard docs/video/tour.json. Use after a change to how the panel, the dock, the browser, the graph or the 3D view look or are used, when a new feature should be shown in the video, or when asked to update, re-record or re-cut it. Not for still screenshots (readme-screenshots).
 ---
 
 # README video
@@ -31,10 +31,12 @@ Lightwheel's SDK asks its server for the kitchen — and cargo, Xephyr, lavapipe
    into the video. `ffmpeg -ss T -i target/video/arena-composer.mp4 -frames:v 1 -update 1 frame.png`
    takes the frame at `T`. A video that fails one is not done: change the storyboard, never the
    video.
-3. Hand the mp4 to a person to upload. GitHub plays only video it hosts, and only a signed-in browser
-   can put it there, by dragging the file into an issue comment or the README's editor on
-   github.com. The `https://github.com/user-attachments/assets/…` URL that gives goes on a line of
-   its own in README.md, under the screenshots' table, in place of the last one.
+3. Run `docs/video/publish.sh`, on the branch whose pull request changes the video. GitHub plays
+   only video it hosts, so it uploads the mp4 in a comment on that pull request — where reviewers
+   see it too — and writes the `https://github.com/user-attachments/assets/…` URL GitHub gave it
+   on the README's video line: the one line that is such a URL alone, put under the screenshots'
+   table the first time. Commit README.md with the change. It needs gh 2.102 or later, for
+   `--attach`, and push access; it posts, so run it once the video is right.
 
 A video is right when:
 
