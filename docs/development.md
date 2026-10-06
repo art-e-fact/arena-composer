@@ -56,9 +56,10 @@ run it after changing what they show. The
 [readme-screenshots](../.claude/skills/readme-screenshots/SKILL.md) skill says how to change a shot.
 
 Its video is a tour played in a real `arena-view`, so the edits it makes are solved:
-[docs/video/record.sh](video/record.sh) records it, [docs/video/publish.sh](video/publish.sh)
-uploads it to the pull request and points the README at it, and the
-[readme-video](../.claude/skills/readme-video/SKILL.md) skill says how to change it.
+[docs/video/record.sh](video/record.sh) records it, and the
+[readme-video](../.claude/skills/readme-video/SKILL.md) skill says how to change it. Neither the
+shots nor the video are committed: [docs/publish.sh](publish.sh) uploads them to the pull request
+and points the README at them.
 
 ## Tests
 
