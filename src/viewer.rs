@@ -65,6 +65,7 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
         // Nothing unless `ARENA_VIEWER_TOUR` names a storyboard. After the
         // window is set up, which a tour resizes.
         .add_plugins(crate::tour::plugin)
+        .add_plugins(crate::spawn::plugin)
         .insert_resource(ResolvedScene(scene))
         .insert_resource(SceneUpdates(Mutex::new(updates)))
         .add_systems(Startup, setup)

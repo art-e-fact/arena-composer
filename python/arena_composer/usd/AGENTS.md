@@ -27,7 +27,11 @@ into the renderer's convention (USD's `st` origin is bottom-left, glTF's and Bev
 splits `GeomSubset` bindings into a piece apiece, since assets that shade per face subset — Isaac's
 robots among them — come out untextured if you read only the gprim's own binding. Normals come from
 `primvars:normals` before the `normals` attribute, which is both USD's precedence rule and the only way
-to read exporters that write nothing else. Primvars are matched by name *and* type, and authored values
+to read exporters that write nothing else. A mesh that authors none and keeps USD's default
+`catmullClark` scheme gets smooth, area-weighted vertex normals computed here, as Hydra shades it;
+left to the renderer, the corner-flattened mesh is shaded one flat normal per triangle, which is what
+made Fourier's GR1T2 render in blocky light and dark patches. Primvars are matched by name *and*
+type, and authored values
 are checked for NaN: assets in this library do author a `token[]` where a float array belongs, and NaN
 UVs that spread through tangent generation.
 
@@ -54,6 +58,9 @@ What currently doesn't draw. Check here before treating a render bug as new.
   `sphere`). `resolve_layout.bound_spawned_shapes` bounds them by the shape and the payload draws that
   box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape: they keep their configured pose
   and an empty box, the payload draws nothing for them, and a relation naming one is refused.
+- UDIM textures (`<UDIM>` in the path, one image per tile: Fourier's GR1T2 has nine albedo tiles along
+  U). The path matches no file, so it is dropped and the robot is its base grey. Fixing it means
+  packing the tiles into one image and remapping the UVs, which needs the same texture cache as below.
 - The separate single-channel OmniPBR `metallic_texture`/`reflectionroughness_texture` pair, read as its
   scalar constants instead. Packing the two into one image needs a texture cache.
 

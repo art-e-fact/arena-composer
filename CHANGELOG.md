@@ -187,6 +187,17 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `add_object` and `remove_object` answer a spec a hand edit left misshapen — `embodiment: null`,
   a `relations` that is not a list — with a refusal, where the agent got a bare
   `Error executing tool`.
+- Lightwheel kitchens with the marble countertop, such as the ones
+  `kitchen_bench_lightwheel_open_microwave` and `kitchen_bench_lightwheel_pick_and_place` use, draw
+  their counters, and `arena-render` and `render_views` no longer fail on them: the texture is a
+  16-bit greyscale image, which the renderer could not sample.
+- Fourier's GR1 humanoid (`gr1`, `gr1_joint`, `gr1_pink`) is shaded smooth, as Isaac Sim shows it,
+  where it drew in blocky light and dark patches: a mesh that authors no normals and is a
+  subdivision surface, USD's default, gets smooth ones. Its textures are still not drawn.
+- The window and the renders frame what is drawn, where a background's light, stray vertices or
+  ground plane shrank the scene to a speck in a large dark frame: the replicator kitchens, galileo
+  and packing_table among them. A spec that stands objects on packing_table or galileo as a whole
+  still has Arena place them hundreds of metres away, and the frame takes them in.
 
 ## [0.2.0] - 2026-09-28
 

@@ -65,10 +65,14 @@ def read_mesh(prim: Any) -> Surface | None:
     if mesh.GetOrientationAttr().Get() == UsdGeom.Tokens.leftHanded:
         triangles = triangles[:, ::-1]
 
+    normals = _corner_values(_normals(prim, mesh), counts, indices, width=3)
+    if normals is None and mesh.GetSubdivisionSchemeAttr().Get() != UsdGeom.Tokens.none:
+        normals = _smooth_normals(points, indices, triangles)
+
     return Surface(
         positions=points[indices].astype(np.float32),
         triangles=triangles.astype(np.uint32),
-        normals=_corner_values(_normals(prim, mesh), counts, indices, width=3),
+        normals=normals,
         uvs=_corner_values(_uvs(prim), counts, indices, width=2),
         face_of_triangle=face_of_triangle,
         face_count=len(counts),
@@ -154,6 +158,24 @@ def _corner_values(
     return np.nan_to_num(
         np.ascontiguousarray(expanded, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0
     )
+
+
+def _smooth_normals(points: np.ndarray, indices: np.ndarray, triangles: np.ndarray) -> np.ndarray:
+    """Area-weighted vertex normals, one per face corner, for a mesh that authors none.
+
+    A subdivision surface (USD's default scheme, ``catmullClark``) with no normals
+    is drawn smooth by Hydra, which is what Isaac Sim shows. Left to the renderer,
+    the corner-flattened mesh gets one flat normal per triangle: Fourier's GR1,
+    which authors none, comes out as blocky light and dark patches.
+    """
+    corners = points[indices].astype(np.float64)
+    a, b, c = corners[triangles[:, 0]], corners[triangles[:, 1]], corners[triangles[:, 2]]
+    face_normals = np.cross(b - a, c - a)  # its length is twice the triangle's area, which is the weight
+    summed = np.zeros(points.shape, dtype=np.float64)
+    for corner in range(3):
+        np.add.at(summed, indices[triangles[:, corner]], face_normals)
+    length = np.linalg.norm(summed, axis=1, keepdims=True)
+    return (summed / np.maximum(length, 1e-12))[indices].astype(np.float32)
 
 
 def _normals(prim: Any, mesh: UsdGeom.Mesh) -> tuple[Any, str] | None:

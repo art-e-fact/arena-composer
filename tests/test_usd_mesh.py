@@ -119,6 +119,50 @@ def test_a_non_numeric_primvar_falls_back_to_the_attribute(tmp_path: Path) -> No
     assert surface.normals.tolist() == [[1, 0, 0]] * 4, "the token[] primvar is ignored"
 
 
+# Two triangles folded 90 degrees along the edge from vertex 0 to vertex 1, authoring no
+# normals, as Fourier's GR1T2 does for every mesh. USD's default subdivision scheme is
+# `catmullClark`, so the fold is a smooth surface unless the scheme says `none`.
+FOLD = """#usda 1.0
+(
+    defaultPrim = "Asset"
+    upAxis = "Z"
+    metersPerUnit = 1
+)
+
+def Xform "Asset"
+{{
+    def Mesh "Fold"
+    {{
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]
+        int[] faceVertexCounts = [3, 3]
+        int[] faceVertexIndices = [0, 1, 2, 0, 3, 1]
+        uniform token subdivisionScheme = "{scheme}"
+    }}
+}}
+"""
+
+
+def test_a_subdivision_surface_with_no_normals_is_shaded_smooth(tmp_path: Path) -> None:
+    """GR1T2's meshes author no normals; left flat, the humanoid renders in light and dark patches.
+
+    Hydra draws a `catmullClark` mesh smooth, so the corners a face shares with its
+    neighbour take the average of their normals, and a `none` scheme is left to the
+    renderer's flat ones.
+    """
+    def surface_with(scheme: str):
+        usda = tmp_path / f"{scheme}.usda"
+        usda.write_text(FOLD.format(scheme=scheme), encoding="utf-8")
+        return extract(open_stage(str(usda)))[0].surface
+
+    edge = np.sqrt(0.5)
+    # Corners are 0, 1, 2 for the first face and 0, 3, 1 for the second.
+    assert surface_with("catmullClark").normals == pytest.approx(
+        np.array([[0, edge, edge], [0, edge, edge], [0, 0, 1], [0, edge, edge], [0, 1, 0], [0, edge, edge]]),
+        abs=1e-6,
+    )
+    assert surface_with("none").normals is None, "a hard-edged mesh keeps the renderer's flat normals"
+
+
 def test_non_finite_uvs_are_neutralised(tmp_path: Path) -> None:
     """Authored NaNs must not reach the renderer.
 

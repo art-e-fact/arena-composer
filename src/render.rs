@@ -110,6 +110,7 @@ pub fn run(scene: Scene, shots: Vec<(View, PathBuf)>, width: u32, height: u32) {
             height,
         })
         .init_resource::<Progress>()
+        .add_plugins(crate::spawn::plugin)
         .add_systems(Startup, setup)
         .add_systems(Update, capture)
         .run();
