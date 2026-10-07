@@ -6,6 +6,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Added
 
 - The editor panel shows the background, object sets, object references and the task — its
@@ -218,6 +220,7 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - The first release on its own: `arena-view`, `arena-resolve-layout`, `arena-mcp` and
   `arena-composer init`, as a manylinux wheel attached to the GitHub Release.
 
-[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/art-e-fact/arena-composer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/art-e-fact/arena-composer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/art-e-fact/arena-composer/releases/tag/v0.1.0
