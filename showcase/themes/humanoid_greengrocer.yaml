@@ -1,0 +1,21 @@
+# AgiBot at a small oak table with fruit and vegetables.
+env_name: showcase_humanoid_greengrocer
+embodiment:
+  id: agibot
+  registry_name: agibot
+  params: {}
+background:
+  id: table
+  registry_name: table_oak_robolab
+  params: {}
+relations:
+- kind: is_anchor
+  subject: table
+  params: {}
+- kind: at_position
+  subject: agibot
+  params: {x: -1.26, y: 0.0, z: -0.35, relation_loss_weight: 20}
+draw:
+  from: [Residential/Kitchen/Food/Fruit, Residential/Kitchen/Food/Vegetables]
+  count: 6
+  onto: table

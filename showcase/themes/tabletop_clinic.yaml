@@ -1,0 +1,21 @@
+# Surgical instruments, medicine and sterile trays on an oak table, a Franka at one end.
+env_name: showcase_tabletop_clinic
+embodiment:
+  id: franka
+  registry_name: franka_joint_pos
+  params: {}
+background:
+  id: oak_table
+  registry_name: table_oak_robolab
+  params: {}
+relations:
+- kind: is_anchor
+  subject: oak_table
+  params: {}
+- kind: at_position
+  subject: franka
+  params: {x: -0.5, y: 0.0, z: 0.36}
+draw:
+  from: [Hospital/Medicine, Hospital/Medical_Instruments, Hospital/Medical_Devices, Hospital/Sterile_Containers]
+  count: 6
+  onto: oak_table

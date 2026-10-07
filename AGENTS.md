@@ -68,6 +68,8 @@ skill for changing what they show. One to how it is used re-records its video:
 | [main.rs](src/main.rs) | the dev `arena-viewer`: a packed payload off disk, in the window or, given `VIEW=PNG` pairs, headless |
 
 [tests/](tests/) is Python only. Rust tests are inline `#[cfg(test)]` modules beside the code.
+[showcase/](showcase/) is a gallery of renders for a person to look over, outside `pytest`'s run:
+see [docs/development.md](docs/development.md#the-showcase).
 
 ## Docs
 

@@ -121,6 +121,23 @@ sampled layout passing.
 
 See [AGENTS.md](AGENTS.md) and [docs/](docs/).
 
+### The showcase on Artefacts
+
+[artefacts.yaml](artefacts.yaml) runs the [showcase](docs/development.md#the-showcase), a gallery
+of about twenty environments each drawn from four views, as an
+[Artefacts](https://app.artefacts.com/artefacts/arena-composer) job. Run it from this repo's root,
+with the [Artefacts CLI](https://docs.artefacts.com/getting-started/) installed, Arena's venv
+active and this checkout installed into it, on a machine that can draw:
+
+```bash
+artefacts config add artefacts/arena-composer   # once: the project's API key
+artefacts run showcase
+```
+
+The pictures and `tests_junit.xml` go to the top of the run's upload, and the dashboard shows a
+test per environment, failed where the environment did not build or draw. The first run downloads
+the props and takes several minutes longer.
+
 ## License
 
 Licensed under either of

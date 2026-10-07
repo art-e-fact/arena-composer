@@ -1,0 +1,21 @@
+# Galbot, arms out, at the maple table with snacks and drinks.
+env_name: showcase_humanoid_snackbar
+embodiment:
+  id: galbot
+  registry_name: galbot
+  params: {}
+background:
+  id: table
+  registry_name: maple_table_robolab
+  params: {}
+relations:
+- kind: is_anchor
+  subject: table
+  params: {}
+- kind: at_position
+  subject: galbot
+  params: {x: -0.6, y: 0.0, z: -0.665, relation_loss_weight: 20}
+draw:
+  from: [Residential/Kitchen/Food/Snacks, Residential/Kitchen/Food/Beverages]
+  count: 6
+  onto: table

@@ -1,0 +1,26 @@
+# Hand tools on the FR3's workcell table, the robot at the table as in Arena's gear and syringe specs.
+env_name: showcase_workshop
+embodiment:
+  id: fr3
+  registry_name: industrial_fr3_robotiq_2f85
+  params:
+    initial_pose: {position_xyz: [-0.5, -0.1, 0.912], rotation_xyzw: [0.0, 0.0, 0.0, 1.0]}
+background:
+  id: workcell
+  registry_name: fr3_workcell_table
+  params:
+    initial_pose: {position_xyz: [-0.5, -0.1, 0.912], rotation_xyzw: [0.0, 0.0, 0.0, 1.0]}
+object_references:
+- id: table
+  parent_id: workcell
+  prim_path: placement_surface
+  object_type: base
+  params: {}
+relations:
+- kind: is_anchor
+  subject: table
+  params: {}
+draw:
+  from: [Industrial/Tools/Hand]
+  count: 5
+  onto: table

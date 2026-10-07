@@ -1,0 +1,19 @@
+# A Franka beside an oak table over small automotive consumables, brake parts and lubricants.
+env_name: showcase_industrial_parts
+embodiment:
+  id: franka
+  registry_name: franka_joint_pos
+  params:
+    initial_pose: {position_xyz: [-0.62, 0.0, 0.52], rotation_xyzw: [0.0, 0.0, 0.0, 1.0]}
+background:
+  id: bench
+  registry_name: table_oak_robolab
+  params: {}
+relations:
+- kind: is_anchor
+  subject: bench
+  params: {}
+draw:
+  from: [Industrial/Machines/Automotive/Consumables, Industrial/Machines/Automotive/Brake_System, Industrial/Hardware/Lubricants]
+  count: 6
+  onto: bench

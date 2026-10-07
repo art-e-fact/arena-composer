@@ -1,0 +1,25 @@
+# A GR1 humanoid at a modern G-shaped kitchen's counter, laid with fruit and vegetables.
+env_name: showcase_kitchen_gshaped_humanoid
+embodiment:
+  id: gr1
+  registry_name: gr1_joint
+  params: {}
+background:
+  id: kitchen
+  registry_name: lightwheel_kitchen_g_shaped_modern2
+  params:
+    collision_mode: mesh
+    repair_collision_mesh_non_watertight: false
+object_references:
+- {id: floor, parent_id: kitchen, prim_path: floor_room/geometry, object_type: base, params: {}}
+- {id: counter_top, parent_id: kitchen, prim_path: counter_main_main_group/top_geometry, object_type: base, params: {}}
+relations:
+- {kind: is_anchor, subject: floor, params: {}}
+- {kind: is_anchor, subject: counter_top, params: {}}
+- {kind: 'on', subject: gr1, reference: floor, params: {}}
+- {kind: next_to, subject: gr1, reference: counter_top, params: {side: negative_y, distance_m: 0.05, tolerance_m: 0.1}}
+- {kind: rotate_around_solution, subject: gr1, params: {yaw_rad: 1.57}}
+draw:
+  from: [Residential/Kitchen/Food/Fruit, Residential/Kitchen/Food/Vegetables]
+  count: 7
+  onto: counter_top
