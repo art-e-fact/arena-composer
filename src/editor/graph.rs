@@ -29,7 +29,8 @@ use egui::epaint::CubicBezierShape;
 use egui::{Color32, FontId, Galley, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
 
 use super::thumbnails::Pictures;
-use super::{Form, card, relations};
+use super::card::{self, Role};
+use super::{Form, relations};
 use crate::spec::{Spec, Step};
 
 /// Space between two things side by side in a row.
@@ -183,41 +184,6 @@ fn fit(pane: Rect, bounds: Rect) -> TSTransform {
 fn zoom_about(view: TSTransform, pointer: Pos2, scale: f32) -> TSTransform {
     let pointer = pointer.to_vec2();
     TSTransform::new(pointer - (pointer - view.translation) * (scale / view.scaling), scale)
-}
-
-/// What kind of node a node is, which its colours and glyph say.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Role {
-    Embodiment,
-    Background,
-    Object,
-    ObjectSet,
-    ObjectReference,
-}
-
-impl Role {
-    /// Fill and border: Arena's own palette for its Mermaid graph.
-    fn colors(self) -> (Color32, Color32) {
-        let rgb = Color32::from_rgb;
-        match self {
-            Role::Embodiment => (rgb(0x7a, 0x3a, 0x3a), rgb(0xd8, 0x7a, 0x7a)),
-            Role::Background => (rgb(0x3a, 0x4f, 0x7a), rgb(0x7a, 0xa0, 0xd8)),
-            Role::Object => (rgb(0x7a, 0x6b, 0x3a), rgb(0xd8, 0xc4, 0x7a)),
-            Role::ObjectSet => (rgb(0x7a, 0x5a, 0x3a), rgb(0xd8, 0xa8, 0x7a)),
-            Role::ObjectReference => (rgb(0x6b, 0x3a, 0x7a), rgb(0xc4, 0x7a, 0xd8)),
-        }
-    }
-
-    /// The glyph its card wears in the panel.
-    fn glyph(self) -> &'static str {
-        match self {
-            Role::Embodiment => card::EMBODIMENT,
-            Role::Background => card::BACKGROUND,
-            Role::Object => card::OBJECT,
-            Role::ObjectSet => card::OBJECT_SET,
-            Role::ObjectReference => card::OBJECT_REFERENCE,
-        }
-    }
 }
 
 /// A node as the graph draws it.

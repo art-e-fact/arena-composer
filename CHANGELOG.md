@@ -6,6 +6,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Changed
+
+- A node's card in the editor panel wears the colour its node has in the spatial graph: a stripe
+  down its left edge, a tint over the card, and its icon in white, as the graph draws it. Its
+  summary, after the id, is no longer greyed out. Relations, the task and subtasks are not nodes
+  and stay grey.
+
 ## [0.3.0] - 2026-10-07
 
 ### Added

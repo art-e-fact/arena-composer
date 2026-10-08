@@ -34,6 +34,13 @@ icon, the title, and at the far edge the eye (relations only) and the × that re
 title is the entry's id, always a box to type in; a relation or subtask has no id, so its kind menu
 takes the title's place. An object's icon is its asset's picture, where the asset has one.
 
+A node's card wears the colours its node has in the graph, from `card::Role`: a stripe down its
+left edge in the node's border colour, its fill tinted a little toward the node's fill, and its
+glyph in white, as the graph draws it. Its folded summary is in the text colour rather than weak,
+since weak text is weak against the panel's own fill and fades on a tint. A relation, the task and
+a subtask are no node and stay grey, as they are in the graph. Keep the colour off the border:
+the border is the picked and hovered outline, and the background's blue would read as picked.
+
 A section only says what goes in an entry's title and body; the card draws the rest. To give a new
 part of the spec a panel, write a section function in [form.rs](../src/editor/form.rs) and add it
 to `panel`. Three rules keep it working like the others:
@@ -79,9 +86,10 @@ tests in [browser.rs](../src/editor/browser.rs) drive the grid in a headless `eg
 
 The dock's second tab draws the spec as Arena's review GUI draws it with Mermaid: a node per id, an
 edge per relation naming a reference, from its subject to it and labelled with its kind, and a
-dashed edge from each object reference to its parent. A relation naming no other node — a unary
-one, or one naming its own subject — is a chip on its subject's node. Nothing in it knows a relation
-kind's name.
+dashed edge from each object reference to its parent. A node's colours and glyph are `card::Role`'s,
+the ones its card wears in the panel, so the two are matched by eye. A relation naming no other node
+— a unary one, or one naming its own subject — is a chip on its subject's node. Nothing in it knows
+a relation kind's name.
 
 It reads down the way the scene stands: what a node is placed against is drawn below it, so the
 anchor, the background and whatever nothing names end up along the foot. The layout is Sugiyama's
