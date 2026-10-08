@@ -6,6 +6,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Added
 
 - The editor panel shows the background, object sets, object references and the task — its
@@ -56,6 +58,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `arena-composer new PATH` writes a task YAML at `PATH`, and the scene it includes, holding a
   pick-and-place that validates, solves and builds. The scene goes in the `scenes` beside a `tasks`
   directory, else beside the task.
+- `arena-render SPEC...` draws specs with no window and no display: it solves each layout and
+  writes a PNG per `--view` — `default`, the perspective the window opens on, and the orthographic
+  `top`, `front` and `side` — as `<spec>-<view>.png` under `--out-dir`, printing each path. Several
+  specs share one import of Arena. One that does not build is skipped with its reasons, the rest are
+  drawn, and the run exits 1; a layout that fails placement is drawn all the same, with the checks
+  it failed.
 
 ### Changed
 
@@ -181,6 +189,17 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `add_object` and `remove_object` answer a spec a hand edit left misshapen — `embodiment: null`,
   a `relations` that is not a list — with a refusal, where the agent got a bare
   `Error executing tool`.
+- Lightwheel kitchens with the marble countertop, such as the ones
+  `kitchen_bench_lightwheel_open_microwave` and `kitchen_bench_lightwheel_pick_and_place` use, draw
+  their counters, and `arena-render` and `render_views` no longer fail on them: the texture is a
+  16-bit greyscale image, which the renderer could not sample.
+- Fourier's GR1 humanoid (`gr1`, `gr1_joint`, `gr1_pink`) is shaded smooth, as Isaac Sim shows it,
+  where it drew in blocky light and dark patches: a mesh that authors no normals and is a
+  subdivision surface, USD's default, gets smooth ones. Its textures are still not drawn.
+- The window and the renders frame what is drawn, where a background's light, stray vertices or
+  ground plane shrank the scene to a speck in a large dark frame: the replicator kitchens, galileo
+  and packing_table among them. A spec that stands objects on packing_table or galileo as a whole
+  still has Arena place them hundreds of metres away, and the frame takes them in.
 
 ## [0.2.0] - 2026-09-28
 
@@ -201,6 +220,7 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - The first release on its own: `arena-view`, `arena-resolve-layout`, `arena-mcp` and
   `arena-composer init`, as a manylinux wheel attached to the GitHub Release.
 
-[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/art-e-fact/arena-composer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/art-e-fact/arena-composer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/art-e-fact/arena-composer/releases/tag/v0.1.0

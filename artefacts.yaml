@@ -1,0 +1,42 @@
+project: artefacts/arena-composer
+
+version: 0.1.0
+
+# The showcase gallery (docs/development.md#the-showcase) as a job. From the repo root, with
+# Arena's venv active and this checkout installed in it, on a machine that can draw:
+#
+#   artefacts run showcase
+#
+# Every PNG and tests_junit.xml, a test case per spec, land at the top of the scenario's upload
+# dir; the specs the themes generated go in specs/ beside them.
+#
+# Artefacts ignores exit codes and passes a run that leaves no tests_junit.xml, so when pytest
+# cannot write one (no pytest, Arena failing to import) the command writes an error in its place.
+# `2>&1` is required: the client reads a command's stdout to the end before its stderr, so a
+# command that fills the stderr pipe first blocks forever.
+#
+# `package` and `simulator` are placeholders the config validator requires: a local run builds
+# nothing, and nothing here starts Isaac Sim. `isaac_sim` names the stack Arena comes in, as the
+# other Arena projects' jobs do.
+
+jobs:
+  showcase:
+    type: test
+    timeout: 30 # minutes; about 5 once the props are downloaded
+    package:
+      docker:
+        build:
+          dockerfile: empty
+    runtime:
+      framework: other
+      simulator: isaac_sim
+    scenarios:
+      settings:
+        - name: showcase
+          run: >-
+            ARENA_SHOWCASE_DIR="$ARTEFACTS_SCENARIO_UPLOAD_DIR" python -m pytest showcase
+            --junitxml="$ARTEFACTS_SCENARIO_UPLOAD_DIR/tests_junit.xml" 2>&1
+            || [ -e "$ARTEFACTS_SCENARIO_UPLOAD_DIR/tests_junit.xml" ]
+            || echo '<testsuite name="showcase" tests="1" errors="1"><testcase name="pytest"><error
+            message="pytest wrote no tests_junit.xml, is the Arena venv active? See test_process_log.txt"/></testcase></testsuite>'
+            > "$ARTEFACTS_SCENARIO_UPLOAD_DIR/tests_junit.xml"

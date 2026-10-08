@@ -26,15 +26,17 @@ A packed payload skips Arena's import, the solve and the USD reads. Pack one in 
 arena-resolve-layout environments/tasks/banana_in_bowl.yaml --payload /tmp/scene.msgpack
 ```
 
-Then run the binaries here. `arena-viewer` is `src/main.rs`. `arena-render` has no `[[bin]]` entry:
-cargo finds it at `src/bin/arena-render.rs`.
+Then run the dev binary here, `arena-viewer` (`src/main.rs`). On its own it opens the window:
 
 ```bash
 cargo run --bin arena-viewer -- /tmp/scene.msgpack
 ```
 
+Given `VIEW=PNG` pairs it draws them headless and exits, through the same `render.rs` that
+`arena-render` and `render_views` run:
+
 ```bash
-cargo run --bin arena-render -- /tmp/scene.msgpack top=top.png front=front.png
+cargo run --bin arena-viewer -- /tmp/scene.msgpack top=top.png front=front.png
 ```
 
 To see the window without a person at the keyboard:
@@ -94,6 +96,26 @@ ARENA_COMPOSER_PAYLOAD=/tmp/scene.msgpack pytest
 CI ([ci.yml](../.github/workflows/ci.yml)) has no Arena. It runs `cargo test`, and runs pytest
 against the wheel it built, skipping the files [tests/conftest.py](../tests/conftest.py) lists. A new
 test file that imports Arena has to be added to that list, or CI fails.
+
+### The showcase
+
+[showcase/](../showcase/) draws a gallery for a person to look over: a few of each family of Arena's
+own specs, and themes that put together robots, backgrounds and SimReady props no shipped spec uses.
+`pytest` does not collect it. Run it here, on a machine that can draw, after a change to how a scene
+is read or drawn:
+
+```bash
+pytest showcase
+```
+
+Every case is drawn from every view into `$ARENA_SHOWCASE_DIR` (`/tmp/arena-showcase` by default),
+beside a `junit.xml` with a test case per spec. A case fails when its spec does not build or draw;
+one that draws lists its images and its placement verdict as properties. `ARENA_SHOWCASE_SEED`
+draws other props and other layouts. The first run downloads the props, which takes minutes.
+`artefacts run showcase` runs it as an Artefacts job instead, into the run's upload: see the
+[README](../README.md#the-showcase-on-artefacts). A theme
+is a spec in `showcase/themes/` with a `draw` key, which
+[test_showcase.py](../showcase/test_showcase.py) describes.
 
 ## The wheel
 

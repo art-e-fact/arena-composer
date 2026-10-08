@@ -202,28 +202,64 @@ fn perspective(scene: &Scene, focus: Vec3, size: Vec3) -> Framing {
     }
 }
 
-/// The layout's world-space bounds in Bevy's frame, over the assets that are
-/// drawn. `None` when nothing is.
+/// A flat piece this many times wider than everything else its asset draws is
+/// left out of the framing: the ground plane some backgrounds carry
+/// (packing_table's is 5 km square) would otherwise shrink the layout to a
+/// speck. A room's floor is not one, being about as wide as the walls around
+/// it, and nor is a prop's body beside its label, not being flat.
+const OUTSIZED: f32 = 10.0;
+
+/// The layout's world-space bounds in Bevy's frame, over what is drawn: the
+/// vertices themselves, not the boxes Arena reports. Those take in whatever
+/// USD's bounding box does — a 100 m default extent on every light, vertices no
+/// face uses — and run to hundreds of metres around a room a few wide.
+/// `None` when nothing is drawn.
 pub fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
     let to_bevy = arena_to_bevy();
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    let mut any = false;
-    for asset in scene
-        .assets()
-        .iter()
-        .filter(|asset| !scene.geometry_of(asset).is_empty())
-    {
-        let (lo, hi) = world_aabb(asset);
-        // The frame change only permutes and flips axes, so a box stays a box
-        // and its two corners are enough — sorted back into min and max.
-        for point in [to_bevy * lo, to_bevy * hi] {
-            min = min.min(point);
-            max = max.max(point);
+    let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    for asset in scene.assets() {
+        let pieces: Vec<Vec<Vec3>> = scene
+            .geometry_of(asset)
+            .iter()
+            .map(|node| node.positions().into_iter().map(Vec3::from).collect())
+            .collect();
+        let boxes: Vec<_> = pieces.iter().map(|points| union(points.iter().map(|&p| (p, p)))).collect();
+        let outsized = outsized(&boxes);
+        let pose = asset.transform();
+        for (i, points) in pieces.iter().enumerate() {
+            if Some(i) != outsized {
+                for &point in points {
+                    let world = to_bevy * pose.transform_point(point);
+                    (min, max) = (min.min(world), max.max(world));
+                }
+            }
         }
-        any = true;
     }
-    any.then_some((min, max))
+    min.cmple(max).all().then_some((min, max))
+}
+
+/// The piece, if any, that [`OUTSIZED`] leaves out. Only the widest can be wider
+/// than ten times all the others together. Flat is thinner than a hundredth of
+/// its width.
+fn outsized(boxes: &[Option<(Vec3, Vec3)>]) -> Option<usize> {
+    let (widest, big) = boxes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| b.map(|b| (i, b)))
+        .max_by(|a, b| width(a.1).total_cmp(&width(b.1)))?;
+    let others = union(boxes.iter().enumerate().filter(|&(i, _)| i != widest).filter_map(|(_, b)| *b))?;
+    let flat = (big.1 - big.0).min_element() * 100.0 < width(big);
+    (flat && width(big) > OUTSIZED * width(others)).then_some(widest)
+}
+
+/// The smallest box around some boxes; `None` for none.
+fn union(boxes: impl Iterator<Item = (Vec3, Vec3)>) -> Option<(Vec3, Vec3)> {
+    boxes.reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
+}
+
+/// A box's longest side.
+fn width((lo, hi): (Vec3, Vec3)) -> f32 {
+    (hi - lo).max_element()
 }
 
 /// An asset's world-space bounds in Arena's frame: the reported local box
@@ -281,8 +317,8 @@ mod tests {
     }
 
     /// One asset at `position` with the given local bounds. `drawable` decides
-    /// whether it points at a geometry entry — the node itself is degenerate,
-    /// since none of these tests upload a mesh.
+    /// whether it points at a geometry entry — a node of two vertices, the
+    /// box's corners, since none of these tests upload a mesh.
     pub fn scene(position: [f32; 3], bbox: ([f32; 3], [f32; 3]), drawable: bool) -> Scene {
         Scene {
             env_name: "t".into(),
@@ -295,7 +331,15 @@ mod tests {
                 geometry: drawable.then_some(0),
                 ..default()
             }]),
-            geometries: vec![vec![GeometryNode::default()]],
+            geometries: vec![vec![piece(bbox.0, bbox.1)]],
+            ..default()
+        }
+    }
+
+    /// A node drawing only the two corners of a box.
+    fn piece(lo: [f32; 3], hi: [f32; 3]) -> GeometryNode {
+        GeometryNode {
+            positions: bytemuck::cast_slice(&[lo, hi]).to_vec(),
             ..default()
         }
     }
@@ -317,6 +361,30 @@ mod tests {
     #[test]
     fn undrawable_assets_are_left_out_of_the_bounds() {
         assert!(bounds(&scene([10.0; 3], ([0.0; 3], [1.0; 3]), false)).is_none());
+    }
+
+    /// A background's flat ground plane thousands of metres wide, and an
+    /// Arena box that takes it in, must not set the framing — but a room's
+    /// floor, as wide as its walls, still does.
+    #[test]
+    fn an_outsized_piece_is_left_out_of_the_bounds() {
+        let mut scene = scene([0.0; 3], ([-2500.0, -2500.0, 0.0], [2500.0, 2500.0, 1.0]), true);
+        scene.geometries[0] = vec![
+            piece([-2500.0, -2500.0, 0.0], [2500.0, 2500.0, 0.0]),
+            piece([-1.0, -1.0, 0.0], [1.0, 1.0, 1.0]),
+            piece([0.0; 3], [0.1; 3]),
+        ];
+        let (min, max) = bounds(&scene).unwrap();
+        assert!(min.abs_diff_eq(Vec3::new(-1.0, 0.0, -1.0), 1e-5), "{min}");
+        assert!(max.abs_diff_eq(Vec3::new(1.0, 1.0, 1.0), 1e-5), "{max}");
+        // A floor about as wide as the wall beside it stays.
+        scene.geometries[0] = vec![piece([-5.0, -5.0, 0.0], [5.0, 5.0, 0.0]), piece([-5.0, 5.0, 0.0], [5.0, 5.1, 3.0])];
+        let (min, max) = bounds(&scene).unwrap();
+        assert!((max - min).max_element() >= 10.0, "{min} {max}");
+        // So does a box's body beside the small label on it: it is not flat.
+        scene.geometries[0] = vec![piece([0.0; 3], [1.0; 3]), piece([0.0; 3], [0.01; 3])];
+        let (min, max) = bounds(&scene).unwrap();
+        assert!((max - min).max_element() > 0.99, "{min} {max}");
     }
 
     /// The box the solver constrained: the local bounds turned by the pose and

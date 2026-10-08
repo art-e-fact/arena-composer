@@ -20,9 +20,9 @@ Run these from this repo with Arena's venv active. The `arena-*` commands run fr
 which owns the specs.
 Python edits take effect at once; a Rust edit takes effect when that install runs again.
 
-To change the Rust side without paying for Arena on every run, pack a payload once and run
-`arena-viewer` or `arena-render` on it. That loop, the screenshot variables, the opt-in tests, the
-wheel and releasing are in [docs/development.md](docs/development.md).
+To change the Rust side without paying for Arena on every run, pack a payload once and run the dev
+`arena-viewer` on it, in its window or headless. That loop, the screenshot variables, the opt-in
+tests, the wheel and releasing are in [docs/development.md](docs/development.md).
 
 A change to what the window looks like retakes the README's screenshots:
 `docs/screenshots/shoot.sh`, and the [readme-screenshots](.claude/skills/readme-screenshots/SKILL.md)
@@ -44,9 +44,9 @@ skill for changing what they show. One to how it is used re-records its video:
 | [spec_edit.py](python/arena_composer/spec_edit.py) | the only YAML writer: routes each edit to the file that owns the key |
 | [view.py](python/arena_composer/view.py) | `arena-view`: watches the spec, re-solves, serves the panel's requests |
 | [viewer_process.py](python/arena_composer/viewer_process.py), [render_process.py](python/arena_composer/render_process.py) | the child processes Bevy runs in |
-| [render.py](python/arena_composer/render.py) | one-shot PNG renders of a packed scene |
+| [render.py](python/arena_composer/render.py) | `arena-render`: specs → PNGs, headless; and the one-shot render `render_views` shares |
 | [mcp_server.py](python/arena_composer/mcp_server.py) | `arena-mcp` |
-| [cli.py](python/arena_composer/cli.py) | `arena-composer init`: the MCP launcher, client configs and skill links; `arena-composer new` |
+| [cli.py](python/arena_composer/cli.py) | `arena-composer init`: the MCP launcher, client configs and skill links; `arena-composer new`; the `--seed`, `--asset-cache` and `--import` the spec commands share |
 | [skills/](python/arena_composer/skills/) | Agent Skills the wheel ships and `init` links into a project; `new` copies `author-arena-spec`'s templates |
 | [_core.pyi](python/arena_composer/_core.pyi) | typed signatures for the compiled extension |
 
@@ -65,9 +65,11 @@ skill for changing what they show. One to how it is used re-records its video:
 | [render.rs](src/render.rs) | headless renders, a PNG per view |
 | [tour.rs](src/tour.rs), [record.rs](src/record.rs) | the README's video: a storyboard played with a pointer of its own, and recorded |
 | [python.rs](src/python.rs) | the PyO3 wrapper, behind the `python` feature |
-| [main.rs](src/main.rs), [bin/arena-render.rs](src/bin/arena-render.rs) | `arena-viewer` and `arena-render`, reading a packed payload off disk |
+| [main.rs](src/main.rs) | the dev `arena-viewer`: a packed payload off disk, in the window or, given `VIEW=PNG` pairs, headless |
 
 [tests/](tests/) is Python only. Rust tests are inline `#[cfg(test)]` modules beside the code.
+[showcase/](showcase/) is a gallery of renders for a person to look over, outside `pytest`'s run:
+see [docs/development.md](docs/development.md#the-showcase).
 
 ## Docs
 

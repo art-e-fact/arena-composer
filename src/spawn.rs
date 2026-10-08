@@ -10,12 +10,69 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageLoaderSettings;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureFormat;
 
 use crate::scene::Node;
 
 /// The prim a node was projected from, kept so a picked entity can be named.
 #[derive(Component)]
 pub struct PrimPath(pub String);
+
+/// Keeps 16-bit greyscale textures drawable: see [`widen_integer_textures`].
+pub fn plugin(app: &mut App) {
+    app.add_systems(
+        Update,
+        widen_integer_textures.run_if(resource_changed::<Assets<Image>>),
+    );
+}
+
+/// Bevy decodes a 16-bit greyscale PNG (Lightwheel's `marble_5_0.png`) as `R16Uint`, or `Rg16Uint` with
+/// alpha, and `StandardMaterial` cannot sample an integer texture: the material fails to build and the
+/// frame logs an error. `Rgba16Unorm` would keep the depth, but needs a wgpu feature Bevy does not ask
+/// for, so this repacks them as 8-bit RGBA. It runs in `Update`, after the loader has inserted the image
+/// and before the render world extracts it, so the first frame that draws it already sees a float one.
+///
+/// Read as sRGB, which is right for the only slot that has met one, `base_color`: a greyscale colour map.
+// ponytail: a 16-bit greyscale in a data slot (normal, occlusion) would be gamma-decoded; give it its own
+// format when an asset has one.
+fn widen_integer_textures(mut images: ResMut<Assets<Image>>) {
+    let integer: Vec<_> = images
+        .iter()
+        .filter(|(_, image)| {
+            matches!(
+                image.texture_descriptor.format,
+                TextureFormat::R16Uint | TextureFormat::Rg16Uint
+            )
+        })
+        .map(|(id, _)| id)
+        .collect();
+    for id in integer {
+        if let Some(mut image) = images.get_mut(id) {
+            widen(&mut image);
+        }
+    }
+}
+
+fn widen(image: &mut Image) {
+    let channels = if image.texture_descriptor.format == TextureFormat::R16Uint {
+        1
+    } else {
+        2
+    };
+    let Some(data) = image.data.take() else {
+        return;
+    };
+    // Little-endian u16s, so the high byte is the second of each pair.
+    let rgba = data
+        .chunks_exact(2 * channels)
+        .flat_map(|texel| {
+            let (grey, alpha) = (texel[1], if channels == 2 { texel[3] } else { 255 });
+            [grey, grey, grey, alpha]
+        })
+        .collect();
+    image.data = Some(rgba);
+    image.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+}
 
 /// Spawn one entity per node, parented under `placement`.
 ///
@@ -133,6 +190,26 @@ mod tests {
             opacity: 1.0,
             ..default()
         }
+    }
+
+    /// A 16-bit greyscale PNG arrives from Bevy's loader as `R16Uint`, which `StandardMaterial` cannot
+    /// sample; it has to come out as a float format with the grey in all three colour channels.
+    #[test]
+    fn a_16_bit_greyscale_texture_is_widened_to_rgba8() {
+        let mut image = Image::new(
+            bevy::render::render_resource::Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            [0x00u16, 0xff00].iter().flat_map(|v| v.to_le_bytes()).collect(),
+            TextureFormat::R16Uint,
+            RenderAssetUsages::default(),
+        );
+        widen(&mut image);
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(image.data.as_deref(), Some(&[0, 0, 0, 255, 0xff, 0xff, 0xff, 255][..]));
     }
 
     /// A node with positions and indices but no normals still uploads, with

@@ -37,6 +37,9 @@ https://github.com/user-attachments/assets/b069bedf-5977-42f0-a335-4526127f0119
   spec in 3D, beside a form that edits the spec.
 - `arena-mcp` is an MCP server whose tools search assets, add and remove objects, and describe and
   render the solved layout.
+- `arena-render <spec>.yaml...` draws the solved layout headless, a PNG per `--view`: `default`
+  (perspective), or orthographic `top`, `front` and `side`. It needs no display, and a machine
+  with no GPU draws through Mesa's lavapipe.
 - `arena-resolve-layout <spec>.yaml` prints the solved layout as JSON or text.
 - `arena-composer new environments/tasks/<name>.yaml` starts a spec: a task, and the scene it
   includes, holding a pick-and-place that validates, solves and builds.
@@ -96,7 +99,7 @@ Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/ma
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
 
 ```bash
-gh release download v0.2.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
+gh release download v0.3.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
 uv pip install --python <Arena's venv>/bin/python /tmp/arena-composer/*.whl
 ```
 
@@ -117,6 +120,23 @@ sampled layout passing.
 ## Developing
 
 See [AGENTS.md](AGENTS.md) and [docs/](docs/).
+
+### The showcase on Artefacts
+
+[artefacts.yaml](artefacts.yaml) runs the [showcase](docs/development.md#the-showcase), a gallery
+of about twenty environments each drawn from four views, as an
+[Artefacts](https://app.artefacts.com/artefacts/arena-composer) job. Run it from this repo's root,
+with the [Artefacts CLI](https://docs.artefacts.com/getting-started/) installed, Arena's venv
+active and this checkout installed into it, on a machine that can draw:
+
+```bash
+artefacts config add artefacts/arena-composer   # once: the project's API key
+artefacts run showcase
+```
+
+The pictures and `tests_junit.xml` go to the top of the run's upload, and the dashboard shows a
+test per environment, failed where the environment did not build or draw. The first run downloads
+the props and takes several minutes longer.
 
 ## License
 

@@ -1,0 +1,24 @@
+# Candles, notebooks, glasses and paper on a standing desk, a Franka at its middle.
+env_name: showcase_tabletop_office
+embodiment:
+  id: franka
+  registry_name: franka_ik
+  params: {}
+background:
+  id: office_table
+  registry_name: office_table_background
+  params: {}
+relations:
+- kind: is_anchor
+  subject: office_table
+  params: {}
+- kind: at_position
+  subject: franka
+  params: {x: 0.55, y: -0.55, z: 0.53}
+- kind: rotate_around_solution
+  subject: franka
+  params: {yaw_rad: 1.5708}
+draw:
+  from: [Residential/Office, Residential/Personal_Items, Residential/Decor/Candles]
+  count: 8
+  onto: office_table

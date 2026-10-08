@@ -1,6 +1,6 @@
 [package]
 name = "arena_composer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Bevy viewer for dry-resolved IsaacLab-Arena layouts."
 authors = ["Andras Polgar <azazdeaz@gmail.com>"]
@@ -12,8 +12,9 @@ name = "arena_composer"
 # `rlib` is what our own `[[bin]]` and `cargo test` link against.
 crate-type = ["cdylib", "rlib"]
 
-# Opens a packed scene straight off disk, so the viewer can be iterated on with
-# `cargo run` without paying for Arena's import + solve on every rebuild.
+# Opens a packed scene straight off disk, in the window or drawn headless, so
+# the viewer and the renderer can be iterated on with `cargo run` without
+# paying for Arena's import + solve on every rebuild.
 [[bin]]
 name = "arena-viewer"
 path = "src/main.rs"

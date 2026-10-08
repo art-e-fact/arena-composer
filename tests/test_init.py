@@ -1,4 +1,5 @@
-"""`arena-composer init`, run into a temporary project.
+"""`arena-composer init`, run into a temporary project; and the options the
+spec commands share.
 
 Every client config points at the one launcher, so what is worth testing is
 that they name it, that it starts the server from a working directory other
@@ -9,6 +10,7 @@ broken server rather than a missing install.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -165,3 +167,23 @@ def test_the_mcp_json_command_fails_loudly_outside_the_project(tmp_path: Path):
     assert result.returncode != 0
     assert not result.stdout
     assert b"arena-mcp" in result.stderr
+
+
+def test_a_module_that_does_not_import_is_one_line_on_stderr_and_exit_1(monkeypatch, capsys):
+    """`arena-view`, `arena-resolve-layout` and `arena-render` answer a bad
+    `--import` alike, before Arena is imported: the module and where it was
+    named, and nothing on stdout."""
+    parser = argparse.ArgumentParser(prog="arena-render")
+    cli.add_spec_options(parser)
+    args = parser.parse_args(["--import", "my_assets"])
+
+    def failing(imports):
+        assert imports == ("my_assets",)
+        raise ImportError("--import names my_assets, which does not import: no such module")
+
+    monkeypatch.setattr(cli.catalog, "load_extensions", failing)
+    with pytest.raises(SystemExit) as exit:
+        cli.apply_spec_options(parser, args)
+    assert exit.value.code == 1
+    out, err = capsys.readouterr()
+    assert (out, err) == ("", "arena-render: --import names my_assets, which does not import: no such module\n")

@@ -1,0 +1,25 @@
+# A Galbot at a traditional large G-shaped kitchen's counter, stocked with pantry goods.
+env_name: showcase_kitchen_pantry_galbot
+embodiment:
+  id: galbot
+  registry_name: galbot
+  params: {}
+background:
+  id: kitchen
+  registry_name: lightwheel_kitchen_g_shaped_large_traditional
+  params:
+    collision_mode: mesh
+    repair_collision_mesh_non_watertight: false
+object_references:
+- {id: floor, parent_id: kitchen, prim_path: floor_room/geometry, object_type: base, params: {}}
+- {id: counter_top, parent_id: kitchen, prim_path: counter_main_main_group/top_geometry, object_type: base, params: {}}
+relations:
+- {kind: is_anchor, subject: floor, params: {}}
+- {kind: is_anchor, subject: counter_top, params: {}}
+- {kind: 'on', subject: galbot, reference: floor, params: {}}
+- {kind: next_to, subject: galbot, reference: counter_top, params: {side: negative_y, distance_m: 0.05, tolerance_m: 0.1}}
+- {kind: rotate_around_solution, subject: galbot, params: {yaw_rad: 1.57}}
+draw:
+  from: [Residential/Kitchen/Food/Beverages, Residential/Kitchen/Food/Canned_Goods, Residential/Kitchen/Food/Condiments, Residential/Kitchen/Food/Snacks, Residential/Kitchen/Food/Boxed_Goods]
+  count: 7
+  onto: counter_top

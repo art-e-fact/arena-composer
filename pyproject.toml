@@ -28,6 +28,7 @@ dependencies = [
 [project.scripts]
 arena-resolve-layout = "arena_composer.resolve_layout:main"
 arena-view = "arena_composer.view:main"
+arena-render = "arena_composer.render:main"
 arena-mcp = "arena_composer.mcp_server:main"
 arena-composer = "arena_composer.cli:main"
 

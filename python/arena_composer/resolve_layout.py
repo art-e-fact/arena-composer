@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import os
 import sys
 from collections import Counter
 from collections.abc import Iterable
@@ -54,7 +53,7 @@ from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 from isaaclab_arena.utils.usd.prim_tree import load_usd_prim_tree
 
-from arena_composer import catalog, spec_edit
+from arena_composer import cli, spec_edit
 from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 from arena_composer.usd_assets import localize, use_local_asset_cache
 
@@ -434,8 +433,8 @@ def _xyz(point: Any) -> list[float]:
     return [float(coordinate) for coordinate in point.flatten().tolist()]
 
 
-def _format_text(dump: dict[str, Any]) -> str:
-    """Render the dump as a terminal-readable summary."""
+def summary(dump: dict[str, Any]) -> str:
+    """The dump's first line: the env, the seed and the placement verdict."""
     placement = dump["placement"]
     if "success" not in placement:
         status = "nothing to solve"
@@ -450,7 +449,12 @@ def _format_text(dump: dict[str, Any]) -> str:
         # Not "not run dry": a check for a relation kind the spec does not use
         # has nothing to check, in the sim either.
         status += "; not run: " + ", ".join(placement["not_run"])
-    lines = [f"{dump['env_name']}  (seed {placement['seed']}, {status})"]
+    return f"{dump['env_name']}  (seed {placement['seed']}, {status})"
+
+
+def _format_text(dump: dict[str, Any]) -> str:
+    """Render the dump as a terminal-readable summary."""
+    lines = [summary(dump)]
     for asset in dump["assets"]:
         position = ", ".join(f"{value:+.3f}" for value in asset["position_xyz"])
         rotation = ", ".join(f"{value:+.3f}" for value in asset["rotation_xyzw"])
@@ -478,7 +482,7 @@ def _format_xyz(values: list[float]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("spec", type=Path, help="Path to an ArenaEnvGraphSpec YAML")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"Placement seed (default: {DEFAULT_SEED})")
+    cli.add_spec_options(parser)
     parser.add_argument(
         "--samples",
         type=int,
@@ -492,28 +496,9 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Also pack the layout and its USD geometry here, for `arena-viewer`",
     )
-    parser.add_argument(
-        "--asset-cache",
-        type=Path,
-        help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
-    )
-    parser.add_argument(
-        "--import",
-        dest="imports",
-        action="append",
-        default=[],
-        metavar="MODULE",
-        help=f"Import MODULE first, for the assets and kinds it registers with Arena; repeatable. "
-        f"${catalog.IMPORTS} names more, separated by '{os.pathsep}'",
-    )
     args = parser.parse_args(argv)
 
-    try:
-        catalog.load_extensions(tuple(args.imports))
-    except ImportError as error:
-        print(f"{parser.prog}: {error}", file=sys.stderr)
-        return 1
-    use_local_asset_cache(args.asset_cache)
+    cli.apply_spec_options(parser, args)
     # Arena and the solver print progress to stdout; keep it off the machine-readable output.
     with contextlib.redirect_stdout(sys.stderr):
         dump = resolve_layout_from_yaml(args.spec, seed=args.seed, samples=args.samples)
