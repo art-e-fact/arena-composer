@@ -9,9 +9,9 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
 <table>
   <tr>
     <!-- assets.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/32319398-aeb2-40b0-acaa-001a202fe33a"><img src="https://github.com/user-attachments/assets/32319398-aeb2-40b0-acaa-001a202fe33a" alt="The visual editor with the asset browser searched"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/1cb38053-b2f1-40a1-b0f7-82fd06c4a1ea"><img src="https://github.com/user-attachments/assets/1cb38053-b2f1-40a1-b0f7-82fd06c4a1ea" alt="The visual editor with the asset browser searched"></a></td>
     <!-- graph.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/67e256a6-51b9-4f0e-aee7-2c13b08a2173"><img src="https://github.com/user-attachments/assets/67e256a6-51b9-4f0e-aee7-2c13b08a2173" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/13b3c05f-7442-4d8a-b87c-1fa8495f72b8"><img src="https://github.com/user-attachments/assets/13b3c05f-7442-4d8a-b87c-1fa8495f72b8" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
@@ -20,7 +20,7 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
 </table>
 
 <!-- arena-composer.mp4 -->
-https://github.com/user-attachments/assets/b069bedf-5977-42f0-a335-4526127f0119
+https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 
 ## Highlights
 
