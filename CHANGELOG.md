@@ -31,6 +31,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   relation on an anchor, which the solver ignores; the robot's origin inside an anchor's box, as on
   `table_oak_robolab`; and a background whose root is a rigid body nothing holds up, as
   `table_oak_robolab`'s is, so nothing on it settles. Each of these passed all eight samples.
+- `list_kinds` says the class each task param that names an object needs, as `needs`: `Openable`
+  for `OpenDoorTask`'s `openable_object`, `Turnable` for `TurnKnobTask`'s `turnable_object`,
+  `EmbodimentBase`, the robot, for `LiftObjectTaskRL`'s `embodiment`, and `Asset`, any entry, for
+  most. A list of ids under `other_params` says it too. It said only `node_ref`, so agents learnt
+  the class from `check_spec`'s refusal.
 
 ### Changed
 
@@ -57,6 +62,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   those lights are not drawn, and the light that stands in for Arena's now stands in for them too.
 - A check for a relation kind the spec does not use is listed in `placement.not_run`, as 0.3.0
   said it would be, where it read as passed: a spec with no `next_to` reported `next_to: true`.
+- A task param typed with a project's own asset or affordance class is a node, as Arena reads it:
+  the panel picks it from the spec's ids, and `list_kinds` lists it as a `node_ref`. Only Arena's
+  own classes counted, so the panel had no control for it.
 
 ## [0.4.0] - 2026-10-20
 

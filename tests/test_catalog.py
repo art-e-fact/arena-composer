@@ -79,8 +79,27 @@ def test_a_kind_lists_the_params_no_control_edits_and_whether_arena_vetted_it():
         "type": "list[Asset]",
         "required": True,
         "default": None,
+        "needs": "Asset",
     }
     assert "pick_up_object" not in by_name["PickAndPlaceTask"].other_params, "a field was listed twice"
+
+
+def test_a_task_param_naming_a_node_says_the_class_it_needs():
+    """The task asserts the class as Arena builds it, once Isaac Sim has
+    started. Told only `node_ref`, agents opened a banana as a door."""
+    fields = {(kind.name, field.name): field for kind in catalog.tasks() for field in kind.fields}
+    for kind, param, needs in [
+        ("OpenDoorTask", "openable_object", "Openable"),
+        ("PlaceUprightTask", "placeable_object", "Placeable"),
+        ("TurnKnobTask", "turnable_object", "Turnable"),
+        ("LiftObjectTaskRL", "embodiment", "EmbodimentBase"),
+        ("PickAndPlaceTask", "destination_object", "Asset"),
+    ]:
+        assert (fields[kind, param].kind, fields[kind, param].needs) == ("node_ref", needs), (kind, param)
+    assert fields["PickAndPlaceTask", "destination_object"].optional
+    assert not any(field.needs for field in fields.values() if field.kind != "node_ref")
+    # Arena passes a relation its params as they are written, so none names a node.
+    assert not any(field.kind == "node_ref" for kind in catalog.relations() for field in kind.fields)
 
 
 @pytest.fixture

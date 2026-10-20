@@ -648,6 +648,13 @@ def list_kinds() -> dict[str, Any]:
     registered all the same. A `unary` relation takes no `reference`.
     `compositions` is what `task.composition` may be.
 
+    A task param that names entries — a `node_ref`, or a list of ids under
+    `other_params` — says in `needs` the class each must be: the task asserts
+    it as Arena builds it, and `check_spec` before that. `Asset` is any entry
+    and `EmbodimentBase` the robot. An affordance, such as `Openable`, is an
+    asset of that class, as the `microwave` is, or an object reference given
+    its joint param, such as `params.openable_joint_name`.
+
     About 30 kB, and the same for the life of the server, so once is enough.
     """
     with _quiet():
