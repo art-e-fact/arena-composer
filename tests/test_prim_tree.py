@@ -46,6 +46,10 @@ def usd(tmp_path: Path) -> Path:
     stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/World").GetPrim())
     UsdPhysics.CollisionAPI.Apply(UsdGeom.Cube.Define(stage, "/World/cube").GetPrim())
     UsdGeom.Cube.Define(stage, "/World/decor/mesh")
+    # The Seattle lab table's only collider: proxy purpose, which Arena does not bound.
+    proxy = UsdGeom.Cube.Define(stage, "/World/Collisions/Cube")
+    proxy.CreatePurposeAttr(UsdGeom.Tokens.proxy)
+    UsdPhysics.CollisionAPI.Apply(proxy.GetPrim())
     UsdPhysics.ArticulationRootAPI.Apply(UsdGeom.Xform.Define(stage, "/World/cabinet").GetPrim())
     for part in ("body", "door"):
         prim = UsdGeom.Cube.Define(stage, f"/World/cabinet/{part}").GetPrim()
@@ -77,7 +81,8 @@ def _refusal(spec: Path, **arguments) -> str:
 
 
 def test_under_the_background_a_prim_is_named_relative_to_it(spec: Path):
-    """The visual-only Xform is not there: nothing could reference it."""
+    """The visual-only Xform is not there: nothing could reference it. Nor is the proxy collider, or
+    the Xform holding it: neither has a box that a relation could place by."""
     assert _tree(spec, node_id=TABLE) == {"total": 4, "matched": 4, "prims": [CABINET, BODY, DOOR, CUBE]}
 
 

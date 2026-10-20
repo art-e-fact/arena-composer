@@ -7,8 +7,9 @@ asset cache (see :mod:`arena_composer.usd_assets`), so no Kit resolver is requir
 
 Two conventions worth matching in a viewer:
 
-* Bounding boxes are local (root-relative) and follow Isaac Lab's spawn convention — the USD
-  default prim's own ``xformOp:scale`` is unbaked, only the reported ``scale`` applies.
+* Bounding boxes are local and Arena's: measured from the USD default prim's origin with its
+  authored rotation kept, and only the reported ``scale`` applied, the frame
+  :mod:`arena_composer.usd.extract` draws in.
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
   ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first
@@ -48,6 +49,7 @@ from isaaclab_arena.relations.validation.types import PlacementCheck
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 from isaaclab_arena.utils.usd.prim_tree import load_usd_prim_tree
+from pxr import Usd, UsdGeom
 
 from arena_composer import cli, spec_edit
 from arena_composer.spec_edit import DEFAULT_SEED, SpecError
@@ -63,10 +65,11 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: in
     ``--placement_seed`` does, and with neither the seed is ``DEFAULT_SEED``.
 
     Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
-    used, or that is a light or a ground plane a relation names; anything else
-    Arena raises passes through. A light or a ground plane no relation names is
-    left where it is configured, with an empty box, as the sim leaves it out of
-    placement too.
+    used, or that is a light or a ground plane a relation names, and for an
+    object reference the solve would place by whose prim has nothing Arena
+    bounds; anything else Arena raises passes through. A light or a ground
+    plane no relation names is left where it is configured, with an empty box,
+    as the sim leaves it out of placement too.
     """
     if samples < 1:
         raise ValueError(f"samples must be at least 1, got {samples}")
@@ -84,14 +87,10 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: in
     placeable = [asset for asset in assets.values() if asset.get_relations()]
     layouts: list[PlacementResult] = []
     if placeable:
-        layouts = ObjectPlacer(params).place(
-            placeable,
-            num_envs=samples,
-            # The fixed obstacles the solver avoids, picked as ArenaEnvBuilder picks them.
-            collision_objects=get_placement_collision_objects(
-                placeable, assets.values(), params.solver_params.collision_mode
-            ),
-        )
+        # The fixed obstacles the solver avoids, picked as ArenaEnvBuilder picks them.
+        obstacles = get_placement_collision_objects(placeable, assets.values(), params.solver_params.collision_mode)
+        check_reference_boxes(spec, assets, obstacles)
+        layouts = ObjectPlacer(params).place(placeable, num_envs=samples, collision_objects=obstacles)
     layout = layouts[0] if layouts else None
 
     return {
@@ -163,6 +162,39 @@ def check_placeable(assets: dict[str, Any], relations: Iterable[Any] = ()) -> No
         raise SpecError(errors)
 
 
+def check_reference_boxes(spec: ArenaEnvGraphSpec, assets: dict[str, Any], obstacles: Iterable[Any] = ()) -> None:
+    """Refuse an object reference the solve places by whose prim has nothing Arena bounds, by index.
+
+    Arena bounds a prim by its default-purpose geometry alone, so a reference to a collision proxy
+    or a guide has an empty box, and the solver stops on an assert that names neither. The solve
+    places by a reference's box when a relation names it, and as a fixed obstacle, one of
+    `obstacles`, when none does.
+    """
+    named = {node_id for relation in spec.relations for node_id in (relation.subject, relation.reference)}
+    obstacles = list(obstacles)
+    errors = [
+        f"object_references.{index}.prim_path: {reference.prim_path} {_unbounded(assets[reference.id])},"
+        f" so {reference.id} has no box to place by"
+        for index, reference in enumerate(spec.object_references or [])
+        if (reference.id in named or assets[reference.id] in obstacles)
+        and assets[reference.id].get_bounding_box().is_empty.any()
+    ]
+    if errors:
+        raise SpecError(errors)
+
+
+def _unbounded(reference: ObjectReference) -> str:
+    """What the referenced prim holds in place of the default-purpose geometry Arena bounds."""
+    stage = Usd.Stage.Open(localize(reference.parent_asset.usd_path))
+    prims = Usd.PrimRange(stage.GetPrimAtPath(reference.prim_path_in_parent_usd), Usd.TraverseInstanceProxies())
+    purposes = {UsdGeom.Imageable(prim).ComputePurpose() for prim in prims if prim.IsA(UsdGeom.Gprim)}
+    purposes -= {UsdGeom.Tokens.default_}
+    if not purposes:
+        return "holds no geometry"
+    only = " and ".join(sorted(purposes))
+    return f"holds only {only}-purpose geometry, and Arena bounds only default-purpose geometry"
+
+
 def _unplaceable(asset: Any) -> str | None:
     """The spawner of a light or a ground plane, which has no bounds to place or draw it by."""
     spawn = asset.object_cfg.spawn if isinstance(asset, Object) else None
@@ -178,8 +210,8 @@ def resolve_layout_from_yaml(path: str | Path, seed: int | None = None, samples:
 
 def prim_tree(path: str | Path, node_id: str) -> list[dict[str, Any]]:
     """The prims of `node_id`'s USD an object reference can name: those in physics or collision, and
-    their ancestors. Each `prim_path` is what the reference writes: relative, which Arena expands under
-    the parent's prim path."""
+    their ancestors, less those with nothing Arena bounds (`check_reference_boxes`). Each `prim_path`
+    is what the reference writes: relative, which Arena expands under the parent's prim path."""
     spec_edit.check_entry(path)
     spec = ArenaEnvGraphSpec.from_yaml(path)
     parents = {spec.background.id: spec.background} | {obj.id: obj for obj in spec.objects}
@@ -188,13 +220,21 @@ def prim_tree(path: str | Path, node_id: str) -> list[dict[str, Any]]:
             [f"{node_id!r} is not the background or an object, the parents a reference can have: {', '.join(parents)}"]
         )
     use_local_asset_cache()
+    usd_path = localize(parents[node_id].resolve_usd_path())
+    stage = Usd.Stage.Open(usd_path)
+    root = stage.GetDefaultPrim().GetPath()
+    # Bounded as Arena bounds a reference. A Lightwheel kitchen's colliders are guides, half the prims listed.
+    bounds = UsdGeom.BBoxCache(Usd.TimeCode.Default(), includedPurposes=[UsdGeom.Tokens.default_])
     return [
         {
             "prim_path": record.relative_path,
             "object_type": record.object_type.value,
             **({"joint_names": list(record.joint_names)} if record.joint_names else {}),
         }
-        for record in load_usd_prim_tree(localize(parents[node_id].resolve_usd_path()))
+        for record in load_usd_prim_tree(usd_path)
+        if not bounds.ComputeWorldBound(stage.GetPrimAtPath(root.AppendPath(record.relative_path)))
+        .ComputeAlignedRange()
+        .IsEmpty()
     ]
 
 

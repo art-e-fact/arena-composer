@@ -378,6 +378,9 @@ async def get_prim_tree(
     A reference picks out part of an asset by its `prim_path` — a tabletop to
     anchor on, a drawer for an affordance task to open. Only prims in physics
     or collision can be one, so only those are listed, with their ancestors.
+    Of those, a prim with no default-purpose geometry — a collider authored as
+    a proxy or a guide, as many are — is left out too: Arena bounds only that,
+    so nothing could be placed on it or around it.
 
     Write a prim's `prim_path` as it comes, with `node_id` as the reference's
     `parent_id`: it is relative, and Arena expands it under that node's prim

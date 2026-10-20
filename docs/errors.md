@@ -16,7 +16,7 @@ is judged, and where the lines come out. The checks are in
 | the validator's fields | at once, all of them | a `registry_name` nothing registers; a wrong type; a missing key; a bare `on` read as `true` |
 | the validator's asserts | once the fields they cover are right; the first to fail stops the rest | an id nothing declares; a duplicate id or `cli_override_specs` arg; a composition that does not fit its subtask count |
 | the build | minutes in, after Isaac Sim starts | a param the constructor lacks or does not take — `TypeError: object.__init__() takes exactly one argument`, naming no key; an object reference that cannot be built; an `env_cfg_override` field nothing has |
-| the resolve | seconds in | a `usd_path` nothing is at, or that is not the single rigid body the sim would spawn; a relation on a light or a ground plane |
+| the resolve | seconds in | a `usd_path` nothing is at, or that is not the single rigid body the sim would spawn; a relation on a light or a ground plane; an object reference the solve places by whose prim has no default-purpose geometry, the only kind Arena bounds |
 
 `spec_edit.check`, and every edit before it writes, run the first four in milliseconds: the first
 two as Arena runs them, the fourth computed here, the third both ways. The fifth needs the assets,

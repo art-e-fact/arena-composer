@@ -5,10 +5,15 @@ vertex positions. See [the payload contract](../../../docs/architecture.md#the-p
 
 `extract.py` draws only the stage's **default prim** subtree, which is what Isaac Lab composes in when
 it spawns an asset; Kit-authored assets park viewport cameras, render settings and outsized collision
-ground planes outside it. It also unbakes the default prim's own `xformOp:scale` (Isaac Lab's spawner
-ignores it, and the resolver's bounding boxes are computed the same way), treats an **unauthored**
-`upAxis`/`metersPerUnit` as Z-up metres rather than USD's Y-up centimetres, and descends into instance
-proxies.
+ground planes outside it. It draws in the frame Arena bounds an asset in: from the default prim's
+origin, keeping that prim's own rotation and unbaking its translate and its `xformOp:scale` (the spawn
+scale replaces it, and the viewer applies that). Isaac Lab's spawner replaces the root's rotation too,
+with the asset's initial pose, so where a root authors one, Arena's box and this drawing are turned
+against the sim: in the cache, `table` (a quarter turn about z, and the 0.55 m translate that made it
+draw off its box), `kitchen` and `kitchen_with_open_drawer` (15°), and
+`computer_mouse_hot3d_robolab` (a quarter turn about x). That is Arena's to fix. It also treats an
+**unauthored** `upAxis`/`metersPerUnit` as Z-up metres rather than USD's Y-up centimetres, and
+descends into instance proxies.
 
 A robot is drawn at its **start pose**, not the pose its file authors. `payload.py` hands `extract` the
 `joint_pos` the resolver reads off the robot's `init_state`, and each link moves as Arena's own posing
