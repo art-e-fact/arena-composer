@@ -5,6 +5,7 @@
 //! frames that come out.
 
 use bevy::camera::ScalingMode;
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use crate::scene::{Asset, Scene, arena_to_bevy};
@@ -33,9 +34,13 @@ const MARGIN: f32 = 1.1;
 /// until nothing else fits in the frame.
 const MIN_EXTENT: f32 = 0.5;
 
-/// Spawn a layout under a fresh [`ArenaRoot`] and return it.
-pub fn spawn_scene(world: &mut World, scene: &Scene) -> Entity {
+/// Spawn a layout under a fresh [`ArenaRoot`] and return it, to be drawn from
+/// `views`, the camera for `views[i]` rendering [`view_layers`]`(i)`. A piece
+/// of the background that some of them [cut away](cut_away) goes on the layers
+/// of the others alone. The window, whose one camera goes anywhere, passes none.
+pub fn spawn_scene(world: &mut World, scene: &Scene, views: &[View]) -> Entity {
     world.insert_resource(Placed(scene.assets().to_vec()));
+    let cuts: Vec<Vec<usize>> = views.iter().map(|&view| cut_away(view, scene)).collect();
     let root = world
         .spawn((
             ArenaRoot,
@@ -57,19 +62,35 @@ pub fn spawn_scene(world: &mut World, scene: &Scene) -> Entity {
                 ChildOf(root),
             ))
             .id();
-        spawn_geometry(world, nodes, placement);
+        let pieces = spawn_geometry(world, nodes, placement);
+        if asset.role != "background" {
+            continue;
+        }
+        for (index, piece) in pieces.into_iter().enumerate() {
+            let kept: Vec<usize> = (0..views.len()).filter(|&i| !cuts[i].contains(&index)).map(|i| i + 1).collect();
+            if let Some(piece) = piece
+                && kept.len() < views.len()
+            {
+                world.entity_mut(piece).insert(RenderLayers::from_layers(&kept));
+            }
+        }
     }
     root
 }
 
+/// What the camera drawing the `i`th of a scene's views renders: the default
+/// layer, which holds everything no view cuts away, and one of its own, which
+/// holds the pieces only some views cut away. See [`spawn_scene`].
+pub fn view_layers(i: usize) -> RenderLayers {
+    RenderLayers::from_layers(&[0, i + 1])
+}
+
 /// Stand in for the dome light Arena injects at build time when neither the
-/// spec nor the background USD supplies one, and for a light the spec lists as
-/// an object, which is not drawn either. `payload.build_payload` sets the flag
-/// for both.
-///
-/// Only those. Lights authored inside a USD are not extracted, so a background
-/// that carries its own is drawn by whatever the assets carry — which is
-/// nothing, today. It lights whatever is drawn, so a reload leaves it alone.
+/// spec nor the background USD supplies one, for a light the spec lists as an
+/// object, and for the lights a background's USD carries: none of them is
+/// drawn, and a room under the ambient fill alone is one flat grey.
+/// `payload.build_payload` sets the flag for all three. It lights whatever is
+/// drawn, so a reload leaves it alone.
 pub fn spawn_lighting(world: &mut World, scene: &Scene) {
     if scene.lighting.auto_injected_dome_light {
         world.spawn((
@@ -202,6 +223,50 @@ fn perspective(scene: &Scene, focus: Vec3, size: Vec3) -> Framing {
     }
 }
 
+/// The background's pieces an axis view leaves out, by index into its
+/// geometry: each that stands wholly in front of everything placed — objects,
+/// the robot — such as a room's near wall, or its ceiling and lamps from above.
+/// From outside, a room is otherwise nothing but its outside.
+///
+/// From above, also each that stands wholly over everything placed that it
+/// covers in the picture, as the cabinets hung over a counter cover what stands
+/// on it. Whatever rests on a piece is covered by it from above, so a shelf
+/// with something on it stays. Not from the front or the side, where what
+/// rests on a table stands beside it in the picture: a table between the
+/// camera and the robot would go, and leave its objects floating.
+///
+/// The perspective view stands where the background puts it, and cuts nothing.
+pub fn cut_away(view: View, scene: &Scene) -> Vec<usize> {
+    // The axis each view looks down, in Bevy's frame, from its positive end.
+    let axis = match view {
+        View::Default => return Vec::new(),
+        View::Top => 1,
+        View::Front => 2,
+        View::Side => 0,
+    };
+    let (background, placed): (Vec<&Asset>, Vec<&Asset>) =
+        scene.assets().iter().partition(|asset| asset.role == "background");
+    let placed: Vec<_> =
+        placed.into_iter().filter_map(|asset| union(world_boxes(scene, asset).into_iter().flatten())).collect();
+    let Some(background) = background.first() else {
+        return Vec::new();
+    };
+    // Whether two boxes overlap in the picture: on every axis but the view's.
+    let covers =
+        |(lo, hi): (Vec3, Vec3), (a, b): (Vec3, Vec3)| (0..3).all(|i| i == axis || (lo[i] < b[i] && a[i] < hi[i]));
+    world_boxes(scene, background)
+        .into_iter()
+        .enumerate()
+        .filter(|&(_, piece)| {
+            let Some(piece) = piece else { return false };
+            let covered: Vec<_> = placed.iter().filter(|&&thing| covers(piece, thing)).collect();
+            let behind = if view == View::Top && !covered.is_empty() { covered } else { placed.iter().collect() };
+            !behind.is_empty() && behind.iter().all(|thing| piece.0[axis] > thing.1[axis])
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
 /// A flat piece this many times wider than everything else its asset draws is
 /// left out of the framing: the ground plane some backgrounds carry
 /// (packing_table's is 5 km square) would otherwise shrink the layout to a
@@ -215,27 +280,23 @@ const OUTSIZED: f32 = 10.0;
 /// face uses — and run to hundreds of metres around a room a few wide.
 /// `None` when nothing is drawn.
 pub fn bounds(scene: &Scene) -> Option<(Vec3, Vec3)> {
-    let to_bevy = arena_to_bevy();
-    let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-    for asset in scene.assets() {
-        let pieces: Vec<Vec<Vec3>> = scene
-            .geometry_of(asset)
-            .iter()
-            .map(|node| node.positions().into_iter().map(Vec3::from).collect())
-            .collect();
-        let boxes: Vec<_> = pieces.iter().map(|points| union(points.iter().map(|&p| (p, p)))).collect();
+    union(scene.assets().iter().flat_map(|asset| {
+        let boxes = world_boxes(scene, asset);
         let outsized = outsized(&boxes);
-        let pose = asset.transform();
-        for (i, points) in pieces.iter().enumerate() {
-            if Some(i) != outsized {
-                for &point in points {
-                    let world = to_bevy * pose.transform_point(point);
-                    (min, max) = (min.min(world), max.max(world));
-                }
-            }
-        }
-    }
-    min.cmple(max).all().then_some((min, max))
+        boxes.into_iter().enumerate().filter_map(move |(i, piece)| piece.filter(|_| Some(i) != outsized))
+    }))
+}
+
+/// The bounds of each of an asset's pieces under its pose, in Bevy's frame:
+/// `None` for a piece with no vertices.
+fn world_boxes(scene: &Scene, asset: &Asset) -> Vec<Option<(Vec3, Vec3)>> {
+    let (to_bevy, pose) = (arena_to_bevy(), asset.transform());
+    let world = |point: [f32; 3]| to_bevy * pose.transform_point(Vec3::from(point));
+    scene
+        .geometry_of(asset)
+        .iter()
+        .map(|node| union(node.positions().into_iter().map(world).map(|point| (point, point))))
+        .collect()
 }
 
 /// The piece, if any, that [`OUTSIZED`] leaves out. Only the widest can be wider
@@ -385,6 +446,41 @@ mod tests {
         scene.geometries[0] = vec![piece([0.0; 3], [1.0; 3]), piece([0.0; 3], [0.01; 3])];
         let (min, max) = bounds(&scene).unwrap();
         assert!((max - min).max_element() > 0.99, "{min} {max}");
+    }
+
+    /// A room seen from outside: each axis view leaves out the background's
+    /// pieces between its camera and what is placed, and only those.
+    #[test]
+    fn axis_views_cut_away_what_stands_in_front_of_the_layout() {
+        // In Arena's frame, Z up. A cup on a table, and a robot beside it that
+        // stands taller than the cabinet's underside but not under it. From the
+        // side, the table stands between the camera and the robot.
+        let room = vec![
+            piece([-2.0, -2.0, 0.0], [2.0, 2.0, 0.0]),  // 0: floor
+            piece([-2.0, -2.0, 3.0], [2.0, 2.0, 3.0]),  // 1: ceiling
+            piece([-2.0, -2.0, 0.0], [2.0, -2.0, 3.0]), // 2: the wall the front view faces
+            piece([0.5, -0.5, 0.0], [1.0, 0.5, 1.0]),   // 3: table, under the cup
+            piece([0.5, -0.5, 1.5], [1.0, 0.5, 2.0]),   // 4: cabinet, over the cup
+            piece([-1.8, 1.6, 2.5], [-1.6, 1.8, 2.9]),  // 5: lamp, over nothing placed
+        ];
+        let asset = |role: &str, geometry| Asset {
+            role: role.into(),
+            geometry: Some(geometry),
+            ..default()
+        };
+        let scene = Scene {
+            assets: Some(vec![asset("background", 0), asset("object", 1), asset("embodiment", 2)]),
+            geometries: vec![
+                room,
+                vec![piece([0.6, -0.1, 1.0], [0.8, 0.1, 1.1])],
+                vec![piece([-1.0, -0.25, 0.0], [-0.5, 0.25, 1.6])],
+            ],
+            ..default()
+        };
+        assert_eq!(cut_away(View::Top, &scene), [1, 4, 5]);
+        assert_eq!(cut_away(View::Front, &scene), [2]);
+        assert!(cut_away(View::Side, &scene).is_empty(), "the table goes, and the cup floats");
+        assert!(cut_away(View::Default, &scene).is_empty());
     }
 
     /// The box the solver constrained: the local bounds turned by the pose and

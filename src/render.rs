@@ -22,7 +22,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_dis
 use bevy::window::ExitCondition;
 use bevy::winit::WinitPlugin;
 
-use crate::layout::{View, ambient, framing, spawn_lighting, spawn_scene};
+use crate::layout::{View, ambient, framing, spawn_lighting, spawn_scene, view_layers};
 use crate::scene::Scene;
 
 /// Frames to render after the textures have settled, before capturing. Gives
@@ -120,11 +120,12 @@ pub fn run(scene: Scene, shots: Vec<(View, PathBuf)>, width: u32, height: u32) {
 /// both asset collections while spawning.
 fn setup(world: &mut World) {
     let request = world.remove_resource::<Request>().expect("a scene to draw");
-    spawn_scene(world, &request.scene);
+    let views: Vec<View> = request.shots.iter().map(|(view, _)| *view).collect();
+    spawn_scene(world, &request.scene, &views);
     spawn_lighting(world, &request.scene);
     world.resource_mut::<Progress>().wanted = request.shots.len();
 
-    for (view, path) in &request.shots {
+    for (i, (view, path)) in request.shots.iter().enumerate() {
         // One target per view. The screenshot plugin skips duplicate targets,
         // so sharing an image between two cameras would silently drop a shot.
         let target = world.resource_mut::<Assets<Image>>().add(
@@ -141,6 +142,7 @@ fn setup(world: &mut World) {
             RenderTarget::Image(target.into()),
             framed.transform,
             framed.projection,
+            view_layers(i),
             ambient(),
             Shot {
                 view: *view,
