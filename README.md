@@ -147,6 +147,9 @@ See [AGENTS.md](AGENTS.md) and [docs/](docs/).
 
 ### The showcase on Artefacts
 
+<!-- showcase.png -->
+<a href="https://github.com/user-attachments/assets/ce24be22-ab64-42d4-aa0f-c4a848f6ec0a"><img src="https://github.com/user-attachments/assets/ce24be22-ab64-42d4-aa0f-c4a848f6ec0a" alt="Six showcase environments, drawn by arena-render: an AgiBot, a Galbot and a DROID in Lightwheel kitchens, a KUKA arm over a bench of hand tools, a DROID in a Replicator kitchen, and a GR1's kitchen from above"></a>
+
 The [showcase](docs/development.md#the-showcase) builds about twenty environments and draws each
 from four views. [artefacts.yaml](artefacts.yaml) runs it as an
 [Artefacts](https://app.artefacts.com/artefacts/arena-composer) job, so every run checks two ways:

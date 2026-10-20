@@ -47,6 +47,10 @@ views:
   front    orthographic from Arena -Y: heights, gaps, floating objects
   side     orthographic from Arena +X: the same, along the other axis
 
+The axis views leave out the background's pieces that stand between them and
+everything the spec places, so a room is seen from inside: its ceiling, its
+near wall, and from above the cabinets hung over the objects.
+
 Each spec's PNGs are <out-dir>/<spec>-<view>.png, <spec> being its file name
 less the extension, and their paths are printed one per line. A layout that fails
 placement is drawn all the same, with the checks it failed on stderr. A spec

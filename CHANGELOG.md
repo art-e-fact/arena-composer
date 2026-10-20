@@ -6,6 +6,16 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Fixed
+
+- `arena-render`'s and `render_views`' `top`, `front` and `side` views see into a room. They leave
+  out the background's pieces that stand between them and everything the spec places, and from
+  above the cabinets hung over the objects too. A Replicator kitchen was drawn from all three as
+  its grey outside, and a Lightwheel kitchen from the side as its outer wall.
+- A background whose USD carries its own lights, such as a Replicator kitchen or the packing table,
+  is lit like the others in the window, `arena-render` and `render_views`, where it was flat grey:
+  those lights are not drawn, and the light that stands in for Arena's now stands in for them too.
+
 ## [0.4.0] - 2026-10-20
 
 ### Added

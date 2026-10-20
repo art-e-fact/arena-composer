@@ -53,6 +53,9 @@ def test_a_light_and_a_ground_plane_are_placed_nowhere_and_drawn_as_nothing():
     assert built["geometries"] == []
     # The spec's own light is not drawn, so the viewer's stand-in lights the scene in its place.
     assert built["lighting"]["auto_injected_dome_light"]
+    # Nor are the lights a background's USD carries, which left a Replicator kitchen flat grey.
+    built = payload.build_payload({"assets": [], "lighting": {"background_usd_has_light": True}}, remote=False)
+    assert built["lighting"]["auto_injected_dome_light"]
 
 
 def test_a_relation_naming_a_light_is_refused_by_its_index():

@@ -117,9 +117,13 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         ],
         "geometries": geometries,
         # The viewer's one stand-in light also stands in for a light the spec
-        # lists, which is not drawn either.
+        # lists, and for the lights a background's USD carries: neither is drawn.
         "lighting": {
-            "auto_injected_dome_light": bool(lighting.get("auto_injected_dome_light") or lighting.get("light_assets"))
+            "auto_injected_dome_light": bool(
+                lighting.get("auto_injected_dome_light")
+                or lighting.get("light_assets")
+                or lighting.get("background_usd_has_light")
+            )
         },
         "viewer": _viewer(dump.get("viewer")),
         "spec": spec,
