@@ -14,7 +14,7 @@ non-uniform scales produces. The cost is that a mesh repeated inside one asset
 is emitted twice; assets that share a USD are still extracted once (see
 :mod:`arena_composer.payload`). Revisit when something needs to move at runtime.
 
-Three departures from a general-purpose USD reader, all matching what Isaac Lab
+Four departures from a general-purpose USD reader, all matching what Isaac Lab
 does when it spawns an asset:
 
 * Only the **default prim's** subtree is drawn. Referencing a USD without a prim
@@ -27,6 +27,8 @@ does when it spawns an asset:
 * An **unauthored** ``upAxis`` or ``metersPerUnit`` means Z-up metres, not USD's
   Y-up centimetres. Arena composes robot USDs on the fly and authors neither;
   under USD's own fallbacks the robot would lie on its side at 1/100 scale.
+* A robot is **posed** at the joint positions it is reset to, which Arena
+  bounds it by, rather than drawn at the pose its file authors.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
 from pxr import Gf, Usd, UsdGeom, UsdUtils
@@ -59,12 +61,16 @@ class Node:
     material: Material
 
 
-def extract(stage: Usd.Stage) -> list[Node]:
-    """Every drawable piece of ``stage``'s default prim, in the asset's frame."""
+def extract(stage: Usd.Stage, joint_pos: Mapping[str, float] | None = None) -> list[Node]:
+    """Every drawable piece of ``stage``'s default prim, in the asset's frame.
+
+    `joint_pos` poses an articulation first: a robot's start pose, keyed by joint name or by
+    Isaac Lab's regex, revolute in radians. See :func:`_posing`.
+    """
     root = stage.GetDefaultPrim()
     nodes = []
     with _quiet():
-        to_asset = _asset_frame(stage, root)
+        to_asset = _asset_frame(stage, root, joint_pos)
         for prim in _drawable(stage, root):
             surface = read_mesh(prim) if prim.IsA(UsdGeom.Mesh) else read_shape(prim)
             if surface is None or surface.triangles.size == 0:
@@ -138,11 +144,14 @@ def _split(prim: Usd.Prim, surface: Surface) -> Iterator[tuple[Surface, Material
             yield piece, read_material(prim)
 
 
-def _asset_frame(stage: Usd.Stage, root: Usd.Prim | None) -> Callable[[Usd.Prim], np.ndarray]:
+def _asset_frame(
+    stage: Usd.Stage, root: Usd.Prim | None, joint_pos: Mapping[str, float] | None
+) -> Callable[[Usd.Prim], np.ndarray]:
     """Build ``prim -> 4x4`` taking prim-local points into the asset's frame.
 
     USD's row-vector convention means the chain reads left to right:
-    ``p · localToWorld · unbake · convention``.
+    ``p · localToWorld · pose · unbake · convention``, where ``pose`` is the
+    identity for a prim no joint moves.
     """
     cache = UsdGeom.XformCache()
     convention = _convention(stage)
@@ -154,7 +163,43 @@ def _asset_frame(stage: Usd.Stage, root: Usd.Prim | None) -> Callable[[Usd.Prim]
         # order its xform ops were authored in.
         unbake = world.GetInverse() * _without_scale(world)
     tail = np.array(unbake * convention)
-    return lambda prim: np.array(cache.GetLocalToWorldTransform(prim)) @ tail
+    pose = _posing(stage, root, joint_pos) if root and joint_pos else lambda path: None
+
+    def to_asset(prim: Usd.Prim) -> np.ndarray:
+        world = np.array(cache.GetLocalToWorldTransform(prim))
+        delta = pose(str(prim.GetPath()))
+        return (world if delta is None else world @ delta) @ tail
+
+    return to_asset
+
+
+def _posing(
+    stage: Usd.Stage, root: Usd.Prim, joint_pos: Mapping[str, float]
+) -> Callable[[str], np.ndarray | None]:
+    """Build ``prim path -> 4x4`` moving a prim's world points from where the file
+    authors its link to where `joint_pos` puts it, or None where no joint moves it.
+
+    Arena's own posing, the one it bounds a robot by (``EmbodimentBase.get_bounding_box``),
+    imported rather than copied so the robot is drawn filling the box it was placed by.
+    Walking out from the root, each link is placed from its parent through the joint's
+    two frames, not where the file authors it: a revolute joint turns by its value, a
+    prismatic one slides by it, and a fixed, spherical or D6 joint holds at zero. A key
+    is a regex Isaac Lab full-matches against joint names; one matching nothing is
+    dropped, and a joint no key names stays at zero.
+
+    Imported here rather than at the top because only this needs Arena: reading an
+    asset unposed takes `usd-core` alone.
+    """
+    from isaaclab_arena.utils.usd.articulation import (
+        articulation_joint_prims,
+        compute_posed_prim_world_deltas,
+        resolve_joint_pos_patterns,
+        resolve_prim_world_delta,
+    )
+
+    joints = resolve_joint_pos_patterns(articulation_joint_prims(root), joint_pos)
+    deltas = compute_posed_prim_world_deltas(stage, str(root.GetPath()), joints)
+    return lambda path: resolve_prim_world_delta(path, deltas)
 
 
 def _convention(stage: Usd.Stage) -> Gf.Matrix4d:

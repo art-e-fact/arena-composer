@@ -10,6 +10,18 @@ ignores it, and the resolver's bounding boxes are computed the same way), treats
 `upAxis`/`metersPerUnit` as Z-up metres rather than USD's Y-up centimetres, and descends into instance
 proxies.
 
+A robot is drawn at its **start pose**, not the pose its file authors. `payload.py` hands `extract` the
+`joint_pos` the resolver reads off the robot's `init_state`, and each link moves as Arena's own posing
+(`isaaclab_arena.utils.usd.articulation`) moves it for `EmbodimentBase.get_bounding_box`, the box the
+robot is placed by. That posing sets each link from its parent through the joint's two frames rather
+than where the file puts it, turns a revolute joint and slides a prismatic one by its value, holds a
+fixed, spherical or D6 joint at zero, and full-matches each key as an Isaac Lab regex
+(`iiwa7_joint_(1|2|7)`). It is the one import of Arena here; reading an asset unposed takes `usd-core`
+alone. Arena's box is looser than the drawing: it bounds each gprim by its local box's corners, which
+stand off a link turned off its axes — 5 cm at the Franka's `panda_link4`. To check a robot against
+its box, box the drawn prims the same way: for kuka_allegro, franka_joint_pos, droid_abs_joint_pos,
+g1_wbc_joint and gr1_joint that agrees to under a millimetre.
+
 `material.py` resolves texture paths through `Sdf.AssetPath.resolvedPath`, never the authored string,
 and drops paths that do not exist — otherwise the viewer's asset server logs a miss per texture. Every
 field is a list of input names tried in order, because these assets mix `UsdPreviewSurface`,
@@ -72,6 +84,7 @@ standalone.
 ## Tests
 
 `pytest` covers this directory against minimal USDAs written inline:
-`test_usd_material.py` for the shading dialects, `test_usd_mesh.py` for the geometry reader. Every
+`test_usd_material.py` for the shading dialects, `test_usd_mesh.py` for the geometry reader, and
+`test_payload.py` for posing, against Arena's own box (it needs Arena, so CI sets it aside). Every
 fixture is a reduction of something a real asset authors — name that asset in a comment when you add
 one, or the fixture reads as a mistake. Each file has a TODO at the top listing what is still uncovered.

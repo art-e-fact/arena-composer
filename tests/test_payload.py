@@ -10,11 +10,14 @@ carries the spec it last read to.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import msgpack
+import numpy as np
 import pytest
 from isaaclab.utils.assets import _mirror_path
+from isaaclab_arena.utils.usd.helpers import compute_local_bounding_box_from_usd_at_joint_pos
 
 from arena_composer import catalog, payload, simready, usd_assets
 
@@ -171,3 +174,76 @@ def test_a_spec_that_no_longer_reads_still_carries_the_reason(tmp_path: Path, mo
     payload.build_payload({"assets": [], "spec": {"env_name": "solved"}, "spec_path": str(spec)}, remote=False)
     spec.write_text(SPEC.replace("banana_ycb_robolab", "no_such_asset"))
     assert carried(["ValidationError"]) == "from_the_file"
+
+
+# A reduction of the KUKA-Allegro's kuka.usd: links are sibling Xforms under the
+# default prim, the base is fixed to the world, and a joint names the bodies it joins.
+ARM = """\
+#usda 1.0
+(
+    defaultPrim = "kuka"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "kuka" (prepend apiSchemas = ["PhysicsArticulationRootAPI"])
+{
+    def Xform "iiwa7_link_0" (prepend apiSchemas = ["PhysicsRigidBodyAPI"])
+    {
+        def Cube "visuals"
+        {
+            double size = 0.2
+            double3 xformOp:translate = (0, 0, 0.1)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "iiwa7_link_1" (prepend apiSchemas = ["PhysicsRigidBodyAPI"])
+    {
+        double3 xformOp:translate = (0, 0, 0.2)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Cube "visuals"
+        {
+            double size = 1
+            double3 xformOp:translate = (0, 0, 0.5)
+            float3 xformOp:scale = (0.1, 0.1, 1)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+    }
+
+    def PhysicsFixedJoint "world_joint"
+    {
+        rel physics:body1 = </kuka/iiwa7_link_0>
+    }
+
+    def PhysicsRevoluteJoint "iiwa7_joint_1"
+    {
+        rel physics:body0 = </kuka/iiwa7_link_0>
+        rel physics:body1 = </kuka/iiwa7_link_1>
+        point3f physics:localPos0 = (0, 0, 0.2)
+        uniform token physics:axis = "Y"
+    }
+}
+"""
+
+
+def test_a_robot_is_drawn_at_the_start_pose_arena_places_it_by(tmp_path: Path):
+    """Arena bounds a robot at its `init_state.joint_pos`, and props keep clear of
+    that box. Drawn at the pose its file authors, the arm stands a metre tall where
+    it was placed lying down. The key is a regex, as KUKA_ALLEGRO_CFG writes them."""
+    usda = tmp_path / "kuka.usda"
+    usda.write_text(ARM)
+    joint_pos = {"iiwa7_joint_(1|2|7)": math.pi / 2}
+    robot = {
+        "id": "robot", "role": "embodiment", "local_usd_path": str(usda), "joint_pos": joint_pos,
+        "position_xyz": [0, 0, 0], "rotation_xyzw": [0, 0, 0, 1], "bbox_min": [0, 0, 0], "bbox_max": [1, 1, 1],
+    }
+
+    built = payload.build_payload({"assets": [robot]}, remote=False)
+    nodes = built["geometries"][built["assets"][0]["geometry"]]
+    positions = np.vstack([np.frombuffer(node["positions"], dtype="<f4").reshape(-1, 3) for node in nodes])
+    box = compute_local_bounding_box_from_usd_at_joint_pos(str(usda), joint_pos)
+    np.testing.assert_allclose(positions.min(axis=0), np.asarray(box.min_point).reshape(-1), atol=1e-6)
+    np.testing.assert_allclose(positions.max(axis=0), np.asarray(box.max_point).reshape(-1), atol=1e-6)
+    assert positions[:, 2].max() < 0.3, "lying down, as Arena bounds it"
