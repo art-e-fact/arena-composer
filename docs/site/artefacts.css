@@ -1,0 +1,45 @@
+/* Artefacts' look, after its new website: the purple, the lime it sets on the purple, and Fira
+   Sans, condensed for headings. zensical.toml names the text's font. */
+@import url("https://fonts.googleapis.com/css2?family=Fira+Sans+Condensed:wght@600&display=swap");
+
+:root {
+  --md-primary-fg-color: #5b4ca9;
+  --md-primary-fg-color--light: #7a6fb3;
+  --md-primary-fg-color--dark: #4c3f92;
+  --md-primary-bg-color: #faf8ff;
+  --md-primary-bg-color--light: #faf8ffb3;
+  --md-accent-fg-color: #4c3f92;
+  --md-accent-fg-color--transparent: #5b4ca91a;
+  --md-accent-bg-color: #faf8ff;
+  --md-accent-bg-color--light: #faf8ffb3;
+  --md-typeset-a-color: #5b4ca9;
+  --artefacts-lime: #dcf98b;
+}
+
+/* Dark: the purple, deepened, under the lime. */
+[data-md-color-scheme="slate"] {
+  --md-hue: 250;
+  --md-default-bg-color: #16132a;
+  --md-accent-fg-color: var(--artefacts-lime);
+  --md-accent-fg-color--transparent: #dcf98b1a;
+  --md-accent-bg-color: #16132a;
+  --md-typeset-a-color: #b7adeb;
+}
+
+.md-header,
+.md-tabs {
+  color: var(--md-primary-bg-color);
+  background-color: var(--md-primary-fg-color);
+}
+
+[data-md-color-scheme] .md-header__title {
+  color: var(--artefacts-lime);
+}
+
+.md-header__title,
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: "Fira Sans Condensed", var(--md-text-font-family);
+  font-weight: 600;
+}
