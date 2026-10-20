@@ -38,8 +38,8 @@ the conventions of a spec, and what to do when a check fails.
 6. **Run `check_spec` after every hand edit**, and fix every line it returns before going on. Each
    line names the file to fix. The playbook below covers the usual ones.
 7. **Run `describe_scene` with `samples=8`.** The spec is done when `placement.passed` equals
-   `placement.samples`. Otherwise `check_failures` names the failing check; fix it from the
-   playbook and run this step again.
+   `placement.samples` and `warnings` is empty. Otherwise `check_failures` names the failing
+   check, and each warning what cannot work; fix it from the playbook and run this step again.
 8. **Use `render_views`** only for a question about shape or contact, such as whether something
    rests on its support or whether two objects overlap. Ask only for the views that answer it.
 
@@ -51,7 +51,10 @@ the conventions of a spec, and what to do when a check fails.
 - Name an id for what the thing is in this scene, such as `mug` or `sink`, in snake_case. Do not
   name it after its `registry_name`.
 - Give the scene one anchor: `is_anchor` on the background, or on an object reference to the
-  surface things stand on.
+  surface things stand on. An anchor takes no other relation: it stays where it is configured.
+- Read positions off the world boxes `describe_scene` returns, not off origins: a table's origin
+  can sit far from its top, which is its `bbox_max[2]`. Its `frame` says which way the robot faces
+  and where its left is. `next_to`'s `side` names a world axis, not the robot's.
 - Give every placed object one relation that says where it is: `on` a support, `at_position`, or
   `position_limits`. A light or a ground plane takes no relation.
 - Quote the kind `'on'`. Arena reads YAML 1.1, where a bare `on` is the boolean true.
@@ -79,6 +82,10 @@ the conventions of a spec, and what to do when a check fails.
 | `check_failures` counts `next_to` | That side has no room, or another relation contradicts it | Choose another `side`, or remove the contradiction |
 | The first sample passes and some others fail | A layout that passes only by luck | Fix the failing check. Do not pin `seed` to hide it |
 | `distinct_layouts` is 1 | Every sample found the same layout | Fine for a fixed setup. For a task meant to vary, loosen the constraints that pin it |
+| `warnings`: `X: no relation places it ...` | An object with nothing to say where it goes | Give it `on` a support, `at_position` or `position_limits` |
+| `warnings`: `relations.N: ... is ignored: ... is an anchor ...` | A relation on an anchor | Remove it. To move the anchor, give it an `initial_pose` in its `params` |
+| `warnings`: `<robot>: its origin ... is inside X's box ...` | The robot spawns inside the anchor | Give the robot, or the anchor, an `initial_pose` that clears the other |
+| `warnings`: `<background>: ... is a dynamic rigid body ...` | A background that falls in the sim, such as `table_oak_robolab` | Choose another background, and tell the user: the fix is Arena's |
 
 ## Report
 

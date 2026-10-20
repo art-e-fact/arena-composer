@@ -6,6 +6,20 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Added
+
+- `describe_scene` reports the world. Each asset has its box in the world, `bbox_min` and
+  `bbox_max`, the one the checks use, and its `yaw_rad`. A `frame` block gives the up axis and the
+  robot's forward and left. It gave only each asset's origin and size, so agents guessed a table's
+  edges from an origin 0.2 m short of them, and the robot's left from a render.
+  `arena-resolve-layout` gives the same boxes as `world_bbox_min` and `world_bbox_max`, beside the
+  local ones.
+- `describe_scene` and `arena-resolve-layout` list `warnings`: what passes every check and still
+  cannot work in the sim. That is an object no relation places, which spawns at the origin; a
+  relation on an anchor, which the solver ignores; the robot's origin inside an anchor's box, as on
+  `table_oak_robolab`; and a background whose root is a rigid body nothing holds up, as
+  `table_oak_robolab`'s is, so nothing on it settles. Each of these passed all eight samples.
+
 ### Fixed
 
 - `arena-render`'s and `render_views`' `top`, `front` and `side` views see into a room. They leave
@@ -15,6 +29,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - A background whose USD carries its own lights, such as a Replicator kitchen or the packing table,
   is lit like the others in the window, `arena-render` and `render_views`, where it was flat grey:
   those lights are not drawn, and the light that stands in for Arena's now stands in for them too.
+- A check for a relation kind the spec does not use is listed in `placement.not_run`, as 0.3.0
+  said it would be, where it read as passed: a spec with no `next_to` reported `next_to: true`.
 
 ## [0.4.0] - 2026-10-20
 
