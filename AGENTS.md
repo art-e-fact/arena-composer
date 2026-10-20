@@ -27,7 +27,8 @@ tests, the wheel and releasing are in [docs/development.md](docs/development.md)
 A change to what the window looks like retakes the README's screenshots:
 `docs/screenshots/shoot.sh`, and the [readme-screenshots](.claude/skills/readme-screenshots/SKILL.md)
 skill for changing what they show. One to how it is used re-records its video:
-`docs/video/record.sh`, and the [readme-video](.claude/skills/readme-video/SKILL.md) skill.
+`docs/video/record.sh`, and the [readme-video](.claude/skills/readme-video/SKILL.md) skill. One to
+how a scene is drawn redraws its picture of the showcase: `python showcase/collage.py`.
 
 ## Where things are
 

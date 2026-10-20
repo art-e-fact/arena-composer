@@ -560,6 +560,9 @@ async def render_views(
     The axis views are orthographic so that a gap reads as a gap: under
     perspective, whether an object looks like it rests on a surface depends on
     where in the frame it sits. "top" and "front" together answer most of it.
+    They leave out the background's pieces that stand between them and
+    everything placed, so a room is seen from inside: its ceiling, its near
+    wall, and from above the cabinets hung over the objects.
 
     Takes seconds, and images are expensive to read — ask for the views that
     answer the question, not all four.

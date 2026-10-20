@@ -3,11 +3,19 @@
 [![Artefacts CI: showcase](https://app.artefacts.com/api/artefacts/arena-composer/badges/showcase.png)](https://app.artefacts.com/artefacts/arena-composer)
 [![Docs](https://img.shields.io/badge/docs-online-5b4ca9)](https://art-e-fact.github.io/arena-composer/)
 
+
+#### A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
+
 > [!WARNING]
 > Under heavy development. Expect the commands, the visual editor and the MCP tools to change
 > between releases, and things to break.
 
-A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
+> [!TIP]
+> To start developing with IsaacLab-Arena quickly, we recommend making your project from the
+> [artefacts-arena-template](https://github.com/art-e-fact/artefacts-arena-template). One
+> `source setup.sh` installs Arena, Isaac Lab and arena-composer, and the project comes with the MCP
+> server and skills wired into Claude Code, VS Code and Cursor, specs to start from, and
+> Experiments that evaluate a policy on them.
 
 <table>
   <tr>
@@ -58,9 +66,8 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - `arena-composer new environments/tasks/<name>.yaml` starts a spec: a task, and the scene it
   includes, holding a pick-and-place that validates, solves and builds.
 
-Each command registers the Isaac Cap assets and tasks Arena's own CLI registers. A project that
-registers its own assets or kinds names the modules that do it with `--import MODULE`, or in
-`ARENA_COMPOSER_IMPORTS`, separated by `:`.
+A project that registers its own assets or kinds names the modules that do it with
+`--import MODULE`, or in `ARENA_COMPOSER_IMPORTS`, separated by `:`.
 
 ## How it works
 
@@ -109,6 +116,10 @@ Arena's [Agentic Environment Generation](https://isaac-sim.github.io/IsaacLab-Ar
 
 > TODO: publish on PyPi and update the install steps
 
+A project made from the [template](https://github.com/art-e-fact/artefacts-arena-template) needs
+none of this: its `source setup.sh` installs a pinned release and runs `init`. The steps below add
+arena-composer to an Arena install of your own.
+
 Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/quickstart/installation.html) in, from a release's wheel. `isaaclab_arena` is not on PyPI, so
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
 
@@ -136,6 +147,9 @@ sampled layout passing.
 See [AGENTS.md](AGENTS.md) and [docs/](docs/).
 
 ### The showcase on Artefacts
+
+<!-- showcase.png -->
+<a href="https://github.com/user-attachments/assets/ce24be22-ab64-42d4-aa0f-c4a848f6ec0a"><img src="https://github.com/user-attachments/assets/ce24be22-ab64-42d4-aa0f-c4a848f6ec0a" alt="Six showcase environments, drawn by arena-render: an AgiBot, a Galbot and a DROID in Lightwheel kitchens, a KUKA arm over a bench of hand tools, a DROID in a Replicator kitchen, and a GR1's kitchen from above"></a>
 
 The [showcase](docs/development.md#the-showcase) builds about twenty environments and draws each
 from four views. [artefacts.yaml](artefacts.yaml) runs it as an

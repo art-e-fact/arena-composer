@@ -22,6 +22,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- `arena-render`'s and `render_views`' `top`, `front` and `side` views see into a room. They leave
+  out the background's pieces that stand between them and everything the spec places, and from
+  above the cabinets hung over the objects too. A Replicator kitchen was drawn from all three as
+  its grey outside, and a Lightwheel kitchen from the side as its outer wall.
+- A background whose USD carries its own lights, such as a Replicator kitchen or the packing table,
+  is lit like the others in the window, `arena-render` and `render_views`, where it was flat grey:
+  those lights are not drawn, and the light that stands in for Arena's now stands in for them too.
 - A check for a relation kind the spec does not use is listed in `placement.not_run`, as 0.3.0
   said it would be, where it read as passed: a spec with no `next_to` reported `next_to: true`.
 
