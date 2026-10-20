@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - [Compared with Arena's Agentic Environment Generation](#compared-with-arenas-agentic-environment-generation)
 - [Install](#install)
 - [Developing](#developing)
-  - [The showcase on Artefacts](#the-showcase-on-artefacts)
+    - [The showcase on Artefacts](#the-showcase-on-artefacts)
 - [License](#license)
 
 ## Highlights
@@ -71,13 +71,32 @@ A project that registers its own assets or kinds names the modules that do it wi
 
 ## How it works
 
+```mermaid
+flowchart TB
+    accTitle: Three ways to change a spec, and one view that follows them all
+    accDescr: The visual editor, the MCP tools and your text editor all change the same YAML files. The visual editor and the MCP tools write through spec_edit's checks, which refuse an edit that would not load. Whoever made a change, arena-view re-solves the layout with Arena's solver and redraws it.
+
+    panel["<b>The visual editor</b><br><code>arena-view</code>"]
+    mcp["<b>The MCP tools</b><br><code>arena-mcp</code>"]
+    text["<b>Your text editor</b>"]
+    checks["<b>Checked first</b><br>an edit that would<br>not load is refused<br><code>spec_edit.py</code>"]
+    yaml[/"<b>The YAML</b><br>a task and its scene"/]
+    view["<b>The view redraws</b><br>re-solved by<br>Arena's solver<br><code>arena-view</code>"]
+
+    panel --> checks
+    mcp --> checks
+    checks --> yaml
+    text ---> yaml
+    yaml -- "every change,<br>whoever made it" --> view
+```
+
 - **The YAML is the source of truth.** The visual editor, the MCP tools and your text editor all
   change the same files.
 - **Edits are checked.** The visual editor and the MCP tools write through one place, which:
-  - refuses an edit that would not load, leaving the files as they were
-  - keeps comments and key order
-  - takes an object's relations along when it is renamed or removed
-  - edits a task and the scene it includes as one spec
+    - refuses an edit that would not load, leaving the files as they were
+    - keeps comments and key order
+    - takes an object's relations along when it is renamed or removed
+    - edits a task and the scene it includes as one spec
 - **The visual editor follows the file.** Every change is re-solved and redrawn, whoever made it.
   One that does not solve leaves the last layout up and says why.
 - **Arena places things.** The layout comes from Arena's own placement solver: one of the layouts

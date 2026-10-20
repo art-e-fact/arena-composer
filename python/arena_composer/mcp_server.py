@@ -606,8 +606,10 @@ def check_spec(spec: str) -> dict[str, Any]:
     as the boolean true. And what Arena only finds once it builds the scene,
     after the sim has started: a param an asset, relation, subtask or object
     reference lacks, or one a relation, subtask or embodiment does not take —
-    most objects and backgrounds take any, so a misspelt one there is the
-    build's to find — an id in a list param the spec has not got, an atomic
+    most objects and backgrounds take any, so a misspelt one there passes,
+    and `describe_scene` stops on it with `TypeError: object.__init__() takes
+    exactly one argument`, naming no param — an id in a list param the spec
+    has not got, an atomic
     task of a kind that builds only among other subtasks, an object reference
     with no `prim_path`, a misspelled field under `env_cfg_override.sim`.
 

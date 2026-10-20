@@ -22,6 +22,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- `check_spec` says where a misspelt object or background param shows: it passes the check, and
+  `describe_scene`, `arena-render` and the window stop on it seconds in, with
+  `TypeError: object.__init__() takes exactly one argument`, which names neither the param nor the
+  object. It said the build would find it, once Isaac Sim had started. The `author-arena-spec`
+  skill's playbook says what to fix for that line.
 - `arena-render`'s and `render_views`' `top`, `front` and `side` views see into a room. They leave
   out the background's pieces that stand between them and everything the spec places, and from
   above the cabinets hung over the objects too. A Replicator kitchen was drawn from all three as

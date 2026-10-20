@@ -1,14 +1,40 @@
 # Architecture
 
-One package, two languages. Python owns everything that needs OpenUSD — Arena's registries, its
-placement solver, and reading the assets' geometry and materials. Rust owns Bevy and opens no USD.
-They meet in one MessagePack payload:
+arena-composer draws an [IsaacLab-Arena](https://github.com/isaac-sim/IsaacLab-Arena) environment
+spec, the YAML that says which objects a scene holds and how they relate, without starting Isaac
+Sim: in a window you edit it in, or as PNGs. What it does is in the [README](../README.md); this
+page is how it is put together.
 
-```
-spec.yaml ─▶ resolve_layout.py ─▶ payload.py ──MessagePack──▶ scene.rs + spec.rs
-             (Arena, the solver)   (+ usd/: geometry)             │
-                                                                  ├─▶ viewer.rs + editor/   a window   (arena-view)
-                                                                  └─▶ render.rs             PNGs       (arena-render, render_views)
+One package, two languages. Python owns everything that needs [OpenUSD](https://openusd.org), the
+format Arena's assets are in: Arena's registries, its placement solver, and reading the assets'
+geometry and materials. Rust owns [Bevy](https://bevy.org), the game engine that draws them, and
+opens no USD. They meet in one [MessagePack](https://msgpack.org) payload:
+
+```mermaid
+flowchart TB
+    accTitle: From a spec to a picture
+    accDescr: Python reads the spec, places its objects with Arena's solver, reads their geometry from USD and packs it all into one MessagePack payload. Rust unpacks the payload and draws it with Bevy, in a window you edit in or as PNGs.
+
+    spec[/"<b>spec.yaml</b><br>objects, how they relate,<br>a robot, a task"/]
+
+    subgraph python ["Python: everything that needs OpenUSD"]
+        direction LR
+        solve["<b>Place the objects</b><br>with Arena's solver<br><code>resolve_layout.py</code>"]
+        pack["<b>Read their geometry</b><br>and pack it<br><code>usd/</code>, <code>payload.py</code>"]
+        solve --> pack
+    end
+
+    subgraph rust ["Rust: draws with Bevy, opens no USD"]
+        direction LR
+        unpack["<b>Unpack</b><br><code>scene.rs</code>, <code>spec.rs</code>"]
+        window["<b>A window to edit in</b><br>arena-view<br><code>viewer.rs</code>, <code>editor/</code>"]
+        pngs["<b>PNGs</b><br>arena-render, render_views<br><code>render.rs</code>"]
+        unpack --> window
+        unpack --> pngs
+    end
+
+    spec --> python
+    python -- "one MessagePack payload" --> rust
 ```
 
 The same payload runs through the dev `arena-viewer` straight off disk, in the window or drawn
@@ -39,6 +65,23 @@ Measured, JSON spent ~760 ms formatting the geometry as decimal text against ~2 
   fields.
 
 ## Processes
+
+```mermaid
+flowchart LR
+    accTitle: The processes, and what each pipe carries
+    accDescr: arena-view starts the viewer child and sends it scenes down its stdin, and the viewer sends the panel's edits back up its stdout. arena-render, and arena-mcp when an agent calls render_views, start a render child for each render, which takes one scene on its stdin, writes the PNGs and exits.
+
+    view["<b>arena-view</b><br>Python<br><code>view.py</code>"]
+    viewer["<b>viewer child</b><br>Bevy, the window<br><code>viewer.rs</code>"]
+    view -- "stdin: scenes" --> viewer
+    viewer -- "stdout: edits" --> view
+
+    render["<b>arena-render</b><br>Python<br><code>render.py</code>"]
+    mcp["<b>arena-mcp</b><br>Python, an agent's tools<br><code>mcp_server.py</code>"]
+    child["<b>render child</b><br>Bevy, no window:<br>writes PNGs, exits<br><code>render.rs</code>"]
+    render -- "stdin: one scene" --> child
+    mcp -- "stdin: one scene" --> child
+```
 
 | Process | Where | Why a process of its own |
 | --- | --- | --- |
@@ -85,8 +128,35 @@ the stream closes the window.
 
 Writing the YAML takes milliseconds and solving the layout takes seconds, so an edit is answered
 twice: the editor half at once with `solving: true`, and the full payload when the solve lands. A
-refused edit is answered once, with the unchanged spec, the reason and `solving: false`. Each step
-is documented where it happens:
+refused edit is answered once, with the unchanged spec, the reason and `solving: false`.
+
+```mermaid
+sequenceDiagram
+    accTitle: An edit, answered twice
+    accDescr: An edit made in the panel goes up the viewer's stdout to arena-view. arena-view refuses an edit that would not load, and answers with the spec as it was and the reason. Otherwise it writes the file and answers at once with the new spec, so the card shows the edit while the view says it is behind. Seconds later the solve lands, and arena-view sends the layout, if it solved, then the spec as the file now reads, which ends the wait.
+
+    participant panel as Panel<br>(viewer child)
+    participant view as arena-view<br>(Python)
+    participant file as spec.yaml
+
+    Note over panel: you change a value<br>on a card
+    panel->>view: the edit, up stdout:<br>Set, Insert or Remove
+    alt it would not load
+        view-->>panel: the spec as it was,<br>and the reason
+    else it would
+        view->>file: write it
+        view-->>panel: the new spec,<br>solving: true
+        Note over panel: the card shows the edit,<br>the view says it is behind
+        Note over view: solving, for seconds.<br>Edits arriving now<br>share the next solve
+        opt it solved
+            view-->>panel: the layout
+        end
+        view-->>panel: the spec as the file<br>now reads, solving: false
+        Note over panel: the view catches up
+    end
+```
+
+Each step is documented where it happens:
 
 | Step | Where |
 | --- | --- |

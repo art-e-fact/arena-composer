@@ -64,7 +64,13 @@ def stage(out: Path = OUT) -> list[Path]:
         kind = "tree" if path.is_dir() else "blob"
         return f"]({CONFIG['repo_url']}/{kind}/{commit}/{name}{match['anchor'] or ''})"
 
-    shutil.rmtree(out, ignore_errors=True)
+    # Emptied rather than removed: `zensical serve` stops watching a docs_dir that is deleted.
+    out.mkdir(parents=True, exist_ok=True)
+    for entry in out.iterdir():
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
     for name in CONFIG.get("extra_css", []):
         (out / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / name, out / name)

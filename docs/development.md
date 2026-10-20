@@ -147,6 +147,16 @@ script again after editing a page. `zensical build` writes the site to `target/s
 a link to a page or a heading that does not exist, and deploys it to GitHub Pages from `main`.
 [site/artefacts.css](site/artefacts.css) gives it Artefacts' colours and type.
 
+Indent a nested list four spaces. GitHub nests one at two, but the site does not, and draws it as
+part of the list above, so [test_docs_site.py](../tests/test_docs_site.py) fails one that is not a
+multiple of four.
+
+A diagram is a `mermaid` code block, which GitHub and the site both draw, each in its own colours.
+Its `accTitle` and `accDescr` are what a screen reader says for it, so
+[test_docs_site.py](../tests/test_docs_site.py) fails a diagram without them. It is drawn in the
+reader's browser, so one that does not parse fails no build: look at it on the pull request. Keep
+one under about 690 px wide, the column's width on a laptop, or it is shrunk to fit, text and all.
+
 ## The wheel
 
 ```bash
