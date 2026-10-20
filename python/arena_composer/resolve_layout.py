@@ -9,7 +9,9 @@ Two conventions worth matching in a viewer:
 
 * Bounding boxes are local and Arena's: measured from the USD default prim's origin with its
   authored rotation kept, and only the reported ``scale`` applied, the frame
-  :mod:`arena_composer.usd.extract` draws in.
+  :mod:`arena_composer.usd.extract` draws in. ``world_bbox_min``/``world_bbox_max`` are the box
+  Arena checks the layout with: the local one turned by the asset's rotation and moved to its
+  position.
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
   ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first
@@ -45,11 +47,13 @@ from isaaclab_arena.relations.object_placer import ObjectPlacer
 from isaaclab_arena.relations.passive_collision_objects import get_placement_collision_objects
 from isaaclab_arena.relations.placement_poses import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
+from isaaclab_arena.relations.relations import ClutterOn, FaceTo, NextTo, NotNextTo, On
 from isaaclab_arena.relations.validation.types import PlacementCheck
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 from isaaclab_arena.utils.usd.prim_tree import load_usd_prim_tree
-from pxr import Usd, UsdGeom
+from isaaclab_arena.utils.yaw import yaw_from_quat_xyzw
+from pxr import Usd, UsdGeom, UsdPhysics
 
 from arena_composer import cli, spec_edit
 from arena_composer.spec_edit import DEFAULT_SEED, SpecError
@@ -92,11 +96,13 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: in
         check_reference_boxes(spec, assets, obstacles)
         layouts = ObjectPlacer(params).place(placeable, num_envs=samples, collision_objects=obstacles)
     layout = layouts[0] if layouts else None
+    entries = [_asset_entry(node_id, assets[node_id], meta, layout) for node_id, meta in _node_meta(spec).items()]
 
     return {
         "env_name": spec.env_name,
-        "placement": _placement_summary(layouts, seed, samples),
-        "assets": [_asset_entry(node_id, assets[node_id], meta, layout) for node_id, meta in _node_meta(spec).items()],
+        "placement": _placement_summary(layouts, seed, samples, {relation.kind for relation in spec.relations}),
+        "assets": entries,
+        "warnings": warnings(spec, assets, entries),
         # The spec as authored, beside the layout it resolved to. An editor
         # needs both: the layout says where the solver put things, this says
         # what it was asked for, and only this one can be written back.
@@ -201,6 +207,67 @@ def _unplaceable(asset: Any) -> str | None:
     return type(spawn).__name__ if isinstance(spawn, (LightCfg, GroundPlaneCfg)) else None
 
 
+def warnings(spec: ArenaEnvGraphSpec, assets: dict[str, Any], entries: list[dict[str, Any]]) -> list[str]:
+    """What passes every check a dry solve runs and still cannot work in the sim, a line each.
+
+    `entries` are the dump's assets. None of these refuses the spec: Arena builds each of them.
+    """
+    lines = [
+        f"{node_id}: no relation places it and it has no initial_pose, so it spawns at the origin"
+        for node_id in [obj.id for obj in spec.objects] + [members.id for members in spec.object_sets or []]
+        if not assets[node_id].get_relations()
+        and assets[node_id].get_initial_pose() is None
+        and not _unplaceable(assets[node_id])
+    ]
+    # The solver moves only what is not an anchor, and reads only its relations; Arena applies no
+    # marker to an anchor either.
+    anchors = {node_id for node_id, asset in assets.items() if getattr(asset, "is_anchor", False)}
+    lines += [
+        f"relations.{index}: {relation.kind} on {relation.subject} is ignored: {relation.subject} is an"
+        " anchor, which stays where it is configured whatever its other relations say"
+        for index, relation in enumerate(spec.relations)
+        if relation.subject in anchors and relation.kind != "is_anchor"
+    ]
+    boxes = {entry["id"]: entry for entry in entries}
+    robot = boxes[spec.embodiment.id]
+    for node_id in sorted(anchors):
+        low, high = boxes[node_id]["world_bbox_min"], boxes[node_id]["world_bbox_max"]
+        # A room's box holds the whole robot, as it should; a table's cannot.
+        holds_robot = all(a <= b for a, b in zip(low, robot["world_bbox_min"])) and all(
+            a >= b for a, b in zip(high, robot["world_bbox_max"])
+        )
+        if all(a < b < c for a, b, c in zip(low, robot["position_xyz"], high)) and not holds_robot:
+            origin = ", ".join(f"{value:.2f}" for value in robot["position_xyz"])
+            lines.append(
+                f"{spec.embodiment.id}: its origin, ({origin}), is inside {node_id}'s box, so the robot spawns"
+                f" inside {node_id}; give one of them an initial_pose that clears the other"
+            )
+    background = assets[spec.background.id]
+    grounded = any(_unplaceable(asset) == GroundPlaneCfg.__name__ for asset in assets.values())
+    if background.usd_path and not grounded and (body := _falling_root(background.usd_path)):
+        lines.append(
+            f"{spec.background.id}: {body}, its USD's default prim, is a dynamic rigid body, enabled and not"
+            " kinematic, and nothing in the spec holds it up, so in the sim it falls and nothing on it settles"
+        )
+    return lines
+
+
+def _falling_root(usd_path: str) -> str | None:
+    """The default prim's path where it is a dynamic rigid body, as Isaac Lab spawns it, else None.
+
+    Arena takes a background's root to be non-physical: a rigid one spawns as authored and falls,
+    with whatever ground the file has beside it left out, since only the default prim is spawned.
+    `table_oak_robolab`'s fixture does both; `maple_table_robolab` wraps the same table in a scene
+    whose root holds the table and a ground.
+    """
+    stage = Usd.Stage.Open(localize(usd_path))  # held: a prim of a stage that is gone is invalid
+    root = stage.GetDefaultPrim()
+    body = UsdPhysics.RigidBodyAPI(root)
+    if root and root.HasAPI(UsdPhysics.RigidBodyAPI) and body.GetRigidBodyEnabledAttr().Get():
+        return None if body.GetKinematicEnabledAttr().Get() else str(root.GetPath())
+    return None
+
+
 def resolve_layout_from_yaml(path: str | Path, seed: int | None = None, samples: int = 1) -> dict[str, Any]:
     """Load an env graph spec YAML and resolve it."""
     spec_edit.check_entry(path)
@@ -254,9 +321,12 @@ def _node_meta(spec: ArenaEnvGraphSpec) -> dict[str, dict[str, Any]]:
 
 
 def _asset_entry(node_id: str, asset: Any, meta: dict[str, Any], layout: PlacementResult | None) -> dict[str, Any]:
-    """Describe one asset: identity, geometry source, transform, and local bounds."""
+    """Describe one asset: identity, geometry source, transform, and local and world bounds."""
     pose = _pose(asset, layout)
     bbox = _bounding_box(asset)
+    # Turned as the solver turns a box, by the whole rotation; an empty box's corners would turn to NaN.
+    world = bbox if bbox.is_empty.any() else bbox.rotated_by_quat(pose.rotation_xyzw)
+    world = world.translated(pose.position_xyz)
     return {
         "id": node_id,
         **meta,
@@ -268,8 +338,11 @@ def _asset_entry(node_id: str, asset: Any, meta: dict[str, Any], layout: Placeme
         "solved": layout is not None and asset in layout.positions,
         "position_xyz": list(pose.position_xyz),
         "rotation_xyzw": list(pose.rotation_xyzw),
+        "yaw_rad": yaw_from_quat_xyzw(pose.rotation_xyzw),
         "bbox_min": _xyz(bbox.min_point),
         "bbox_max": _xyz(bbox.max_point),
+        "world_bbox_min": _xyz(world.min_point),
+        "world_bbox_max": _xyz(world.max_point),
     }
 
 
@@ -342,14 +415,26 @@ def _pose(asset: Any, layout: PlacementResult | None) -> Pose:
     return pose or Pose.identity()
 
 
-def _placement_summary(layouts: list[PlacementResult], seed: int, samples: int) -> dict[str, Any]:
+#: The relation kind each of Arena's relation checks tests. Arena runs every check it has and
+#: passes one with nothing to test, so a check for a kind the spec does not use goes in `not_run`.
+_CHECKED_KIND = {
+    PlacementCheck.ON_RELATION: On.name,
+    PlacementCheck.CLUTTER_ON_RELATION: ClutterOn.name,
+    PlacementCheck.NEXT_TO: NextTo.name,
+    PlacementCheck.NOT_NEXT_TO: NotNextTo.name,
+    PlacementCheck.FACE_TO: FaceTo.name,
+}
+
+
+def _placement_summary(layouts: list[PlacementResult], seed: int, samples: int, kinds: set[str]) -> dict[str, Any]:
     """Whether the first sample passed the checks a dry solve can run, which it
     could not, and how the rest fared.
 
     A pass here is necessary for the sim to accept the layout, not sufficient,
     since physics settling and IK reach are the simulator's to decide and
-    `not_run` says so. The samples are the layouts Arena would draw on as many
-    resets; they can converge on the same one, so `distinct_layouts` counts
+    `not_run` says so, as it does a check for a relation kind not in `kinds`,
+    the ones the spec uses. The samples are the layouts Arena would draw on as
+    many resets; they can converge on the same one, so `distinct_layouts` counts
     them rather than taking `samples` for it.
 
     With nothing to place — no relation — every sample is the configured poses,
@@ -371,7 +456,11 @@ def _placement_summary(layouts: list[PlacementResult], seed: int, samples: int) 
             "check_failures": {},
         }
     layout = layouts[0]
-    checks = layout.validation_results.validation_results
+    checks = {
+        check: passed
+        for check, passed in layout.validation_results.validation_results.items()
+        if _CHECKED_KIND.get(check) in kinds | {None}
+    }
     failed = [index for index, sample in enumerate(layouts) if not sample.success]
     return {
         "seed": seed,
@@ -464,7 +553,7 @@ def summary(dump: dict[str, Any]) -> str:
 
 def _format_text(dump: dict[str, Any]) -> str:
     """Render the dump as a terminal-readable summary."""
-    lines = [summary(dump)]
+    lines = [summary(dump), *(f"warning: {line}" for line in dump["warnings"])]
     for asset in dump["assets"]:
         position = ", ".join(f"{value:+.3f}" for value in asset["position_xyz"])
         rotation = ", ".join(f"{value:+.3f}" for value in asset["rotation_xyzw"])

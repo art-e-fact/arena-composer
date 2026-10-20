@@ -2,7 +2,7 @@
 
 Worked scenarios to measure the skill against, and the failure modes they exist to catch. Each
 one starts in a project where `arena-composer init` has run. It passes when `check_spec` returns
-`ok` and `describe_scene` with `samples=8` reports `passed` equal to `samples`.
+`ok` and `describe_scene` with `samples=8` reports `passed` equal to `samples` and no `warnings`.
 
 ## Scenarios
 
@@ -27,6 +27,8 @@ one starts in a project where `arena-composer init` has run. It passes when `che
   changes first.
 - **One passing sample read as done.** Arena draws a new layout on every reset, so the criterion
   is all eight.
+- **Every sample passing read as working.** An object nothing places, a pin on the anchor, the
+  robot inside the table, a table that falls: each passes every check. `warnings` names them.
 - **A kind that cannot be the only subtask.** `NoTask`, `LiftObjectTask` and
   `SortMultiObjectTask` validate as an atomic task and stop the sim when it builds them.
   `check_spec` names them.

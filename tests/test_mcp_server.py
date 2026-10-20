@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sys
 import threading
 import time
@@ -149,6 +150,66 @@ def test_a_spec_that_does_not_read_is_described_as_a_result_and_refused_as_a_ren
     assert progress == ["resolving task.yaml"], progress
 
 
+#: A resolve as `describe_scene` reads it. The G1 stands as Arena's loco-manipulation scene stands
+#: it, turned to face world -x, and the maple table's origin is 0.2 m short of its near edge.
+DUMP = {
+    "env_name": "e",
+    "spec_path": "task.yaml",
+    "placement": {},
+    "warnings": [],
+    "relations": [],
+    "assets": [
+        {
+            "id": "g1",
+            "role": "embodiment",
+            "registry_name": "g1_wbc_joint",
+            "is_anchor": False,
+            "solved": False,
+            "position_xyz": [0.8, -1.38, 0.78],
+            "yaw_rad": math.pi,
+            "bbox_min": [-0.092, -0.186, -0.785],
+            "bbox_max": [0.417, 0.186, 0.531],
+            "world_bbox_min": [0.383, -1.566, -0.005],
+            "world_bbox_max": [0.892, -1.194, 1.311],
+        },
+        {
+            "id": "maple_table_robolab",
+            "role": "background",
+            "registry_name": "maple_table_robolab",
+            "is_anchor": True,
+            "solved": True,
+            "position_xyz": [0.0, 0.0, 0.0],
+            "yaw_rad": 0.0,
+            "bbox_min": [0.19857, -0.47786, -0.697],
+            "bbox_max": [0.89857, 0.52214, 0.003],
+            "world_bbox_min": [0.19857, -0.47786, -0.697],
+            "world_bbox_max": [0.89857, 0.52214, 0.003],
+        },
+    ],
+}
+
+
+def test_describe_scene_reports_the_world_and_which_way_the_robot_faces(tmp_path: Path, monkeypatch):
+    """In the trial, agents guessed a table's edges from its origin and the robot's left from a
+    render. The G1 turned to face -x has its left at -y, which `next_to` calls `negative_y`."""
+    spec = tmp_path / "task.yaml"
+    spec.write_text("task: [\n")
+    monkeypatch.setattr(mcp_server, "_resolve", lambda path, seed, samples: DUMP)
+
+    described = json.loads(_call("describe_scene", spec=str(spec)).content[0].text)
+    assert described["frame"] == {
+        "up": [0.0, 0.0, 1.0],
+        "robot_forward": [-1.0, 0.0, 0.0],
+        "robot_left": [0.0, -1.0, 0.0],
+    }
+    robot, table = described["assets"]
+    assert robot["yaw_rad"] == 3.1416
+    assert (robot["bbox_min"], robot["bbox_max"]) == ([0.383, -1.566, -0.005], [0.892, -1.194, 1.311])
+    assert table["position_xyz"] == [0.0, 0.0, 0.0] and table["bbox_min"][0] == 0.1986 and table["bbox_max"][2] == 0.003
+    assert table["size_xyz"] == [0.7, 1.0, 0.7]
+    assert described["warnings"] == []
+
+
 def test_a_long_solve_says_it_is_still_running(tmp_path: Path, monkeypatch):
     """A first download or a mesh-heavy solve runs for minutes with nothing to
     show. A heartbeat says it is still going, on one count that only climbs,
@@ -162,7 +223,7 @@ def test_a_long_solve_says_it_is_still_running(tmp_path: Path, monkeypatch):
 
         asked.append(samples)
         time.sleep(0.35)
-        return {"env_name": "e", "spec_path": str(path), "placement": {}, "assets": [], "relations": []}
+        return DUMP
 
     monkeypatch.setattr(mcp_server, "HEARTBEAT", 0.1)
     monkeypatch.setattr(mcp_server, "_resolve", slow)
