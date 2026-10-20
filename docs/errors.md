@@ -23,7 +23,10 @@ two as Arena runs them, the fourth computed here, the third both ways. The fifth
 so it is `resolve_layout`'s, raised as a `SpecError` carrying the same kind of lines, and
 `describe_scene` answers it the same way. What a layout fails is not an error at all: `placement`
 reports the checks, and a pass there is necessary for the sim to accept the layout, not sufficient
-(`resolve_layout._placement_summary`).
+(`resolve_layout._placement_summary`). What passes them and still cannot work in the sim is a
+warning (`resolve_layout.warnings`): an object nothing places, a relation on an anchor, the robot
+inside an anchor, a background that falls. Arena builds each of these, so a warning refuses
+nothing. A new one gets a sweep too, for warnings on specs that work.
 
 ## What is computed here, and why
 

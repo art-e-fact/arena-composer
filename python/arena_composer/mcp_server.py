@@ -20,11 +20,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import math
 import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -90,7 +91,8 @@ behind another.
 What a resolve reports is one seeded sample. Pin `seed` to compare two edits;
 at runtime Arena draws a different valid layout on every reset, so before
 calling a layout done ask `describe_scene` for `samples=8` and read how many
-passed.
+passed, and its `warnings`: what passes every check and still cannot work in
+the sim.
 """
 
 mcp = MCPServer("arena-composer", instructions=INSTRUCTIONS)
@@ -293,18 +295,41 @@ async def describe_scene(
     positions come from the placement solver. Read the YAML itself for what
     was authored.
 
-    `placement` is the solver's verdict on the first sample: `checks` and
-    `failed_checks` for what a dry solve can decide — resting on, next to,
-    overlap — and `not_run` for what it did not check: what only the
-    simulator can, physics settling among them, and any the spec's
-    `placer_params.enabled_checks` leave out. A pass is necessary for the sim
-    to accept the layout, not sufficient.
+    `frame` is Arena's world: metres, `up` along +z, and `robot_forward` and
+    `robot_left`, the robot's own +x and +y in the world. An asset's heading
+    is its +x, as `face_to` turns it, and a yaw turns it counter-clockwise
+    from world +x toward +y. Arena's robots reach along their +x, but the
+    KUKA-Allegro reaches along its -x. `next_to`'s `side` names a world axis,
+    not the robot's: with `robot_left` at [0, 1, 0], the robot's left is
+    `positive_y`.
+
+    Each asset's `position_xyz` is its origin, not its centre: a table's
+    origin can sit far from its top. `bbox_min` and `bbox_max` are its box in
+    the world, axis-aligned and enclosing it as it is turned, the box the
+    checks use, so `bbox_max[2]` is its top. `size_xyz` is its own size,
+    unturned, and `yaw_rad` its heading.
+
+    `placement` is the solver's verdict. `success` is the first sample's
+    alone, and so are `checks` and `failed_checks`, what a dry solve decides
+    — resting on, next to, overlap — for the relation kinds the spec uses.
+    `not_run` lists what was not checked: a check for a kind the spec does
+    not use, any the spec's `placer_params.enabled_checks` leave out, and
+    what only the simulator decides, physics settling among them. A pass is
+    necessary for the sim to accept the layout, not sufficient.
 
     Arena draws a new layout on every reset, so one passing sample says
     little. With `samples` above 1 the solver draws that many at once and
     `placement` adds `passed` of `samples`, `failed_samples` by index,
     `check_failures` counting each failed check across them, and
     `distinct_layouts`, since samples can converge on the same layout.
+
+    `warnings` lists what passes every check and still cannot work in the
+    sim: an object no relation places, which spawns at the origin; a
+    relation on an anchor, which the solver ignores, since an anchor stays
+    where it is configured; the robot's origin inside an anchor's box, where
+    it spawns inside it; a background that falls, being a rigid body with
+    nothing holding it up. A layout is done when its samples all pass and
+    `warnings` is empty.
 
     A light or a ground plane has nothing to place: it stays where it is
     configured, unsolved, with an empty box. A scene where nothing has a
@@ -344,17 +369,23 @@ async def describe_scene(
         # as a refused edit, and reads the same way. Returned rather than
         # raised: the SDK withholds any exception's message but `ToolError`'s.
         return {"ok": False, "errors": spec_edit.reasons(error)}
+    robot = next(asset for asset in dump["assets"] if asset["role"] == "embodiment")
     return {
         "env_name": dump["env_name"],
         "spec_path": dump["spec_path"],
+        "frame": _frame(robot["yaw_rad"]),
         "placement": dump["placement"],
+        "warnings": dump["warnings"],
         "assets": [
             {
                 "id": asset["id"],
                 "role": asset["role"],
                 "registry_name": asset.get("registry_name"),
-                "position_xyz": [round(value, 4) for value in asset["position_xyz"]],
-                "size_xyz": [round(high - low, 4) for high, low in zip(asset["bbox_max"], asset["bbox_min"])],
+                "position_xyz": _rounded(asset["position_xyz"]),
+                "yaw_rad": round(asset["yaw_rad"], 4),
+                "bbox_min": _rounded(asset["world_bbox_min"]),
+                "bbox_max": _rounded(asset["world_bbox_max"]),
+                "size_xyz": _rounded(high - low for high, low in zip(asset["bbox_max"], asset["bbox_min"])),
                 "is_anchor": asset["is_anchor"],
                 "solved": asset["solved"],
             }
@@ -362,6 +393,17 @@ async def describe_scene(
         ],
         "relations": dump["relations"],
     }
+
+
+def _frame(yaw: float) -> dict[str, list[float]]:
+    """Arena's up, and the robot's own +x and +y in the world, turned by its `yaw`."""
+    cos, sin = math.cos(yaw), math.sin(yaw)
+    return {"up": [0.0, 0.0, 1.0], "robot_forward": _rounded((cos, sin, 0.0)), "robot_left": _rounded((-sin, cos, 0.0))}
+
+
+def _rounded(values: Iterable[float]) -> list[float]:
+    """To the tenth of a millimetre, without the -0.0 a turn leaves."""
+    return [round(value, 4) + 0.0 for value in values]
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -518,6 +560,9 @@ async def render_views(
     The axis views are orthographic so that a gap reads as a gap: under
     perspective, whether an object looks like it rests on a surface depends on
     where in the frame it sits. "top" and "front" together answer most of it.
+    They leave out the background's pieces that stand between them and
+    everything placed, so a room is seen from inside: its ceiling, its near
+    wall, and from above the cabinets hung over the objects.
 
     Takes seconds, and images are expensive to read — ask for the views that
     answer the question, not all four.
