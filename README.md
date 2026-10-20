@@ -6,7 +6,7 @@
 > Under heavy development. Expect the commands, the visual editor and the MCP tools to change
 > between releases, and things to break.
 
-A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
+A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
 
 <table>
   <tr>
