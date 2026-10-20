@@ -3,11 +3,12 @@
 [![Artefacts CI: showcase](https://app.artefacts.com/api/artefacts/arena-composer/badges/showcase.png)](https://app.artefacts.com/artefacts/arena-composer)
 [![Docs](https://img.shields.io/badge/docs-online-5b4ca9)](https://art-e-fact.github.io/arena-composer/)
 
+
+#### A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
+
 > [!WARNING]
 > Under heavy development. Expect the commands, the visual editor and the MCP tools to change
 > between releases, and things to break.
-
-A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
 
 > [!TIP]
 > To start developing with IsaacLab-Arena quickly, we recommend making your project from the
