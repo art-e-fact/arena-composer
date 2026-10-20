@@ -30,6 +30,7 @@ last list it was sent.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from functools import cache
 from pathlib import Path
@@ -63,10 +64,14 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
     else to fill the browser from; a viewer being fed already has the list.
     """
     geometries: list[list[dict[str, Any]]] = []
-    by_usd: dict[str, int] = {}
+    by_usd: dict[tuple[str, str], int] = {}
 
     def geometry_index(asset: dict[str, Any]) -> int | None:
-        """Extract the asset's USD once, however many assets share it."""
+        """Extract the asset's USD once, however many assets share it at one pose.
+
+        A robot is drawn at its start pose, which Arena bounds it at, rather than at
+        whatever pose its file authors.
+        """
         if asset.get("role") in _UNDRAWN_ROLES:
             return None
         path = asset.get("local_usd_path")
@@ -81,10 +86,12 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             surface = box(np.divide(asset["bbox_min"], scale), np.divide(asset["bbox_max"], scale))
             geometries.append([_encode_node(Node(asset["id"], surface, _STAND_IN))])
             return len(geometries) - 1
-        if path not in by_usd:
-            by_usd[path] = len(geometries)
-            geometries.append([_encode_node(node) for node in extract(open_stage(path))])
-        return by_usd[path]
+        joint_pos = asset.get("joint_pos")
+        key = path, json.dumps(joint_pos, sort_keys=True)
+        if key not in by_usd:
+            by_usd[key] = len(geometries)
+            geometries.append([_encode_node(node) for node in extract(open_stage(path), joint_pos)])
+        return by_usd[key]
 
     spec, owners = dump.get("spec") or {}, _owners(dump.get("spec_path"))
     lighting = dump.get("lighting", {})

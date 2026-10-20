@@ -34,6 +34,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - Arena's new kinds are listed and edited like the others: the `clutter_on` relation, the
   `ObjectInTask` task, and the `clutter_on_relation` check.
 
+### Fixed
+
+- The window, `arena-render` and `render_views` draw a robot at the joint positions it starts at,
+  which Arena bounds and places it by, rather than at the pose its USD file is authored in; that
+  includes an `initial_joint_pose` the spec gives a DROID or a Franka. The KUKA-Allegro stood 1.6 m
+  tall where Arena had placed it folded forward, 0.84 m tall and reaching 0.57 m, so props kept
+  clear of an arm the picture did not show. The GR1's forearms and the Franka's arm moved too.
+
 ### Removed
 
 - Registering Isaac Cap's assets and tasks: Arena no longer has them, nor its gear insertion and
