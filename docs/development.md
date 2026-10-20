@@ -117,6 +117,31 @@ draws other props and other layouts. The first run downloads the props, which ta
 is a spec in `showcase/themes/` with a `draw` key, which
 [test_showcase.py](../showcase/test_showcase.py) describes.
 
+## The docs site
+
+[art-e-fact.github.io/arena-composer](https://art-e-fact.github.io/arena-composer/) is built with
+[Zensical](https://zensical.org) from the pages where they live in the repository. The nav in
+[zensical.toml](../zensical.toml) lists every page on the site by its path, and
+[site/stage.py](site/stage.py) copies those pages to `target/docs` under the same paths: a link
+between two pages works as written, and every other link, to source or to a page left off the site,
+is pointed at GitHub at the commit being built. The README's video line becomes a `<video>` tag in
+the staged copy. A page under `docs/` missing from the nav fails
+[test_docs_site.py](../tests/test_docs_site.py).
+
+```bash
+python3 docs/site/stage.py
+```
+
+```bash
+uvx zensical@0.0.71 serve
+```
+
+It serves at `localhost:8000/arena-composer/`, and rebuilds when the staged copy changes, so run the
+script again after editing a page. `zensical build` writes the site to `target/site` instead.
+[docs.yml](../.github/workflows/docs.yml) builds it with `--strict` on every pull request, which fails
+a link to a page or a heading that does not exist, and deploys it to GitHub Pages from `main`.
+[site/artefacts.css](site/artefacts.css) gives it Artefacts' colours and type.
+
 ## The wheel
 
 ```bash
