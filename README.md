@@ -9,6 +9,13 @@
 
 A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
 
+> [!TIP]
+> To start developing with IsaacLab-Arena quickly, we recommend making your project from the
+> [artefacts-arena-template](https://github.com/art-e-fact/artefacts-arena-template). One
+> `source setup.sh` installs Arena, Isaac Lab and arena-composer, and the project comes with the MCP
+> server and skills wired into Claude Code, VS Code and Cursor, specs to start from, and
+> Experiments that evaluate a policy on them.
+
 <table>
   <tr>
     <!-- assets.png -->
@@ -58,9 +65,8 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - `arena-composer new environments/tasks/<name>.yaml` starts a spec: a task, and the scene it
   includes, holding a pick-and-place that validates, solves and builds.
 
-Each command registers the Isaac Cap assets and tasks Arena's own CLI registers. A project that
-registers its own assets or kinds names the modules that do it with `--import MODULE`, or in
-`ARENA_COMPOSER_IMPORTS`, separated by `:`.
+A project that registers its own assets or kinds names the modules that do it with
+`--import MODULE`, or in `ARENA_COMPOSER_IMPORTS`, separated by `:`.
 
 ## How it works
 
@@ -108,6 +114,10 @@ Arena's [Agentic Environment Generation](https://isaac-sim.github.io/IsaacLab-Ar
 ## Install
 
 > TODO: publish on PyPi and update the install steps
+
+A project made from the [template](https://github.com/art-e-fact/artefacts-arena-template) needs
+none of this: its `source setup.sh` installs a pinned release and runs `init`. The steps below add
+arena-composer to an Arena install of your own.
 
 Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/quickstart/installation.html) in, from a release's wheel. `isaaclab_arena` is not on PyPI, so
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
