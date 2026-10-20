@@ -1,0 +1,26 @@
+# Hand tools on a heavy-duty packing table, a KUKA arm with an Allegro hand bolted to its far corner.
+env_name: showcase_tabletop_workshop
+embodiment:
+  id: kuka
+  registry_name: kuka_allegro
+  params: {}
+background:
+  id: packing_table
+  registry_name: packing_table
+  params: {}
+object_references:
+# The table alone: the background's own box takes in its 5 km ground.
+- {id: bench, parent_id: packing_table, prim_path: SM_CratePacking_Table_A1/SM_HeavyDutyPackingTable_C02_01, object_type: base, params: {}}
+# The tote on the table, which a reference with no relations makes an obstacle.
+- {id: tote, parent_id: packing_table, prim_path: container_h20, object_type: rigid, params: {}}
+relations:
+- {kind: is_anchor, subject: bench, params: {}}
+# The arm's box at its start pose is 7 cm short of the table's depth: too little for `on`'s 5 cm margins.
+- {kind: 'on', subject: kuka, reference: bench, params: {clearance_m: 0.0, edge_margin_m: 0.0}}
+- {kind: at_position, subject: kuka, params: {x: 0.94, y: 1.04}}
+# A tool that starts inside the tote's or the arm's box stays there, so solve many starts.
+placer_params: {max_placement_attempts: 150}
+draw:
+  from: [Industrial/Tools/Hand]
+  count: 6
+  onto: bench
