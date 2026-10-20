@@ -13,7 +13,7 @@ use bevy_egui::{EguiContexts, egui};
 use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::browser;
-use super::card::{self, Card, Icon, cross};
+use super::card::{Card, Icon, Role, cross};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
 use super::dock::{self, Dock};
 use super::graph::{Item, Pick};
@@ -334,7 +334,7 @@ fn embodiment(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let node = &form.spec.embodiment;
     let path = [Step::from("embodiment")];
     section(ui, "embodiment", None, form.owner("embodiment"), state.revealing(&path), |ui| {
-        let card = Card::new(&path, Icon::Glyph(card::EMBODIMENT)).summary(&node.registry_name).folded();
+        let card = Card::new(&path, Icon::Node(Role::Embodiment)).summary(&node.registry_name).folded();
         card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
             ui,
             state,
@@ -359,7 +359,7 @@ fn background(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let node = &form.spec.background;
     let path = [Step::from("background")];
     section(ui, "background", None, form.owner("background"), state.revealing(&path), |ui| {
-        let card = Card::new(&path, Icon::Glyph(card::BACKGROUND)).summary(&node.registry_name).folded();
+        let card = Card::new(&path, Icon::Node(Role::Background)).summary(&node.registry_name).folded();
         card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
             ui,
             state,
@@ -402,7 +402,7 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, pictures: &mu
             let name = asset.map_or(node.registry_name.as_str(), |asset| asset.name.as_str());
             let icon = asset
                 .and_then(|asset| pictures(&asset.thumbnail))
-                .map_or(Icon::Glyph(card::OBJECT), Icon::Picture);
+                .map_or(Icon::Node(Role::Object), |picture| Icon::Picture(Role::Object, picture));
             let card = Card::new(&path, icon).summary(name).folded().removable();
             let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
@@ -438,7 +438,7 @@ fn object_sets(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
         for (index, entry) in sets.iter().enumerate() {
             let path = vec![Step::from("object_sets"), Step::from(index)];
             let members = entry.members.join(", ");
-            let card = Card::new(&path, Icon::Glyph(card::OBJECT_SET)).summary(&members).removable();
+            let card = Card::new(&path, Icon::Node(Role::ObjectSet)).summary(&members).removable();
             let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
@@ -474,7 +474,7 @@ fn object_references(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     section(ui, "object references", Some(references.len()), owner, revealing, |ui| {
         for (index, entry) in references.iter().enumerate() {
             let path = vec![Step::from("object_references"), Step::from(index)];
-            let card = Card::new(&path, Icon::Glyph(card::OBJECT_REFERENCE)).summary(&entry.parent_id).removable();
+            let card = Card::new(&path, Icon::Node(Role::ObjectReference)).summary(&entry.parent_id).removable();
             let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
