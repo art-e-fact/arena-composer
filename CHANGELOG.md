@@ -41,6 +41,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   includes an `initial_joint_pose` the spec gives a DROID or a Franka. The KUKA-Allegro stood 1.6 m
   tall where Arena had placed it folded forward, 0.84 m tall and reaching 0.57 m, so props kept
   clear of an arm the picture did not show. The GR1's forearms and the Franka's arm moved too.
+- Isaac's Seattle lab table, the `table` background, is drawn where Arena solves it. Its USD
+  stands its root 0.55 m along x, which the panel and `arena-render` drew and Arena's box leaves
+  out, so props solved onto the table stood beside it. An asset's root now keeps only its rotation,
+  as in Arena's box.
 
 ### Removed
 

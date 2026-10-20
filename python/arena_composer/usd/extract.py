@@ -14,16 +14,20 @@ non-uniform scales produces. The cost is that a mesh repeated inside one asset
 is emitted twice; assets that share a USD are still extracted once (see
 :mod:`arena_composer.payload`). Revisit when something needs to move at runtime.
 
-Four departures from a general-purpose USD reader, all matching what Isaac Lab
-does when it spawns an asset:
+Four departures from a general-purpose USD reader, to draw an asset as Isaac Lab
+spawns it and as Arena bounds it to place it:
 
 * Only the **default prim's** subtree is drawn. Referencing a USD without a prim
   path targets its default prim, so anything beside it — Kit's viewport cameras
   and render settings, and in a couple of object assets a 50 m collision ground
   plane — is authoring the file kept to itself.
-* The default prim's own ``xformOp:scale`` is **unbaked**, because Isaac Lab's
-  spawner ignores it. The resolver computes its bounding boxes the same way, so
-  leaving it in would make the geometry and the solved layout disagree.
+* The default prim's own translate and scale are **unbaked** and its rotation
+  is kept, because that is the frame Arena bounds an asset in: from the default
+  prim's origin, with its authored rotation, and the spawn scale replacing its
+  own, which the viewer applies. Anything else draws the geometry off the
+  solved layout. Isaac Lab's spawner replaces the rotation too, with the
+  asset's initial pose, so on an asset whose root authors one, Arena's box and
+  the sim disagree; this follows the box the layout was solved by.
 * An **unauthored** ``upAxis`` or ``metersPerUnit`` means Z-up metres, not USD's
   Y-up centimetres. Arena composes robot USDs on the fly and authors neither;
   under USD's own fallbacks the robot would lie on its side at 1/100 scale.
@@ -158,10 +162,10 @@ def _asset_frame(
     unbake = Gf.Matrix4d(1)
     if root:
         world = cache.GetLocalToWorldTransform(root)
-        # Strip the default prim's whole contribution, then put back everything
-        # but its scale. Doing it as a matrix pair sidesteps having to know the
+        # Strip the default prim's whole contribution, then put back its
+        # rotation. Doing it as a matrix pair sidesteps having to know the
         # order its xform ops were authored in.
-        unbake = world.GetInverse() * _without_scale(world)
+        unbake = world.GetInverse() * Gf.Matrix4d().SetRotate(Gf.Transform(world).GetRotation())
     tail = np.array(unbake * convention)
     pose = _posing(stage, root, joint_pos) if root and joint_pos else lambda path: None
 
@@ -212,14 +216,6 @@ def _convention(stage: Usd.Stage) -> Gf.Matrix4d:
         if meters > 0:
             matrix = matrix * Gf.Matrix4d().SetScale(meters)
     return matrix
-
-
-def _without_scale(matrix: Gf.Matrix4d) -> Gf.Matrix4d:
-    decomposed = Gf.Transform(matrix)
-    stripped = Gf.Transform()
-    stripped.SetTranslation(decomposed.GetTranslation())
-    stripped.SetRotation(decomposed.GetRotation())
-    return stripped.GetMatrix()
 
 
 def _place(surface: Surface, matrix: np.ndarray) -> Surface:

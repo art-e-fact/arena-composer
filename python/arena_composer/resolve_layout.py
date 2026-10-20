@@ -7,8 +7,9 @@ asset cache (see :mod:`arena_composer.usd_assets`), so no Kit resolver is requir
 
 Two conventions worth matching in a viewer:
 
-* Bounding boxes are local (root-relative) and follow Isaac Lab's spawn convention — the USD
-  default prim's own ``xformOp:scale`` is unbaked, only the reported ``scale`` applies.
+* Bounding boxes are local and Arena's: measured from the USD default prim's origin with its
+  authored rotation kept, and only the reported ``scale`` applied, the frame
+  :mod:`arena_composer.usd.extract` draws in.
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
   ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first

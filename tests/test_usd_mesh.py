@@ -65,6 +65,32 @@ def Xform "Asset"
 """
 
 
+# Isaac's Seattle lab table, `table`: its default prim stands 0.55 m along x and
+# is turned a quarter about z. The scale is `grey_bin_robolab`'s root's.
+TURNED_ROOT = """#usda 1.0
+(
+    defaultPrim = "DemoTable"
+    upAxis = "Z"
+    metersPerUnit = 1
+)
+
+def Xform "DemoTable"
+{
+    double3 xformOp:translate = (0.55, 0, 0)
+    float3 xformOp:rotateXYZ = (0, 0, 90)
+    float3 xformOp:scale = (0.007, 0.007, 0.007)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+    def Mesh "TableGeom"
+    {
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+    }
+}
+"""
+
+
 def surface_of(tmp_path: Path, *, normals: str = "", extra: str = ""):
     """Extract the one surface from a QUAD stage filled in with these attributes."""
     usda = tmp_path / "asset.usda"
@@ -180,6 +206,22 @@ def test_non_finite_uvs_are_neutralised(tmp_path: Path) -> None:
     assert np.isfinite(surface.uvs).all()
     # The good corners still flip V normally; only the bad one is zeroed.
     assert surface.uvs.tolist() == [[0.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+
+
+def test_the_default_prim_keeps_its_rotation_and_drops_its_translate_and_scale(tmp_path: Path) -> None:
+    """The frame Arena bounds an asset in: from the default prim's origin, turned
+    as it is turned, and at the spawn scale, which the viewer applies.
+
+    Keeping the translate drew the table 0.55 m off the box the layout was
+    solved by, so the props solved onto it stood beside it.
+    """
+    usda = tmp_path / "asset.usda"
+    usda.write_text(TURNED_ROOT, encoding="utf-8")
+    positions = extract(open_stage(str(usda)))[0].surface.positions
+
+    # A quarter turn about z takes x to y and y to -x.
+    assert positions.min(axis=0).round(6).tolist() == [-1, 0, 0]
+    assert positions.max(axis=0).round(6).tolist() == [0, 1, 0]
 
 
 def test_a_cube_scaled_flat_keeps_the_normals_of_its_two_faces(tmp_path: Path) -> None:
