@@ -55,8 +55,7 @@ What currently doesn't draw. Check here before treating a render bug as new.
   scale as the only unit conversion. `_convention` applies `metersPerUnit` on top of it, so the
   extracted mesh would be drawn at 1/100 size. Any asset authored in non-metre units is exposed to this.
 - Objects spawned from a shape config instead of a USD (`procedural_cube`, `procedural_table`,
-  `sphere`). `resolve_layout.bound_spawned_shapes` bounds them by the shape and the payload draws that
-  box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape: they keep their configured pose
+  `sphere`). Arena bounds them by the shape and the payload draws that box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape: they keep their configured pose
   and an empty box, the payload draws nothing for them, and a relation naming one is refused.
 - UDIM textures (`<UDIM>` in the path, one image per tile: Fourier's GR1T2 has nine albedo tiles along
   U). The path matches no file, so it is dropped and the robot is its base grey. Fixing it means

@@ -12,6 +12,26 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   down its left edge, a tint over the card, and its icon in white, as the graph draws it. Its
   summary, after the id, is no longer greyed out. Relations, the task and subtasks are not nodes
   and stay grey.
+- arena-composer runs on IsaacLab-Arena's main branch from 2026-10-13 on (#1430; tested at
+  dc77564), where Arena rewrote its history without Isaac Cap and moved the placement APIs, and no
+  longer on the Arena 0.3.0 ran on. Both call themselves version 0.3.0, so the install cannot tell
+  them apart. Arena's 0.3.1 release is not supported: it predates #1430.
+- A spec's placement settings are its `placer_params`, as Arena now reads them: `enabled_checks`
+  and `required_checks` decide what a solve checks, and `describe_scene` reports the rest in
+  `placement.not_run`. A spec still on `placement_validators` is refused with Arena's line saying
+  to move them.
+- `--seed`, and `seed` on `describe_scene` and `render_views`, default to the spec's
+  `placer_params.placement_seed`, and to 42 only where the spec has none. A seed given still wins,
+  as Arena's `--placement_seed` does, and `placement.seed` says which one ran.
+- `get_prim_tree` gives a relative `prim_path` under an object too, as under the background: Arena
+  now expands it under the reference's parent.
+- Arena's new kinds are listed and edited like the others: the `clutter_on` relation, drawn as an
+  arrow to its support, the `ObjectInTask` task, and the `clutter_on_relation` check.
+
+### Removed
+
+- Registering Isaac Cap's assets and tasks: Arena no longer has them, nor its gear insertion and
+  syringe sort specs.
 
 ## [0.3.0] - 2026-10-07
 

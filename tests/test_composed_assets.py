@@ -9,10 +9,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from isaaclab_arena.assets.registries import AssetRegistry
-from isaaclab_arena.relations.passive_collision_objects import get_passive_collision_objects
 
 from arena_composer import payload
-from arena_composer.resolve_layout import _asset_entry, bound_spawned_shapes
+from arena_composer.resolve_layout import _asset_entry, check_placeable
 from arena_composer.spec_edit import SpecError
 
 
@@ -35,18 +34,15 @@ def test_a_deformable_cube_is_drawn_as_its_bounding_box():
     [("procedural_cube", [0.025, 0.05, 0.05]), ("sphere", [0.1, 0.1, 0.1])],
 )
 def test_an_asset_spawned_from_a_shape_is_bounded_by_that_shape(registry_name, half_size):
-    assets = {"shape": AssetRegistry().get_asset_by_name(registry_name)()}
-    bound_spawned_shapes(assets)
-    entry = _asset_entry("shape", assets["shape"], {"role": "object"}, layout=None)
+    entry = _asset_entry("shape", AssetRegistry().get_asset_by_name(registry_name)(), {"role": "object"}, layout=None)
+    assert entry["usd_path"] is None
     np.testing.assert_allclose(entry["bbox_min"], np.negative(half_size))
     np.testing.assert_allclose(entry["bbox_max"], half_size)
 
 
 def test_a_light_and_a_ground_plane_are_placed_nowhere_and_drawn_as_nothing():
     assets = {name: AssetRegistry().get_asset_by_name(name)() for name in ("light", "ground_plane")}
-    bound_spawned_shapes(assets)
-    # An unset usd_path is what Arena skips as an obstacle, so it has to survive.
-    assert get_passive_collision_objects(assets.values()) == []
+    check_placeable(assets)
 
     entries = [_asset_entry(name, asset, {"role": "object"}, layout=None) for name, asset in assets.items()]
     assert [(entry["solved"], entry["bbox_min"], entry["bbox_max"]) for entry in entries] == [
@@ -66,5 +62,5 @@ def test_a_relation_naming_a_light_is_refused_by_its_index():
         SimpleNamespace(kind="on", subject="cube", reference="lamp"),
     ]
     with pytest.raises(SpecError) as refused:
-        bound_spawned_shapes(assets, relations)
+        check_placeable(assets, relations)
     assert refused.value.errors == ["relations.1: on names 'lamp', a DomeLightCfg with nothing to place; it takes no relation"]

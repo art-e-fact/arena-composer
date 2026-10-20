@@ -166,7 +166,10 @@ def add_spec_options(parser: argparse.ArgumentParser) -> None:
     """`--seed`, `--asset-cache` and `--import`, which `arena-view`,
     `arena-resolve-layout` and `arena-render` take alike."""
     parser.add_argument(
-        "--seed", type=int, default=DEFAULT_SEED, metavar="N", help=f"Placement seed (default: {DEFAULT_SEED})"
+        "--seed",
+        type=int,
+        metavar="N",
+        help=f"Placement seed (default: the spec's placer_params.placement_seed, else {DEFAULT_SEED})",
     )
     parser.add_argument(
         "--asset-cache",

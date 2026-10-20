@@ -23,11 +23,10 @@ import json
 import sys
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from isaaclab.sim import CuboidCfg, GroundPlaneCfg, LightCfg, SphereCfg
+from isaaclab.sim import GroundPlaneCfg, LightCfg
 from isaaclab_arena.assets.background import Background
 from isaaclab_arena.assets.deformable_object import DeformableObject
 from isaaclab_arena.assets.object import Object
@@ -37,18 +36,15 @@ from isaaclab_arena.assets.registries import AssetRegistry
 from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
 from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import (
     _attach_spatial_relations_to_assets,
-    build_checks_for_placer_params,
     instantiate_assets_from_spec,
 )
 from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
-from isaaclab_arena.environments.relation_solver_interface import _should_include_background_mesh
+from isaaclab_arena.environment_spec.placer_params_cfg_override import build_placer_params_from_override
 from isaaclab_arena.relations.object_placer import ObjectPlacer
-from isaaclab_arena.relations.object_placer_params import ObjectPlacerParams
-from isaaclab_arena.relations.passive_collision_objects import get_passive_collision_objects
-from isaaclab_arena.relations.placement_events import get_pose_from_layout
+from isaaclab_arena.relations.passive_collision_objects import get_placement_collision_objects
+from isaaclab_arena.relations.placement_poses import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
-from isaaclab_arena.relations.placement_validation import PlacementCheck
-from isaaclab_arena.relations.relations import get_anchor_objects
+from isaaclab_arena.relations.validation.types import PlacementCheck
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
 from isaaclab_arena.utils.usd.prim_tree import load_usd_prim_tree
@@ -58,35 +54,43 @@ from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 from arena_composer.usd_assets import localize, use_local_asset_cache
 
 
-def resolve_layout(spec: ArenaEnvGraphSpec, seed: int = DEFAULT_SEED, samples: int = 1) -> dict[str, Any]:
+def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: int = 1) -> dict[str, Any]:
     """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
 
     `samples` layouts are solved in one batch, an env each; the first is the
-    one described, and the placement summary counts how many passed.
+    one described, and the placement summary counts how many passed. `seed`
+    wins over the spec's ``placer_params.placement_seed``, as Arena's
+    ``--placement_seed`` does, and with neither the seed is ``DEFAULT_SEED``.
 
     Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
-    used, that spawns neither a USD nor a shape to bound it by, or that is a
-    light or a ground plane a relation names; anything else Arena raises passes
-    through. A light or a ground plane no relation names is left where it is
-    configured, with an empty box, as the sim leaves it out of placement too.
+    used, or that is a light or a ground plane a relation names; anything else
+    Arena raises passes through. A light or a ground plane no relation names is
+    left where it is configured, with an empty box, as the sim leaves it out of
+    placement too.
     """
     if samples < 1:
         raise ValueError(f"samples must be at least 1, got {samples}")
     use_local_asset_cache()
     check_usd_params(spec.objects)
     assets = instantiate_assets_from_spec(spec, AssetRegistry())
-    bound_spawned_shapes(assets, spec.relations)
+    check_placeable(assets, spec.relations)
     _attach_spatial_relations_to_assets(spec.relations, assets)
 
+    params = build_placer_params_from_override(spec.placer_params)
+    if seed is None:
+        seed = DEFAULT_SEED if params.placement_seed is None else params.placement_seed
+    params.placement_seed = seed
     # Assets without relations keep their configured pose; the rest are solved together.
     placeable = [asset for asset in assets.values() if asset.get_relations()]
     layouts: list[PlacementResult] = []
     if placeable:
-        params = replace(build_checks_for_placer_params(spec), placement_seed=seed)
         layouts = ObjectPlacer(params).place(
             placeable,
             num_envs=samples,
-            collision_objects=_collision_objects(assets, placeable, params),
+            # The fixed obstacles the solver avoids, picked as ArenaEnvBuilder picks them.
+            collision_objects=get_placement_collision_objects(
+                placeable, assets.values(), params.solver_params.collision_mode
+            ),
         )
     layout = layouts[0] if layouts else None
 
@@ -141,52 +145,31 @@ def check_usd_params(objects: Iterable[Any]) -> None:
         raise SpecError(errors)
 
 
-def bound_spawned_shapes(assets: dict[str, Any], relations: Iterable[Any] = ()) -> None:
-    """Give each object spawned from a shape, not a USD, the bounding box of that shape.
+def check_placeable(assets: dict[str, Any], relations: Iterable[Any] = ()) -> None:
+    """Refuse a relation that names a light or a ground plane, by index.
 
-    Arena's ``Object.get_bounding_box`` reads the box from ``usd_path``, which
-    these leave unset, and returns one already set as it is. So the solver
-    places them by this box, and the payload draws it.
-
-    A light or a ground plane has nothing to place and keeps its unset
-    ``usd_path``, which is what keeps Arena from taking it for an obstacle. A
-    relation naming one is refused here, by index: Arena would stop on a bare
-    assert inside the solver.
+    Neither has a box to place it by: Arena bounds an object by its USD or its
+    primitive shape, and would stop on an assert inside the solver.
     """
-    errors, unplaceable = [], {}
-    for node_id, asset in assets.items():
-        # An object set names no USD of its own either, but bounds itself by its members'.
-        if not isinstance(asset, Object) or isinstance(asset, RigidObjectSet) or asset.usd_path:
-            continue
-        spawn = asset.object_cfg.spawn
-        if isinstance(spawn, (LightCfg, GroundPlaneCfg)):
-            unplaceable[node_id] = type(spawn).__name__
-            continue
-        if isinstance(spawn, CuboidCfg):
-            half_size = [size / 2 for size in spawn.size]
-        elif isinstance(spawn, SphereCfg):
-            half_size = [spawn.radius] * 3
-        else:
-            errors.append(f"{node_id}: spawns a {type(spawn).__name__}, which has no bounding box to place it by")
-            continue
-        asset.bounding_box = AxisAlignedBoundingBox(
-            min_point=tuple(-half for half in half_size), max_point=tuple(half_size)
-        )
-        # get_bounding_box asserts usd_path is not None before reading the box, and an object
-        # built from a spawner_cfg (`sphere`) has None where the procedural ones have "".
-        asset.usd_path = ""
-    for index, relation in enumerate(relations):
-        for node_id in (relation.subject, relation.reference):
-            if node_id in unplaceable:
-                errors.append(
-                    f"relations.{index}: {relation.kind} names {node_id!r}, a {unplaceable[node_id]} with"
-                    " nothing to place; it takes no relation"
-                )
+    unplaceable = {node_id: spawn for node_id, asset in assets.items() if (spawn := _unplaceable(asset))}
+    errors = [
+        f"relations.{index}: {relation.kind} names {node_id!r}, a {unplaceable[node_id]} with nothing to place;"
+        " it takes no relation"
+        for index, relation in enumerate(relations)
+        for node_id in (relation.subject, relation.reference)
+        if node_id in unplaceable
+    ]
     if errors:
         raise SpecError(errors)
 
 
-def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED, samples: int = 1) -> dict[str, Any]:
+def _unplaceable(asset: Any) -> str | None:
+    """The spawner of a light or a ground plane, which has no bounds to place or draw it by."""
+    spawn = asset.object_cfg.spawn if isinstance(asset, Object) else None
+    return type(spawn).__name__ if isinstance(spawn, (LightCfg, GroundPlaneCfg)) else None
+
+
+def resolve_layout_from_yaml(path: str | Path, seed: int | None = None, samples: int = 1) -> dict[str, Any]:
     """Load an env graph spec YAML and resolve it."""
     spec_edit.check_entry(path)
     spec = ArenaEnvGraphSpec.from_yaml(path)
@@ -195,8 +178,8 @@ def resolve_layout_from_yaml(path: str | Path, seed: int = DEFAULT_SEED, samples
 
 def prim_tree(path: str | Path, node_id: str) -> list[dict[str, Any]]:
     """The prims of `node_id`'s USD an object reference can name: those in physics or collision, and
-    their ancestors. Each `prim_path` is what the reference writes. Relative under the background, which
-    Arena expands with the background's name; whole under an object, which a relative path would miss."""
+    their ancestors. Each `prim_path` is what the reference writes: relative, which Arena expands under
+    the parent's prim path."""
     spec_edit.check_entry(path)
     spec = ArenaEnvGraphSpec.from_yaml(path)
     parents = {spec.background.id: spec.background} | {obj.id: obj for obj in spec.objects}
@@ -204,29 +187,15 @@ def prim_tree(path: str | Path, node_id: str) -> list[dict[str, Any]]:
         raise SpecError(
             [f"{node_id!r} is not the background or an object, the parents a reference can have: {', '.join(parents)}"]
         )
-    asset = parents[node_id]
-    prefix = "" if asset is spec.background else f"{{ENV_REGEX_NS}}/{asset.params.get('instance_name', node_id)}/"
     use_local_asset_cache()
     return [
         {
-            "prim_path": prefix + record.relative_path,
+            "prim_path": record.relative_path,
             "object_type": record.object_type.value,
             **({"joint_names": list(record.joint_names)} if record.joint_names else {}),
         }
-        for record in load_usd_prim_tree(localize(asset.resolve_usd_path()))
+        for record in load_usd_prim_tree(localize(parents[node_id].resolve_usd_path()))
     ]
-
-
-def _collision_objects(assets: dict[str, Any], placeable: list[Any], params: ObjectPlacerParams) -> list[Any]:
-    """Fixed obstacles the solver avoids, selected the way ArenaEnvBuilder selects them."""
-    scene_assets = list(assets.values())
-    collision_mode = params.solver_params.collision_mode
-    return get_passive_collision_objects(
-        scene_assets,
-        include_background=_should_include_background_mesh(placeable, scene_assets, collision_mode),
-        # An anchored reference is placed against, so its subtree is cut out of the parent mesh.
-        background_mesh_exclusions=[a for a in get_anchor_objects(placeable) if isinstance(a, ObjectReference)],
-    )
 
 
 def _node_meta(spec: ArenaEnvGraphSpec) -> dict[str, dict[str, Any]]:
@@ -284,11 +253,12 @@ def _geometry(asset: Any) -> dict[str, Any]:
             "prim_path_in_parent_usd": asset.prim_path_in_parent_usd,
         }
     if isinstance(asset, RigidObjectSet):
-        # One member per env; env 0 is what a single-env viewer shows.
+        # One member per env, at its own scale; env 0's is what a single-env viewer shows.
+        member = asset.objects[asset.variant_indices_by_env[0] if asset.variant_indices_by_env else 0]
         return {
-            **_usd_paths(asset.object_usd_paths[0]),
-            "scale": [1.0, 1.0, 1.0],
-            "member_usd_paths": asset.member_usd_paths,
+            **_usd_paths(member.usd_path or None),
+            "scale": list(member.scale),
+            "member_usd_paths": [obj.usd_path for obj in asset.objects],
         }
     if isinstance(asset, DeformableObject):
         # Not an Object: it spawns from a spawner config and has no usd_path of its
@@ -297,8 +267,8 @@ def _geometry(asset: Any) -> dict[str, Any]:
         # extractor would draw at 1/100 size (usd/AGENTS.md, Known gaps). Read
         # spawner_cfg.usd_path and .scale here once the extractor agrees with Arena.
         return {**_usd_paths(None), "scale": [1.0, 1.0, 1.0]}
-    # Object and Background. usd_path is empty for one spawned from a shape
-    # (bound_spawned_shapes), and the payload draws its bounding box.
+    # Object and Background. usd_path is unset for one spawned from a shape,
+    # and the payload draws its bounding box.
     return {**_usd_paths(asset.usd_path or None), "scale": list(asset.scale)}
 
 
@@ -309,8 +279,8 @@ def _bounding_box(asset: Any) -> Any:
         # for every env assigned, since Arena asserts the count matches.
         per_env = asset.get_bounding_box_per_env(num_envs=len(asset.variant_indices_by_env))
         return AxisAlignedBoundingBox(min_point=per_env.min_point[:1], max_point=per_env.max_point[:1])
-    if isinstance(asset, Object) and asset.usd_path is None:
-        # A light or a ground plane (bound_spawned_shapes): an empty box, drawn as nothing.
+    if _unplaceable(asset):
+        # A light or a ground plane (check_placeable): an empty box, drawn as nothing.
         return AxisAlignedBoundingBox(min_point=(0.0, 0.0, 0.0), max_point=(0.0, 0.0, 0.0))
     return asset.get_bounding_box()
 

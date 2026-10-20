@@ -50,7 +50,8 @@ INCLUDE = "external_yaml"
 #: the run's. See :meth:`SpecFiles.owner`.
 _SCENE_KEYS = frozenset({"embodiment", "background", "objects", "object_sets", "object_references", "relations"})
 
-#: The placement seed every command and tool solves with unless told otherwise.
+#: The placement seed every command and tool solves with when neither it nor
+#: the spec's `placer_params.placement_seed` names one.
 DEFAULT_SEED = 42
 
 
@@ -218,8 +219,8 @@ class SpecFiles:
         the scene's keys together, the task's with the run's settings — so a
         missing ``task`` is the task file's to fix, and a first
         ``cli_override_specs`` lands beside the task, where the template keeps
-        it. Arena's own gear specs put the scene in the entry file and the
-        include holds `env_cfg_override`, and this follows that layout too.
+        it. Arena's gear specs, before 0.3.1, put the scene in the entry file
+        and `env_cfg_override` in the include, and this follows that layout too.
         """
         for path, document in self.documents.items():
             if key in document:
@@ -666,7 +667,7 @@ def _override_problems(spec: Any) -> list[str]:
     if not isinstance(override, dict):
         return []  # absent, or not a mapping, which the validator refuses
     # Private API: the two checks apply_env_cfg_override runs first.
-    from isaaclab_arena.environment_spec.env_cfg_override import _materialize_targets, _validate_override_syntax
+    from isaaclab_arena.hydra.config_override import _materialize_targets, _validate_override_syntax
 
     try:
         _validate_override_syntax(copy.deepcopy(override), path="env")
@@ -1171,10 +1172,11 @@ def _drop_dependents(files: SpecFiles, node_id: str) -> list[str]:
 def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
     """Point everything naming `previous` at `node_id` instead: every slot
     :func:`_id_slots` finds in either file, and the prim path of an object
-    reference inside a renamed *object*, which Arena spells as
+    reference inside a renamed *object* where it is written whole, as
     ``{ENV_REGEX_NS}/<parent id>/...`` — an asset is spawned under its id. A
-    reference inside the background spells the background's registry name
-    there, which a rename of its id leaves alone.
+    relative one Arena expands under the parent's prim path, and a whole one
+    inside the background spells the background's registry name, which a
+    rename of its id leaves alone.
 
     A name left behind is a reference to an asset that no longer exists, which
     stops the spec loading — the same failure removing an asset without its

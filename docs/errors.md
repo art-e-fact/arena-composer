@@ -99,8 +99,8 @@ leaves — `objects: null`, `relations: 'on'` — since it runs on specs the val
   `../scenes/scene.yaml: objects.2.registry_name: ...`. `SpecFiles.owner` says which file holds a
   key, and for one neither has — a missing `task`, a first `cli_override_specs` — the file holding
   its kin: the scene's six keys together, the rest with the task. That covers the template's layout
-  and Arena's gear specs, which keep the scene in the entry file and only `env_cfg_override` in the
-  include.
+  and the one Arena's gear specs had before 0.3.1, the scene in the entry file and only
+  `env_cfg_override` in the include.
 - **The closest that exist** follow a name or id nothing declares (`_hint`, `_UNKNOWN`): from the
   registries for an asset, relation or task kind, from the spec's own ids for a slot, narrowed to
   the ids Arena allows there. Up to three within 0.1 of the best are offered, because a shared
@@ -125,10 +125,9 @@ leaves — `objects: null`, `relations: 'on'` — since it runs on specs the val
    shape, naming the entry's path.
 2. Sweep before and after. From the template's checkout, with this repo on `PYTHONPATH` in Arena's
    venv, run `spec_edit.check` over every YAML with a `task` key under its `environments/` and under
-   Arena's `isaaclab_arena/` and `isaaclab_arena_environments/`, with
-   `isaaclab_arena_environments.isaac_cap.gear_insertion_v2` imported first — 93 specs today — and
-   diff the error lists. A new refusal is a bug in a shipped spec, which the pull request says, or a
-   false refusal to fix.
+   Arena's `isaaclab_arena/` and `isaaclab_arena_environments/` — 89 specs today — and diff the
+   error lists. A new refusal is a bug in a shipped spec, which the pull request says, or a false
+   refusal to fix.
 3. Plant the mistake in a copy of a spec and read the line, as the agent will.
 4. Test it against the real validator, as [test_spec_edit.py](../tests/test_spec_edit.py) does
    throughout: a test that stubs the check tests the uninteresting half. Those files import Arena,

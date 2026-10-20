@@ -58,7 +58,7 @@ the conventions of a spec, and what to do when a check fails.
 - An `atomic` task has exactly one subtask. Some kinds build only as one of several subtasks;
   `check_spec` names them.
 - Write a `prim_path` exactly as `get_prim_tree` returned it, with that node as `parent_id`.
-- Leave `env_cfg_override` and `placement_validators` alone unless the request is about them.
+- Leave `env_cfg_override` and `placer_params` alone unless the request is about them.
 
 ## Playbook
 

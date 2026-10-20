@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(_view(args.spec, args.seed, payload, stamps))
 
 
-def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
+def _resolve(spec: Path, seed: int | None, remote: bool = False) -> bytes:
     """Resolve `spec` into a packed scene. Seconds of work."""
     # Arena and the solver print progress to stdout; keep it off stdout so a
     # caller can still pipe this command's own output somewhere.
@@ -79,7 +79,7 @@ def _resolve(spec: Path, seed: int, remote: bool = False) -> bytes:
         return encode(resolve_layout_from_yaml(spec, seed=seed), remote=remote)
 
 
-async def _view(spec: Path, seed: int, payload: bytes, stamps: dict[Path, int | None]) -> int:
+async def _view(spec: Path, seed: int | None, payload: bytes, stamps: dict[Path, int | None]) -> int:
     """Draw `payload`, reloading it from `spec` until the window closes.
     `stamps` is the files as they stood when `payload` was solved from them."""
     proc = await asyncio.create_subprocess_exec(
@@ -283,7 +283,7 @@ async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) ->
         await _answer(proc, spec)
 
 
-async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:
+async def _solve_when_asked(spec: Path, seed: int | None, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:
     """Re-resolve `spec` whenever `asked` — by an edit from the panel, or a change
     on disk — and draw what comes out.
 
@@ -309,7 +309,7 @@ async def _solve_when_asked(spec: Path, seed: int, proc: asyncio.subprocess.Proc
         await _draw(proc, spec, layout, errors, solving=asked.is_set())
 
 
-def _solved(spec: Path, seed: int) -> tuple[bytes | None, list[str]]:
+def _solved(spec: Path, seed: int | None) -> tuple[bytes | None, list[str]]:
     """The scene `spec` resolves to, and what stopped it where it does not."""
     try:
         return _resolve(spec, seed), []

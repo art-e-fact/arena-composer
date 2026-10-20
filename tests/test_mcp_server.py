@@ -146,7 +146,7 @@ def test_a_spec_that_does_not_read_is_described_as_a_result_and_refused_as_a_ren
         warnings.simplefilter("error", MCPDeprecationWarning)
         result = asyncio.run(rendered())
     assert result.is_error and "ParserError" in result.content[0].text and "task.yaml" in result.content[0].text, result
-    assert progress == [f"resolving task.yaml (seed {mcp_server.DEFAULT_SEED})"], progress
+    assert progress == ["resolving task.yaml"], progress
 
 
 def test_a_long_solve_says_it_is_still_running(tmp_path: Path, monkeypatch):
@@ -181,7 +181,7 @@ def test_a_long_solve_says_it_is_still_running(tmp_path: Path, monkeypatch):
     assert asked == [4]
     values, messages = zip(*progress)
     assert list(values) == sorted(set(values)), "progress has to climb"
-    doing = f"resolving task.yaml (seed {mcp_server.DEFAULT_SEED})"
+    doing = "resolving task.yaml"
     assert messages[0] == doing and len(messages) >= 3, messages
     assert all(message.startswith(f"{doing}: ") and message.endswith(" s") for message in messages[1:]), messages
 
