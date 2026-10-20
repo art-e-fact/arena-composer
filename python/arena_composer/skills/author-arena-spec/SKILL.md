@@ -71,6 +71,7 @@ the conventions of a spec, and what to do when a check fails.
 | `K needs a, b` or `K takes no 'x'; did you mean 'y'?` | Wrong params for a kind | Read the kind's `fields` in `list_kinds` |
 | `K takes no task_description ... builds as one of several` | A kind that cannot be the only subtask | Choose another kind, or make it one of several `sequential` subtasks |
 | `object_references.N.prim_path: ... names none` | A reference with no prim | Take a `prim_path` from `get_prim_tree` |
+| `object_references.N.prim_path: ... has no box to place by` | A prim whose geometry Arena does not bound: a collision proxy, a guide, or none | Take a `prim_path` from `get_prim_tree`, which lists only prims with a box. If it lists none, relate to the parent itself |
 | `relations.N: ... with nothing to place; it takes no relation` | A relation on a light or a ground plane | Remove the relation |
 | `remaining_errors` on an edit that landed | Problems the spec already had | Fix them one edit at a time |
 | `check_failures` counts `on_relation` | The support is too small, or too crowded | Choose a larger support, move objects off it, or lower `edge_margin_m` |

@@ -45,6 +45,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   stands its root 0.55 m along x, which the panel and `arena-render` drew and Arena's box leaves
   out, so props solved onto the table stood beside it. An asset's root now keeps only its rotation,
   as in Arena's box.
+- An object reference to a prim with no default-purpose geometry, such as the Seattle table's
+  `Collisions/Cube`, a proxy, is refused before the solve with a line naming the prim and the
+  purpose its geometry has. Arena bounds only default-purpose geometry, and its solver stopped on
+  `Non-finite solver output` for such a reference that a relation names, or on an interval assert
+  for one it avoids as an obstacle.
+- `get_prim_tree` no longer lists those prims, about half of a Lightwheel kitchen's, its colliders,
+  which are guides.
 
 ### Removed
 

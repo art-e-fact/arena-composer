@@ -1,5 +1,6 @@
-"""The checks a resolve makes on a `params.usd_path` before Arena sees it.
-Against files authored here, so no asset is downloaded and no solve runs."""
+"""The checks a resolve makes before Arena's solver sees a spec: on a `params.usd_path`, and on the
+prim an object reference names. Against files authored here, so no asset is downloaded and no solve
+runs."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from arena_composer.resolve_layout import SpecError, _placement_summary, check_usd_params
+from arena_composer.resolve_layout import SpecError, _placement_summary, check_reference_boxes, check_usd_params
 
 SIMREADY = "simready_usd_object"
 
@@ -56,6 +57,54 @@ def test_a_file_that_is_not_there_is_named(tmp_path: Path):
 
 def test_an_entry_without_a_usd_path_is_not_checked():
     check_usd_params([SimpleNamespace(id="bowl", registry_name="bowl_ycb_robolab", params={})])
+
+
+def test_a_reference_the_solve_places_by_needs_geometry_arena_bounds(tmp_path: Path):
+    """Isaac's Seattle lab table, `table`, draws its top in one mesh with the robot mount, and its
+    only collider, `Collisions/Cube`, is proxy purpose. Arena bounds default-purpose geometry alone,
+    so a reference to the collider has an empty box, and the solver stopped on "Non-finite solver
+    output" for one a relation names, or on an interval assert for one it avoids as an obstacle."""
+    from isaaclab_arena.assets.object import Object
+    from isaaclab_arena.assets.object_type import ObjectType
+    from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import _instantiate_object_reference
+    from isaaclab_arena.environment_spec.arena_env_graph_types import ObjectReferenceSpec
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "table.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/DemoTable").GetPrim())
+    UsdGeom.Cube.Define(stage, "/DemoTable/Visuals/TableGeom")
+    collider = UsdGeom.Cube.Define(stage, "/DemoTable/Collisions/Cube")
+    collider.CreatePurposeAttr(UsdGeom.Tokens.proxy)
+    UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
+    UsdGeom.Xform.Define(stage, "/DemoTable/Empty")
+    stage.Save()
+
+    table = Object(name="table", usd_path=str(path), object_type=ObjectType.BASE)
+    references = [
+        ObjectReferenceSpec(id=node_id, parent_id="table", prim_path=prim_path, object_type="base")
+        for node_id, prim_path in (("top", "Collisions/Cube"), ("legs", "Visuals/TableGeom"), ("none", "Empty"))
+    ]
+    assets = {ref.id: _instantiate_object_reference(ref, parent_asset=table) for ref in references}
+
+    def refused(relations: list[str], obstacles: list[str] = ()) -> list[str]:
+        spec = SimpleNamespace(
+            object_references=references,
+            relations=[SimpleNamespace(subject=node_id, reference=None) for node_id in relations],
+        )
+        try:
+            check_reference_boxes(spec, assets, [assets[node_id] for node_id in obstacles])
+        except SpecError as error:
+            return error.errors
+        return []
+
+    assert refused(["top", "legs", "none"]) == [
+        "object_references.0.prim_path: Collisions/Cube holds only proxy-purpose geometry, and Arena bounds only"
+        " default-purpose geometry, so top has no box to place by",
+        "object_references.2.prim_path: Empty holds no geometry, so none has no box to place by",
+    ]
+    assert refused([], obstacles=["top"]) == refused(["top"]) != []
+    assert refused([]) == [], "a box the solve never sees is no problem"
 
 
 Asset = namedtuple("Asset", "name")
