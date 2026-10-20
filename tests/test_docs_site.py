@@ -22,3 +22,13 @@ def test_every_diagram_is_described():
         text = (ROOT / page).read_text(encoding="utf-8")
         for diagram in re.findall(r"^```mermaid\n(.*?)^```", text, re.DOTALL | re.MULTILINE):
             assert "accTitle:" in diagram and "accDescr" in diagram, f"{page}: a diagram with no accTitle or accDescr"
+
+
+def test_every_nested_list_nests_on_the_site():
+    """GitHub nests a list item indented two spaces, and the site, Python-Markdown, only one indented
+    four: at two, the site draws it as an item of the list above."""
+    for page in SITE["pages"]():
+        text = (ROOT / page).read_text(encoding="utf-8")
+        prose = re.sub(r"^ *```.*?^ *```", "", text, flags=re.DOTALL | re.MULTILINE)
+        for item in re.findall(r"^( +)(?:[-*+]|\d+[.)]) ", prose, re.MULTILINE):
+            assert len(item) % 4 == 0, f"{page}: a list item indented {len(item)} spaces, not a multiple of four"

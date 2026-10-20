@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - [Compared with Arena's Agentic Environment Generation](#compared-with-arenas-agentic-environment-generation)
 - [Install](#install)
 - [Developing](#developing)
-  - [The showcase on Artefacts](#the-showcase-on-artefacts)
+    - [The showcase on Artefacts](#the-showcase-on-artefacts)
 - [License](#license)
 
 ## Highlights
@@ -93,10 +93,10 @@ flowchart TB
 - **The YAML is the source of truth.** The visual editor, the MCP tools and your text editor all
   change the same files.
 - **Edits are checked.** The visual editor and the MCP tools write through one place, which:
-  - refuses an edit that would not load, leaving the files as they were
-  - keeps comments and key order
-  - takes an object's relations along when it is renamed or removed
-  - edits a task and the scene it includes as one spec
+    - refuses an edit that would not load, leaving the files as they were
+    - keeps comments and key order
+    - takes an object's relations along when it is renamed or removed
+    - edits a task and the scene it includes as one spec
 - **The visual editor follows the file.** Every change is re-solved and redrawn, whoever made it.
   One that does not solve leaves the last layout up and says why.
 - **Arena places things.** The layout comes from Arena's own placement solver: one of the layouts
