@@ -6,6 +6,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Added
+
+- Hovering or pinning a `clutter_on` relation in the panel draws the region its subject is dropped
+  from: the middle `spread` of its support's top, and `clearance_m` above that, the floor the
+  subject's bottom has to clear.
+
 ### Changed
 
 - A node's card in the editor panel wears the colour its node has in the spatial graph: a stripe
@@ -25,8 +31,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   as Arena's `--placement_seed` does, and `placement.seed` says which one ran.
 - `get_prim_tree` gives a relative `prim_path` under an object too, as under the background: Arena
   now expands it under the reference's parent.
-- Arena's new kinds are listed and edited like the others: the `clutter_on` relation, drawn as an
-  arrow to its support, the `ObjectInTask` task, and the `clutter_on_relation` check.
+- Arena's new kinds are listed and edited like the others: the `clutter_on` relation, the
+  `ObjectInTask` task, and the `clutter_on_relation` check.
 
 ### Removed
 

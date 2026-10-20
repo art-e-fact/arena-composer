@@ -74,6 +74,17 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
                 draw.face(support, 2, support.0.z, REGION);
             }
         }
+        "clutter_on" => {
+            // The release region's top, and `on`'s support over the region:
+            // the floor the subject's bottom has to clear, which here bounds
+            // it from below only.
+            if let Some(region) = reference.map(|parent| release_region(&args, world_aabb(parent))) {
+                draw.face(region, 2, region.1.z, REGION);
+                if let Some(floor) = support(&args, region) {
+                    draw.face(floor, 2, floor.0.z, REGION);
+                }
+            }
+        }
         "next_to" => {
             let target = reference.and_then(|parent| next_to_target(&args, origin, bounds, world_aabb(parent)));
             if let Some([line_from, line_to, gap_from, gap_to]) = target {
@@ -216,6 +227,13 @@ fn support(args: &Args, (parent_min, parent_max): Aabb) -> Option<Aabb> {
     let min = Vec3::new(parent_min.x + margin, parent_min.y + margin, z);
     let max = Vec3::new(parent_max.x - margin, parent_max.y - margin, z);
     (min.x <= max.x && min.y <= max.y).then_some((min, max))
+}
+
+/// The region `clutter_on` releases its subject over: the parent's bounds with
+/// the footprint shrunk about its centre to `spread` of its width and depth.
+fn release_region(args: &Args, bounds: Aabb) -> Aabb {
+    let half = (bounds.1 - bounds.0) * args.number("spread").unwrap_or(1.0) / 2.0;
+    ((center(bounds) - half).with_z(bounds.0.z), (center(bounds) + half).with_z(bounds.1.z))
 }
 
 /// Where `next_to` wants the subject: the line its near face should touch,
@@ -499,6 +517,34 @@ mod tests {
         params.insert("overlap".into(), Value::Bool(false));
         params.insert("edge_margin_m".into(), Value::Number(0.6));
         assert!(support(&args(&params, None), parent).is_none());
+    }
+
+    /// `clutter_on` releases over the middle of the parent's footprint, the
+    /// kind's 0.2 of it where the spec sets no spread, and its floor is that
+    /// region inset by the margin, the clearance over the parent's top.
+    #[test]
+    fn the_release_region_is_the_middle_of_the_footprint() {
+        let parent = (Vec3::new(-1.0, 0.0, 0.2), Vec3::new(1.0, 4.0, 0.5));
+        let kind = Kind {
+            fields: vec![Field {
+                name: "spread".into(),
+                default: Value::Number(0.2),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let params = Params::from([
+            ("clearance_m".to_owned(), Value::Number(0.01)),
+            ("edge_margin_m".to_owned(), Value::Number(0.05)),
+        ]);
+        let args = args(&params, Some(&kind));
+        let (min, max) = release_region(&args, parent);
+        assert!(min.abs_diff_eq(Vec3::new(-0.2, 1.6, 0.2), 1e-6), "{min}");
+        assert!(max.abs_diff_eq(Vec3::new(0.2, 2.4, 0.5), 1e-6), "{max}");
+
+        let (min, max) = support(&args, (min, max)).expect("a floor");
+        assert!(min.abs_diff_eq(Vec3::new(-0.15, 1.65, 0.51), 1e-6), "{min}");
+        assert!(max.abs_diff_eq(Vec3::new(0.15, 2.35, 0.51), 1e-6), "{max}");
     }
 
     /// `next_to` on +X at ratio 1: the near face a distance off the parent's
