@@ -73,6 +73,7 @@ the conventions of a spec, and what to do when a check fails.
 | `object_references.N.prim_path: ... names none` | A reference with no prim | Take a `prim_path` from `get_prim_tree` |
 | `object_references.N.prim_path: ... has no box to place by` | A prim whose geometry Arena does not bound: a collision proxy, a guide, or none | Take a `prim_path` from `get_prim_tree`, which lists only prims with a box. If it lists none, relate to the parent itself |
 | `relations.N: ... with nothing to place; it takes no relation` | A relation on a light or a ground plane | Remove the relation |
+| `TypeError: object.__init__() takes exactly one argument` from `describe_scene` | A param an object or the background does not take. They take any name, so `check_spec` passes it | Correct or remove the `params` written on objects and the background |
 | `remaining_errors` on an edit that landed | Problems the spec already had | Fix them one edit at a time |
 | `check_failures` counts `on_relation` | The support is too small, or too crowded | Choose a larger support, move objects off it, or lower `edge_margin_m` |
 | `check_failures` counts `no_overlap` | Too many objects for the space | Spread them over more supports, or use `next_to` with a `distance_m` |
