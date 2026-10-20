@@ -1,0 +1,71 @@
+# The docs site, built from the pages where they live in the repository:
+# docs/site/stage.py copies them to `docs_dir` first. docs/development.md says
+# how to build and preview it.
+[project]
+site_name = "arena-composer"
+site_url = "https://art-e-fact.github.io/arena-composer/"
+repo_url = "https://github.com/art-e-fact/arena-composer"
+repo_name = "art-e-fact/arena-composer"
+# Emptied on every staging run, so it has to stay under target/.
+docs_dir = "target/docs"
+site_dir = "target/site"
+# A staged page keeps its path in the repository, so this is its edit link.
+edit_uri = "edit/main/"
+# The Artefacts colours and type; staged beside the pages.
+extra_css = ["docs/site/artefacts.css"]
+
+# Every page on the site, by its path in the repository: docs/site/stage.py
+# stages these and points a link to anything else at GitHub.
+nav = [
+  { "Overview" = "README.md" },
+  { "Internals" = [
+    "docs/architecture.md",
+    "docs/editor.md",
+    "docs/errors.md",
+    "docs/mcp.md",
+    "docs/assets.md",
+    "docs/development.md",
+  ] },
+  "CHANGELOG.md",
+]
+
+[project.theme]
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.instant",
+  "navigation.sections",
+  "search.highlight",
+]
+font.text = "Fira Sans"
+font.code = "Fira Code"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to light mode"
+
+# What GitHub renders and nothing more, since every page is read there too.
+# `toc` and `tables` are always on.
+[project.markdown_extensions]
+toc.permalink = true
+# GitHub's anchor for a heading, which the pages link each other by.
+toc.slugify = { object = "pymdownx.slugs.slugify", kwds = { case = "lower" } }
+pymdownx.betterem = {}
+pymdownx.highlight = {}
+pymdownx.magiclink = {}
+# `> [!WARNING]`, GitHub's alert, as an admonition.
+pymdownx.quotes.callouts = true
+pymdownx.superfences = {}
