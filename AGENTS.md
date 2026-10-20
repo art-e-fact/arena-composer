@@ -80,8 +80,11 @@ see [docs/development.md](docs/development.md#the-showcase).
 - [docs/mcp.md](docs/mcp.md) — rules for the MCP server, and `arena-composer init`
 - [docs/errors.md](docs/errors.md) — how a wrong spec is found, how an edit on one is judged, where
   the lines come out; read before adding a check
-- [docs/development.md](docs/development.md) — setup, iterating on a packed payload, tests, the wheel, releasing
+- [docs/development.md](docs/development.md) — setup, iterating on a packed payload, tests, the docs site, the wheel, releasing
 - [python/arena_composer/usd/AGENTS.md](python/arena_composer/usd/AGENTS.md) — how assets are read, and what does not render yet
+
+The README, the pages under `docs/` and the changelog are also a site, whose nav in
+[zensical.toml](zensical.toml) lists them: a new page under `docs/` goes in it too, or `pytest` fails.
 
 ## Rules that bite
 

@@ -6,6 +6,18 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Fixed
+
+- `arena-render`'s and `render_views`' `top`, `front` and `side` views see into a room. They leave
+  out the background's pieces that stand between them and everything the spec places, and from
+  above the cabinets hung over the objects too. A Replicator kitchen was drawn from all three as
+  its grey outside, and a Lightwheel kitchen from the side as its outer wall.
+- A background whose USD carries its own lights, such as a Replicator kitchen or the packing table,
+  is lit like the others in the window, `arena-render` and `render_views`, where it was flat grey:
+  those lights are not drawn, and the light that stands in for Arena's now stands in for them too.
+
+## [0.4.0] - 2026-10-20
+
 ### Added
 
 - Hovering or pinning a `clutter_on` relation in the panel draws the region its subject is dropped
@@ -52,13 +64,6 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   for one it avoids as an obstacle.
 - `get_prim_tree` no longer lists those prims, about half of a Lightwheel kitchen's, its colliders,
   which are guides.
-- `arena-render`'s and `render_views`' `top`, `front` and `side` views see into a room. They leave
-  out the background's pieces that stand between them and everything the spec places, and from
-  above the cabinets hung over the objects too. A Replicator kitchen was drawn from all three as
-  its grey outside, and a Lightwheel kitchen from the side as its outer wall.
-- A background whose USD carries its own lights, such as a Replicator kitchen or the packing table,
-  is lit like the others in the window, `arena-render` and `render_views`, where it was flat grey:
-  those lights are not drawn, and the light that stands in for Arena's now stands in for them too.
 
 ### Removed
 
@@ -279,7 +284,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - The first release on its own: `arena-view`, `arena-resolve-layout`, `arena-mcp` and
   `arena-composer init`, as a manylinux wheel attached to the GitHub Release.
 
-[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/art-e-fact/arena-composer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/art-e-fact/arena-composer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/art-e-fact/arena-composer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/art-e-fact/arena-composer/releases/tag/v0.1.0
