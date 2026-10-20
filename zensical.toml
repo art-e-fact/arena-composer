@@ -68,4 +68,7 @@ pymdownx.highlight = {}
 pymdownx.magiclink = {}
 # `> [!WARNING]`, GitHub's alert, as an admonition.
 pymdownx.quotes.callouts = true
-pymdownx.superfences = {}
+# A ```mermaid fence, which GitHub draws too, drawn as the diagram.
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
