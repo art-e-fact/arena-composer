@@ -133,7 +133,7 @@ fn setup(world: &mut World) {
         .remove_resource::<ResolvedScene>()
         .expect("a scene to open the window on")
         .0;
-    spawn_scene(world, &scene);
+    spawn_scene(world, &scene, &[]);
     spawn_lighting(world, &scene);
     spawn_camera(world, &scene);
     spawn_hud(world, &scene);
@@ -198,7 +198,7 @@ fn apply_updates(world: &mut World) {
         // and material assets are rebuilt either way — `Assets::add` mints a
         // new one per call — and the old ones are freed with their handles.
         info!("drawing {} ({} assets)", scene.env_name, scene.assets().len());
-        let root = spawn_scene(world, scene);
+        let root = spawn_scene(world, scene, &[]);
         let stale: Vec<Entity> = world
             .query_filtered::<Entity, With<ArenaRoot>>()
             .iter(world)

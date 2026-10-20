@@ -117,6 +117,11 @@ draws other props and other layouts. The first run downloads the props, which ta
 is a spec in `showcase/themes/` with a `draw` key, which
 [test_showcase.py](../showcase/test_showcase.py) describes.
 
+The README's picture of the showcase is six of its cases, each from a camera placed for a person
+rather than from the views it checks. `python showcase/collage.py` draws it beside the gallery as
+`showcase.png`, and [docs/publish.sh](publish.sh) puts it on the README as it does the screenshots.
+Its `TILES` name the cases and their cameras.
+
 ## The docs site
 
 [art-e-fact.github.io/arena-composer](https://art-e-fact.github.io/arena-composer/) is built with

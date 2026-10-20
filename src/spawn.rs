@@ -74,24 +74,27 @@ fn widen(image: &mut Image) {
     image.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
 }
 
-/// Spawn one entity per node, parented under `placement`.
+/// Spawn one entity per node, parented under `placement`, and return them by
+/// node: `None` for a node with nothing to draw.
 ///
 /// `placement` keeps its own `Transform` — the solved pose, in Arena's frame —
 /// and the nodes need none of their own.
-pub fn spawn_geometry(world: &mut World, nodes: &[Node], placement: Entity) {
-    for node in nodes {
-        let Some(mesh) = build_mesh(node) else {
-            continue;
-        };
-        let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-        let material = build_material(node, world);
-        world.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            PrimPath(node.path.clone()),
-            ChildOf(placement),
-        ));
-    }
+pub fn spawn_geometry(world: &mut World, nodes: &[Node], placement: Entity) -> Vec<Option<Entity>> {
+    nodes
+        .iter()
+        .map(|node| {
+            let mesh = build_mesh(node)?;
+            let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
+            let material = build_material(node, world);
+            let piece = world.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                PrimPath(node.path.clone()),
+                ChildOf(placement),
+            ));
+            Some(piece.id())
+        })
+        .collect()
 }
 
 /// Upload one node's triangles, or `None` when it carries nothing drawable.
