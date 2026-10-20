@@ -112,7 +112,7 @@ Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/ma
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
 
 ```bash
-gh release download v0.3.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
+gh release download v0.4.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
 uv pip install --python <Arena's venv>/bin/python /tmp/arena-composer/*.whl
 ```
 
