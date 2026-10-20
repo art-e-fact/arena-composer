@@ -563,8 +563,16 @@ def check_spec(spec: str) -> dict[str, Any]:
     reference lacks, or one a relation, subtask or embodiment does not take —
     most objects and backgrounds take any, so a misspelt one there is the
     build's to find — an id in a list param the spec has not got, an atomic
-    task of a kind that builds only among other subtasks, an object reference
-    with no `prim_path`, a misspelled field under `env_cfg_override.sim`.
+    task of a kind that builds only among other subtasks, a `NoTask` among
+    them, a task param naming a node of another class than it asks for — a
+    door to open that is no Openable, a reference without the joint param
+    that makes it one — a knob level the knob lacks, a contact sensor on or
+    against an articulation, such as a pick-and-place into a microwave, a
+    lifted object with no initial pose, a tuple param short of numbers or a
+    range the wrong way round, an object reference with no `prim_path`, a
+    misspelled field under `env_cfg_override.sim`. And what Arena drops
+    without a word: a key no field reads, such as a param written beside
+    `params` rather than in it, and a placement check nothing registers.
 
     Whether the layout solves it cannot see; that is `describe_scene`.
 

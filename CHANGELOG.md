@@ -6,6 +6,30 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Added
+
+- `check_spec`, and every edit, refuse a spec that Arena only refused minutes into a build, once
+  Isaac Sim had started: a task param naming a node of another class than the task needs, such as an
+  `OpenDoorTask` on a banana, a `PlaceUprightTask` on a bottle that is not `Placeable`, or an
+  object reference without the joint param that makes it openable; a `TurnKnobTask` level the knob
+  has not got; a `PickAndPlaceTask` into an articulated destination, such as a microwave; a
+  `NoTask` beside other subtasks; a lift task whose object has no initial pose; and a tuple param
+  short of numbers, or a range given as `[max, min]`. Each line names the entry to fix and, where
+  there is one, what would do.
+- They also refuse what Arena dropped without a word: a key no field reads, such as
+  `openable_joint_name` beside a reference's `prim_path` rather than under its `params`, or
+  `parms:`; and a name in `placer_params.enabled_checks` or `required_checks` that no check has,
+  which turned that check off.
+
+### Changed
+
+- The line for a task kind that cannot be a task's only subtask, such as `GoalPoseTask`, no longer
+  suggests making it one of several, which sent agents padding it with a `NoTask` that does not
+  build either.
+- A subtask added or switched to another kind in the panel names, in each param that takes a node,
+  the first node of the class its kind needs, such as an Openable for `OpenDoorTask`, where it
+  named the first node of any class, which did not build.
+
 ## [0.4.0] - 2026-10-20
 
 ### Added

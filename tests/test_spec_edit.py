@@ -911,8 +911,9 @@ def test_the_ids_in_a_list_param_are_checked_where_arena_skips_them(spec: Path):
     spec.write_text(sort)
     assert spec_edit.check(spec).errors == [
         # Arena's builder passes an atomic task its description, which SortMultiObjectTask does not take.
-        "task.yaml: task.subtasks.0.kind: SortMultiObjectTask takes no task_description, which Arena passes an"
-        " atomic task, so it does not build alone; it builds as one of several sequential or parallel subtasks",
+        "task.yaml: task.subtasks.0.kind: SortMultiObjectTask takes no task_description, which Arena passes the one"
+        " subtask of an atomic task, so it cannot be a spec's only subtask: it builds only beside other subtasks of"
+        " a sequential or parallel task, and NoTask cannot be one of them",
         "task.yaml: task.subtasks.0.params.pick_up_object_list.1: 'ghost' is not an id this spec declares",
         "task.yaml: task.subtasks.0.params: SortMultiObjectTask pairs each pick_up_object_list entry with a"
         " destination_location_list one, and has 2 and 1",
@@ -1002,3 +1003,182 @@ def test_an_override_naming_a_module_not_yet_loaded_is_not_imported_to_check_it(
     module = "isaaclab.envs.mdp.never_loaded_here"
     assert overridden(spec, f"{{sim: {{physics: {{_target_: {module}.SomeCfg}}}}}}") == []
     assert module not in sys.modules
+
+
+PICK = (
+    "  - kind: PickAndPlaceTask\n"
+    f"    params: {{pick_up_object: banana, destination_location: bowl, background_scene: {TABLE}}}\n"
+)
+LIFT = (
+    "  - kind: LiftObjectTaskRL\n"
+    f"    params: {{lift_object: banana, background_scene: {TABLE}, embodiment: droid}}\n"
+)
+
+
+def subtasks(spec: Path, entries: str, composition: str = "atomic", objects: str = "", extra: str = "") -> list[str]:
+    """What `check` says of `spec` once its task holds `entries`, the YAML of
+    its subtasks, and its scene holds `objects` more and `extra` besides."""
+    head = TASK.split("  subtasks:\n")[0].replace("composition: atomic", f"composition: {composition}")
+    spec.write_text(f"{head}  subtasks:\n{entries}")
+    scene_of(spec).write_text(SCENE.replace("relations:\n", f"{objects}relations:\n") + extra)
+    return spec_edit.check(spec).errors
+
+
+def test_a_task_param_naming_a_node_of_the_wrong_class_is_refused(spec: Path):
+    """Arena checks only that the id is declared; the task's constructor
+    asserts the class its param is annotated with, once the sim has started."""
+    ketchup = "- id: ketchup\n  registry_name: ketchup_bottle_hope_robolab\n  params: {}\n"
+    (line,) = subtasks(spec, "  - kind: PlaceUprightTask\n    params: {placeable_object: ketchup}\n", objects=ketchup)
+    assert line.startswith(
+        "task.yaml: task.subtasks.0.params.placeable_object: PlaceUprightTask needs a Placeable here, and 'ketchup'"
+        " is a ketchup_bottle_hope_robolab, which is not one; a Placeable is 'mug'"
+    ), line
+
+    # A reference is an affordance by its one joint param.
+    drawer = (
+        f"object_references:\n- id: drawer\n  parent_id: {TABLE}\n  prim_path: /drawer\n  object_type: articulation\n"
+        "  params: {}\n"
+    )
+    opens = "  - kind: OpenDoorTask\n    params: {openable_object: drawer}\n"
+    assert subtasks(spec, opens, extra=drawer) == [
+        "task.yaml: task.subtasks.0.params.openable_object: OpenDoorTask needs an Openable here, and 'drawer' is a"
+        " plain object reference, which is not one; give it params.openable_joint_name"
+    ]
+    assert subtasks(spec, opens, extra=drawer.replace("{}", "{openable_joint_name: drawer_joint}")) == []
+    # And an edit making the mistake is refused, both files as they were.
+    before = (spec.read_text(), scene_of(spec).read_text())
+    result = spec_edit.apply(spec, "set", ["task", "subtasks", 0, "params", "openable_object"], "banana")
+    assert not result.ok and result.errors[0].startswith(
+        "task.yaml: task.subtasks.0.params.openable_object: OpenDoorTask needs an Openable here, and 'banana' is a"
+        " banana_ycb_robolab, which is not one; did you mean 'drawer'?"
+    ), result.errors
+    assert (spec.read_text(), scene_of(spec).read_text()) == before
+
+    lift = LIFT.replace("embodiment: droid", "embodiment: bowl")
+    assert subtasks(spec, PICK + lift, "sequential")[0] == (
+        "task.yaml: task.subtasks.1.params.embodiment: LiftObjectTaskRL needs an EmbodimentBase here, and 'bowl' is a"
+        " bowl_ycb_robolab, which is not one; did you mean 'droid'?"
+    )
+
+
+def test_a_knob_level_the_knob_lacks_is_refused(spec: Path):
+    """Arena asserts the level a knob resets to, and never reaches a target
+    past its last: a stand mixer has seven."""
+    mixer = "- id: mixer\n  registry_name: stand_mixer\n  params: {}\n"
+    turn = "  - kind: TurnKnobTask\n    params: {turnable_object: mixer, target_level: 10, reset_level: 7}\n"
+    assert subtasks(spec, turn, objects=mixer) == [
+        "task.yaml: task.subtasks.0.params.target_level: 'mixer' turns through levels -1 to 6, so 10 is never reached",
+        "task.yaml: task.subtasks.0.params.reset_level: 'mixer' turns through levels -1 to 6, so 7 is refused at the"
+        " first reset",
+    ]
+
+
+def test_a_destination_with_no_rigid_body_to_sense_contact_against_is_refused(spec: Path):
+    """PickAndPlaceTask filters its contact sensor against the destination's
+    rigid body as it is built, and an articulated microwave names none."""
+    microwave = "- id: microwave\n  registry_name: microwave\n  params: {}\n"
+    into = PICK.replace("destination_location: bowl", "destination_location: microwave")
+    assert subtasks(spec, into, objects=microwave) == [
+        "task.yaml: task.subtasks.0.params.destination_location: PickAndPlaceTask filters its contact sensor against"
+        " 'microwave', an articulation, where it needs a rigid body or a base; name an object reference to the part"
+        " to use, such as a tray, instead"
+    ]
+    # Arena's own microwave test places onto a reference to its tray, filtered by its prim path.
+    tray = (
+        "object_references:\n- id: tray\n  parent_id: microwave\n  prim_path: Disc\n  object_type: base\n"
+        "  params: {}\n"
+    )
+    onto = PICK.replace("destination_location: bowl", "destination_location: tray")
+    assert subtasks(spec, onto, objects=microwave, extra=tray) == []
+
+
+def test_a_notask_beside_other_subtasks_is_refused_and_alone_is_not(spec: Path):
+    """A composite sums its subtasks' timeouts, and Arena passes it none of its
+    own; NoTask has none. Alone it takes the description TaskBase does."""
+    assert subtasks(spec, PICK + "  - kind: NoTask\n    params: {}\n", "parallel") == [
+        "task.yaml: task.subtasks.1.kind: NoTask has no timeout and no success, so a parallel task holding it does"
+        " not build: Arena sums its subtasks' timeouts into the episode's. Remove it; NoTask builds only alone, as"
+        " an atomic task"
+    ]
+    assert subtasks(spec, "  - kind: NoTask\n    params: {}\n") == []
+
+
+def test_a_key_arena_drops_without_a_word_is_refused(spec: Path):
+    """pydantic ignores a key its model has no field for, so the build goes
+    on without it: a param beside `params` rather than in it, a misspelt
+    `params`, a misspelt section."""
+    drawer = (
+        f"object_references:\n- id: drawer\n  parent_id: {TABLE}\n  prim_path: /drawer\n  object_type: articulation\n"
+        "  openable_joint_name: drawer_joint\n  params: {}\n"
+    )
+    mug = "- id: mug\n  registry_name: mug\n  parms: {scale: [2, 2, 2]}\n"
+    assert subtasks(spec, PICK, objects=mug, extra=drawer) == [
+        "../scenes/scene.yaml: objects.3.parms: Arena ignores this key; did you mean 'params'?",
+        "../scenes/scene.yaml: object_references.0.openable_joint_name: Arena ignores this key; did you mean"
+        " params.openable_joint_name?",
+    ]
+    spec.write_text(TASK + "placer_param: {placement_seed: 3}\n")
+    scene_of(spec).write_text(SCENE)
+    assert spec_edit.check(spec).errors == [
+        "task.yaml: placer_param: Arena ignores this key; did you mean 'placer_params'?"
+    ]
+
+
+def test_a_placement_check_nothing_registers_is_refused(spec: Path):
+    """Arena runs the enabled checks it has and leaves out the rest without a
+    word, so a misspelt `no_overlap` turns it off."""
+    spec.write_text(
+        TASK + "placer_params: {enabled_checks: [on_relation, no_overlapp], required_checks: [on_relation]}\n"
+    )
+    assert spec_edit.check(spec).errors == [
+        "task.yaml: placer_params.enabled_checks.1: no placement check is called 'no_overlapp', and Arena leaves it"
+        " out without a word; did you mean 'no_overlap'?"
+    ]
+
+
+def test_a_tuple_param_holds_its_numbers_and_a_range_its_order(spec: Path):
+    """Arena passes them through, and a step unpacks them: three numbers for
+    two fail, and a range the wrong way round holds nothing."""
+    goal = (
+        "  - kind: GoalPoseTask\n"
+        "    params: {object: banana, target_x_range: [0.1, 0.2, 0.3], target_z_range: [0.5, 0.1]}\n"
+    )
+    assert subtasks(spec, PICK + goal, "sequential") == [
+        "task.yaml: task.subtasks.1.params.target_x_range: GoalPoseTask takes a list of 2 numbers here, [min, max]",
+        "task.yaml: task.subtasks.1.params.target_z_range: GoalPoseTask reads it as [min, max], and 0.5 is above 0.1,"
+        " so nothing is ever in it",
+    ]
+
+
+def test_a_lift_is_given_the_initial_pose_it_reads_before_placement(spec: Path):
+    """A lift task sets its goal off its object's initial pose as it is
+    built, before any solve; Arena gives one only to the anchor."""
+    assert subtasks(spec, PICK + LIFT, "sequential") == [
+        "task.yaml: task.subtasks.1.params.lift_object: LiftObjectTaskRL reads the initial pose of 'banana' as it is"
+        " built, before placement solves one, and the spec gives it none; set objects.0.params.initial_pose, as"
+        " {position_xyz: [x, y, z]}"
+    ]
+    posed = "registry_name: banana_ycb_robolab\n  params: {initial_pose: {position_xyz: [0.5, 0.0, 0.1]}}"
+    scene_of(spec).write_text(SCENE.replace("registry_name: banana_ycb_robolab\n  params: {}", posed))
+    assert spec_edit.check(spec).errors == []
+
+
+def test_a_whole_subtask_written_points_its_placeholders_at_nodes_of_their_class(spec: Path):
+    """The panel fills a new subtask's node params with the first id, which
+    for an `OpenDoorTask` is the robot; the edit points it at an Openable,
+    rather than be refused for the panel's placeholder."""
+    oven = "- id: oven\n  registry_name: microwave\n  params: {}\n"
+    scene_of(spec).write_text(SCENE.replace("relations:\n", f"{oven}relations:\n"))
+    opens = {"kind": "OpenDoorTask", "params": {"openable_object": "droid"}}
+    result = spec_edit.apply(spec, "insert", ["task", "subtasks"], opens)
+    assert result.ok and result.changed == [
+        "added an entry to task.subtasks",
+        "set task.subtasks.1.params.openable_object to 'oven': OpenDoorTask needs an Openable there, and 'droid' is"
+        " not one",
+        "set task.composition to 'sequential': 'atomic' holds exactly one subtask",
+    ], result
+    assert yaml.safe_load(spec.read_text())["task"]["subtasks"][1]["params"] == {"openable_object": "oven"}
+
+    # A kind changed in the panel replaces the whole entry, placeholder and all.
+    result = spec_edit.apply(spec, "set", ["task", "subtasks", 0], opens)
+    assert result.ok and result.changed[1].startswith("set task.subtasks.0.params.openable_object to 'oven'"), result
