@@ -1,10 +1,12 @@
 # arena-composer
 
+[![Artefacts CI: showcase](https://app.artefacts.com/api/artefacts/arena-composer/badges/showcase.png)](https://app.artefacts.com/artefacts/arena-composer)
+
 > [!WARNING]
 > Under heavy development. Expect the commands, the visual editor and the MCP tools to change
 > between releases, and things to break.
 
-A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
+A visual editor, headless renderer and MCP server for authoring [IsaacLab-Arena YAML environment specs.](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/environment_definition.html)
 
 <table>
   <tr>
@@ -21,6 +23,17 @@ A visual editor, headless renderer and MCP server for [IsaacLab-Arena YAML envir
 
 <!-- arena-composer.mp4 -->
 https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
+
+## Contents
+
+- [Highlights](#highlights)
+- [Commands](#commands)
+- [How it works](#how-it-works)
+- [Compared with Arena's Agentic Environment Generation](#compared-with-arenas-agentic-environment-generation)
+- [Install](#install)
+- [Developing](#developing)
+  - [The showcase on Artefacts](#the-showcase-on-artefacts)
+- [License](#license)
 
 ## Highlights
 
@@ -123,20 +136,21 @@ See [AGENTS.md](AGENTS.md) and [docs/](docs/).
 
 ### The showcase on Artefacts
 
-[artefacts.yaml](artefacts.yaml) runs the [showcase](docs/development.md#the-showcase), a gallery
-of about twenty environments each drawn from four views, as an
-[Artefacts](https://app.artefacts.com/artefacts/arena-composer) job. Run it from this repo's root,
-with the [Artefacts CLI](https://docs.artefacts.com/getting-started/) installed, Arena's venv
-active and this checkout installed into it, on a machine that can draw:
+The [showcase](docs/development.md#the-showcase) builds about twenty environments and draws each
+from four views. [artefacts.yaml](artefacts.yaml) runs it as an
+[Artefacts](https://app.artefacts.com/artefacts/arena-composer) job, so every run checks two ways:
+an environment that does not build or draw fails its test, and the pictures show at a glance
+whether the rest still look right.
+
+From this repo's root, with Arena's venv active and this checkout installed in it:
 
 ```bash
 artefacts config add artefacts/arena-composer   # once: the project's API key
 artefacts run showcase
 ```
 
-The pictures and `tests_junit.xml` go to the top of the run's upload, and the dashboard shows a
-test per environment, failed where the environment did not build or draw. The first run downloads
-the props and takes several minutes longer.
+The dashboard gets a test per environment and a PNG per environment and view. More in the
+[Artefacts docs](https://docs.artefacts.com/).
 
 ## License
 
