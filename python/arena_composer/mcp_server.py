@@ -35,11 +35,6 @@ from pydantic import Field
 
 from arena_composer import catalog, render, simready, spec_edit, usd_assets
 
-# From `spec_edit`, not `resolve_layout`: importing the latter imports Arena's
-# solver, two seconds the client spends waiting on the handshake. The first
-# tool that solves pays for it instead — see `_resolve`.
-from arena_composer.spec_edit import DEFAULT_SEED
-
 #: Sent to the client at handshake, as the model's orientation to this server.
 #: Per-tool detail lives in the tool docstrings; this is what ties them into an
 #: order of work and says what each step costs.
@@ -160,7 +155,7 @@ def _spec_path(spec: str) -> Path:
     return path
 
 
-def _resolve(path: Path, seed: int, samples: int = 1) -> dict[str, Any]:
+def _resolve(path: Path, seed: int | None, samples: int = 1) -> dict[str, Any]:
     """Resolve a spec into the layout dump. Seconds of work: Arena's solver runs
     and every asset's USD is read."""
     with _quiet():
@@ -170,6 +165,11 @@ def _resolve(path: Path, seed: int, samples: int = 1) -> dict[str, Any]:
         from arena_composer.resolve_layout import resolve_layout_from_yaml
 
         return resolve_layout_from_yaml(path, seed=seed, samples=samples)
+
+
+def _resolving(path: Path, seed: int | None) -> str:
+    """What a resolve of `path` reports as its progress."""
+    return f"resolving {path.name}" if seed is None else f"resolving {path.name} (seed {seed})"
 
 
 #: Seconds between progress reports while a solve or a download runs.
@@ -285,7 +285,7 @@ def _reindex() -> list[simready.RemoteAsset]:
 
 @mcp.tool(annotations=_READ_ONLY)
 async def describe_scene(
-    spec: str, seed: int = DEFAULT_SEED, samples: int = 1, ctx: Context | None = None
+    spec: str, seed: int | None = None, samples: int = 1, ctx: Context | None = None
 ) -> dict[str, Any]:
     """Resolve a spec and report where every asset ended up.
 
@@ -297,8 +297,8 @@ async def describe_scene(
     `failed_checks` for what a dry solve can decide — resting on, next to,
     overlap — and `not_run` for what it did not check: what only the
     simulator can, physics settling among them, and any the spec's
-    `placement_validators` leave out. A pass is necessary for the sim to
-    accept the layout, not sufficient.
+    `placer_params.enabled_checks` leave out. A pass is necessary for the sim
+    to accept the layout, not sufficient.
 
     Arena draws a new layout on every reset, so one passing sample says
     little. With `samples` above 1 the solver draws that many at once and
@@ -326,7 +326,9 @@ async def describe_scene(
     Args:
         spec: Path to the task YAML.
         seed: Placement seed. The solver samples a different valid layout per
-            seed, so pin it to compare two edits.
+            seed, so pin it to compare two edits. Defaults to the spec's
+            `placer_params.placement_seed`, else 42; `placement.seed` says
+            which one ran.
         samples: How many layouts to draw and check, at least 1. The first is
             the one described.
     """
@@ -336,7 +338,7 @@ async def describe_scene(
     # Off the event loop: a resolve blocks for seconds and the server has to
     # stay answerable for all of them.
     try:
-        dump = await _Progress(ctx).run(f"resolving {path.name} (seed {seed})", _resolve, path, seed, samples)
+        dump = await _Progress(ctx).run(_resolving(path, seed), _resolve, path, seed, samples)
     except Exception as error:
         # A spec that does not read, validate or build is the same normal case
         # as a refused edit, and reads the same way. Returned rather than
@@ -378,12 +380,11 @@ async def get_prim_tree(
     or collision can be one, so only those are listed, with their ancestors.
 
     Write a prim's `prim_path` as it comes, with `node_id` as the reference's
-    `parent_id`: it is relative under the background and starts
-    `{ENV_REGEX_NS}/<id>/` under an object, where a relative path validates
-    and then fails when Arena builds the scene. `object_type` is the one to
-    give the reference: `articulation` for the root of a jointed body, with
-    the `joint_names` that `openable_joint_name` and its kin take, `rigid` for
-    a rigid body, `base` for the rest.
+    `parent_id`: it is relative, and Arena expands it under that node's prim
+    path. `object_type` is the one to give the reference: `articulation` for
+    the root of a jointed body, with the `joint_names` that
+    `openable_joint_name` and its kin take, `rigid` for a rigid body, `base`
+    for the rest.
 
     A kitchen has hundreds of these prims. `total` counts them, `matched` the
     ones the filters keep, and `prims` holds the first `limit` of those, in
@@ -500,7 +501,7 @@ async def render_views(
     spec: str,
     views: list[str] | None = None,
     size: int = render.DEFAULT_SIZE,
-    seed: int = DEFAULT_SEED,
+    seed: int | None = None,
     ctx: Context | None = None,
 ) -> list[Image]:
     """Draw a spec and return the pictures, to check a layout by looking at it.
@@ -537,7 +538,7 @@ async def render_views(
         raise ToolError(f"unknown view(s) {unknown}, expected any of {list(render.VIEWS)}")
 
     progress = _Progress(ctx)
-    payload = await _or_refused(progress, f"resolving {path.name} (seed {seed})", _pack, path, seed)
+    payload = await _or_refused(progress, _resolving(path, seed), _pack, path, seed)
     out_dir = _RENDERS / hashlib.sha256(str(path).encode()).hexdigest()[:16]
     # A view asked for twice is drawn once.
     shots = {view: out_dir / f"{view}.png" for view in views}
@@ -599,7 +600,7 @@ def list_kinds() -> dict[str, Any]:
         return kinds()
 
 
-def _pack(path: Path, seed: int) -> bytes:
+def _pack(path: Path, seed: int | None) -> bytes:
     """Resolve a spec and pack it for the renderer.
 
     Without the SimReady props: they exist for the asset browser to list, and a

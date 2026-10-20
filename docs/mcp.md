@@ -27,9 +27,9 @@ Rules for changing it:
   PyYAML — the reader Arena uses. PyYAML is YAML 1.1, where a bare `on` is `true`, so the `on`
   relation kind has to go out quoted. Validating the in-memory document would not catch that.
 - **Extensions load on the first tool call, not at startup.** `_quiet()` calls
-  `catalog.load_extensions()`, which imports Arena's registries. In `main()` those seconds would
-  delay the handshake, and a module that fails to import would end the server where only the
-  client's log shows why. On the first call it is a `ToolError` the agent reads.
+  `catalog.load_extensions()`, which imports the project's modules, and Arena with them. In `main()`
+  those seconds would delay the handshake, and a module that fails to import would end the server
+  where only the client's log shows why. On the first call it is a `ToolError` the agent reads.
 
 ## Starting it from a client
 

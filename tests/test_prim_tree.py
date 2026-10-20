@@ -81,20 +81,14 @@ def test_under_the_background_a_prim_is_named_relative_to_it(spec: Path):
     assert _tree(spec, node_id=TABLE) == {"total": 4, "matched": 4, "prims": [CABINET, BODY, DOOR, CUBE]}
 
 
-def test_under_an_object_the_path_is_whole_and_arena_builds_a_reference_from_it(spec: Path, usd: Path):
+def test_under_an_object_the_path_is_relative_too_and_arena_builds_a_reference_from_it(spec: Path, usd: Path):
     (prim,) = _tree(spec, node_id="cab", object_type="articulation")["prims"]
-    assert prim == {**CABINET, "prim_path": "{ENV_REGEX_NS}/cab/cabinet"}
+    assert prim == CABINET
 
     parent = AssetRegistry().get_asset_by_name("simready_usd_object")(usd_path=str(usd), instance_name="cab")
-
-    def reference(prim_path: str):
-        ref = ObjectReferenceSpec(id="door", parent_id="cab", prim_path=prim_path, object_type=prim["object_type"])
-        return _instantiate_object_reference(ref, parent_asset=parent, background_registry_name=TABLE)
-
-    assert reference(prim["prim_path"]).prim_path_in_parent_usd == "/World/cabinet"
-    # What the relative form would do: Arena expands it with the background's name.
-    with pytest.raises(AssertionError):
-        reference("cabinet")
+    ref = ObjectReferenceSpec(id="door", parent_id="cab", prim_path=prim["prim_path"], object_type=prim["object_type"])
+    # Arena expands it under the object's prim path, {ENV_REGEX_NS}/cab.
+    assert _instantiate_object_reference(ref, parent_asset=parent).prim_path_in_parent_usd == "/World/cabinet"
 
 
 def test_the_filters_and_the_limit_say_what_they_cut(spec: Path):

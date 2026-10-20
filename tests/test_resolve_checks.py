@@ -79,7 +79,7 @@ def sample(banana_x: float, failed: list[str]) -> SimpleNamespace:
 def test_the_summary_names_the_checks_a_dry_solve_cannot_run():
     """A pass here is necessary, not sufficient: physics settling and IK reach
     are the simulator's to decide, and the summary has to say they were not."""
-    from isaaclab_arena.relations.placement_validation import PlacementCheck
+    from isaaclab_arena.relations.validation.types import PlacementCheck
 
     ran = {check: True for check in PlacementCheck if check not in (PlacementCheck.PHYSICS_SETTLED, PlacementCheck.IK_REACHABLE)}
     layout = sample(0.1, [])

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from arena_composer import catalog, simready, spec_edit
+from arena_composer import catalog, simready
 
 
 def test_a_remote_asset_is_found_with_the_params_to_add_it(tmp_path: Path, monkeypatch):
@@ -93,16 +93,6 @@ def fresh_extensions():
     yield
     catalog.load_extensions.cache_clear()
     catalog.catalog.cache_clear()
-
-
-def test_every_command_registers_what_arenas_own_cli_does(fresh_extensions):
-    import isaaclab_arena_environments
-
-    catalog.load_extensions()
-    assert "factory_gear_base" in {asset.registry_name for asset in catalog.search("gear", limit=100)}
-    # Names only Isaac Cap registers: the robot, the table, the gears.
-    gear_easy = Path(isaaclab_arena_environments.__file__).parent / "isaac_cap/gear_insertion/gear_easy.yaml"
-    assert spec_edit.check(gear_easy).ok
 
 
 def test_modules_are_imported_from_the_flag_and_the_variable(fresh_extensions, tmp_path: Path, monkeypatch):
