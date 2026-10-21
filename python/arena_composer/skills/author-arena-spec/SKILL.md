@@ -58,8 +58,9 @@ the conventions of a spec, and what to do when a check fails.
 - Give every placed object one relation that says where it is: `on` a support, `at_position`, or
   `position_limits`. A light or a ground plane takes no relation.
 - Quote the kind `'on'`. Arena reads YAML 1.1, where a bare `on` is the boolean true.
-- An `atomic` task has exactly one subtask. Some kinds build only as one of several subtasks;
-  `check_spec` names them.
+- An `atomic` task has exactly one subtask. Some kinds cannot be a task's only subtask;
+  `check_spec` names them. Never pad such a task with a `NoTask` or a copy of a subtask: if the
+  goal is that one kind alone, report that Arena cannot build it.
 - Write a `prim_path` exactly as `get_prim_tree` returned it, with that node as `parent_id`.
 - Leave `env_cfg_override` and `placer_params` alone unless the request is about them.
 
@@ -72,7 +73,12 @@ the conventions of a spec, and what to do when a check fails.
 | `Unknown asset ...` with a note about `--import` | The project's own asset, not registered yet | Its module goes in `ARENA_COMPOSER_IMPORTS` in `bin/arena-mcp`; tell the user |
 | `... references unknown reference 'x'` or `... unknown node 'x'` | An id the spec does not declare | Add the object, or correct the id |
 | `K needs a, b` or `K takes no 'x'; did you mean 'y'?` | Wrong params for a kind | Read the kind's `fields` in `list_kinds` |
-| `K takes no task_description ... builds as one of several` | A kind that cannot be the only subtask | Choose another kind, or make it one of several `sequential` subtasks |
+| `K takes no task_description ... cannot be a spec's only subtask` | A kind Arena cannot build alone | Pair it only with subtasks the goal has. If the goal is that kind alone, report that it cannot be built |
+| `NoTask has no timeout and no success ...` | `NoTask` among a task's subtasks | Remove it |
+| `K needs an Openable here, and 'x' is ...` (or a Placeable, a Turnable, a Pressable) | The node is not the kind of thing the task acts on | Name an id or asset the line offers. For part of an asset, give its reference the joint param the line names, from `get_prim_tree` |
+| `'x' turns through levels -1 to N` | A level the knob has not got | Choose a level in that range |
+| `K filters its contact sensor against 'x', an articulation` | A destination with no rigid body to sense contact with | Add an object reference to the part to place onto, from `get_prim_tree`, and name that |
+| `... Arena ignores this key` | A misspelt key, or a param written beside `params` | Correct it, or move it under `params` |
 | `object_references.N.prim_path: ... names none` | A reference with no prim | Take a `prim_path` from `get_prim_tree` |
 | `object_references.N.prim_path: ... has no box to place by` | A prim whose geometry Arena does not bound: a collision proxy, a guide, or none | Take a `prim_path` from `get_prim_tree`, which lists only prims with a box. If it lists none, relate to the parent itself |
 | `relations.N: ... with nothing to place; it takes no relation` | A relation on a light or a ground plane | Remove the relation |

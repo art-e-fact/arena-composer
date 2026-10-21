@@ -33,9 +33,9 @@ flowchart TB
 | Gate | When Arena finds it | What fails there |
 | --- | --- | --- |
 | read and merge | at once | YAML that does not parse; a file that is not a mapping; a key in both files of a pair |
-| the validator's fields | at once, all of them | a `registry_name` nothing registers; a wrong type; a missing key; a bare `on` read as `true` |
+| the validator's fields | at once, all of them | a `registry_name` nothing registers; a wrong type; a missing key; a bare `on` read as `true`. And without a word: a key no field reads, which pydantic drops; a placement check nothing registers, which the placer leaves out |
 | the validator's asserts | once the fields they cover are right; the first to fail stops the rest | an id nothing declares; a duplicate id or `cli_override_specs` arg; a composition that does not fit its subtask count |
-| the build | minutes in, after Isaac Sim starts | a param the constructor lacks or does not take — `TypeError: object.__init__() takes exactly one argument`, naming no key; an object reference that cannot be built; an `env_cfg_override` field nothing has |
+| the build | minutes in, after Isaac Sim starts | a param the constructor lacks or does not take — `TypeError: object.__init__() takes exactly one argument`, naming no key; what a task's constructor asserts of the nodes it names — an Openable, a rigid body to sense contact with, an initial pose to lift from — and a `NoTask` among a composite's subtasks; an object reference that cannot be built; an `env_cfg_override` field nothing has |
 | the resolve | seconds in | a `usd_path` nothing is at, or that is not the single rigid body the sim would spawn; a relation on a light or a ground plane; an object reference the solve places by whose prim has no default-purpose geometry, the only kind Arena bounds |
 
 `spec_edit.check`, and every edit before it writes, run the first four in milliseconds: the first
@@ -63,7 +63,7 @@ nothing. A new one gets a sweep too, for warnings on specs that work.
   everywhere, `_CROSS_REFERENCE` in the compare. A wording Arena changes falls through and is
   compared as text, which can refuse an edit it should have let through, never the reverse: **the
   compare fails closed.** The checks themselves fail open, below.
-- **The build is bound to signatures.** `_build_problems` runs five groups over the merged dict.
+- **The build is bound to signatures.** `_build_problems` runs eight groups over the merged dict.
   Four take `inspect.signature` of the class Arena will construct — the asset behind a
   `registry_name`, a relation kind, a task kind, an object reference's class by its one joint param
   — and bind the entry's params to it (`_binding`, `catalog.missing_params`,
@@ -74,6 +74,17 @@ nothing. A new one gets a sweep too, for warnings on specs that work.
   signature: the ids in a list param, which Arena's validator skips and its builder looks up; a
   reference's `prim_path` and its one affordance; and `env_cfg_override` through Arena's own two
   checks.
+- **A task's nodes are bound to its annotations.** Arena resolves a task param to a node by its
+  annotation and never checks the class; the constructor asserts it. `_value_problems` reads the
+  annotation (`_node_classes`) against the class Arena builds for the id (`_nodes`), and what three
+  kinds of constructor do with their nodes: a knob level against the knob's `num_levels`, a contact
+  sensor on and against nodes with a rigid body (`_CONTACTS`), and a lift's initial pose, read
+  before placement. A tuple param is checked against its annotation's length, and a `_range` for
+  its order. A `NoTask` in a composite is named by its class, the one with no timeout to sum.
+- **What Arena drops is named.** `_ignored_problems` walks Arena's pydantic models for the keys
+  they would drop, and stands down for a model that forbids them, since pydantic names those
+  itself. `_placer_problems` checks `enabled_checks` and `required_checks` against `PlacementCheck`
+  and the registered validators.
 - **What it cannot see.** A constructor ending in `**kwargs` takes any name, and 304 of 332
   registered assets have one — `LibraryObject` down to `object.__init__` all forward — so
   `unexpected_params` answers `[]` and a misspelt object or background param passes. The resolve

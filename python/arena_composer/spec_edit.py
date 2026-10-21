@@ -33,11 +33,13 @@ import re
 import shutil
 import sys
 import tempfile
+import types
+import typing
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 from ruamel.yaml import YAML
@@ -360,7 +362,8 @@ class SpecFiles:
         key = next((key for pattern, key in _SECTIONS if pattern.match(line)), None)
         if key is None and (match := re.match(r"(\w+)[.:]", line)):
             key = match[1]
-        if key not in ArenaEnvGraphSpec.model_fields:
+        # A key Arena has no field for is named only where a file holds it.
+        if key not in ArenaEnvGraphSpec.model_fields and not any(key in doc for doc in self.documents.values()):
             return ""
         owner = self.owner(key)
         return f"{self.path.name if owner == self.path else self.documents[self.path][INCLUDE]}: "
@@ -459,10 +462,13 @@ def _hint(line: str, spec: Any) -> str:
         # A hint is a nicety; the line it would have gone on is the answer.
         return ""
     if close:
-        quoted = [repr(name) for name in close]
-        either = quoted[0] if len(quoted) == 1 else f"{', '.join(quoted[:-1])} or {quoted[-1]}"
-        return f"did you mean {either}?"
+        return f"did you mean {_either([repr(name) for name in close])}?"
     return _IMPORT_HINT if registered else ""
+
+
+def _either(options: list[str]) -> str:
+    """`options` as a sentence offers them: ``'a', 'b' or 'c'``."""
+    return options[0] if len(options) == 1 else f"{', '.join(options[:-1])} or {options[-1]}"
 
 
 #: What Arena's after-validators say — `ArenaEnvGraphSpec.validate`'s and
@@ -519,16 +525,28 @@ def _build_problems(spec: Any) -> list[str]:
     Arena's validator checks that each name is registered and that each id a
     slot holds is declared, and leaves the rest to the build: whether the
     params bind to the constructor they are passed to, whether an asset is
-    the kind its slot holds — a banana validates as the embodiment — whether
-    an object reference can be built at all, and the ids in a list param,
-    which it skips. A name Arena does not know is left to its validator,
+    the kind its slot holds — a banana validates as the embodiment, and as
+    the door a task opens — whether an object reference can be built at all,
+    and the ids in a list param, which it skips. What it drops without a word
+    — a key no field reads, a placement check nothing registers — the build
+    goes ahead without. A name Arena does not know is left to its validator,
     which refuses it by name.
 
     Each group fails open: one that cannot run, on an Arena that moved its
     internals, says so on stderr and refuses nothing.
     """
     errors = []
-    for group in (_asset_problems, _reference_problems, _relation_problems, _subtask_problems, _override_problems):
+    groups = (
+        _asset_problems,
+        _reference_problems,
+        _relation_problems,
+        _subtask_problems,
+        _value_problems,
+        _override_problems,
+        _ignored_problems,
+        _placer_problems,
+    )
+    for group in groups:
         try:
             errors += group(spec)
         except Exception as error:
@@ -608,16 +626,19 @@ def _relation_problems(spec: Any) -> list[str]:
 
 
 def _subtask_problems(spec: Any) -> list[str]:
-    """Each subtask's params against its kind's constructor, and the ids its
-    list params hold, which Arena's validator skips and its builder looks up."""
+    """Each subtask's params against its kind's constructor, the ids its list
+    params hold, which Arena's validator skips and its builder looks up, and
+    its kind against the task's composition."""
     from isaaclab_arena.assets.registries import TaskRegistry
+    from isaaclab_arena.tasks.no_task import NoTask
 
     from arena_composer import catalog
 
     registry = TaskRegistry()
     task = spec.get("task") if isinstance(spec, dict) else None
+    composition = task.get("composition") if isinstance(task, dict) else None
     # Arena passes the task's description to an atomic task only.
-    given = ("task_description",) if isinstance(task, dict) and task.get("composition") == "atomic" else ()
+    given = ("task_description",) if composition == "atomic" else ()
     ids, _ = _id_pools(spec)
     errors = []
     for index, subtask in _indexed(task, "subtasks"):
@@ -628,9 +649,20 @@ def _subtask_problems(spec: Any) -> list[str]:
         cls = registry.get_task_by_name(kind)
         errors += _binding(where, kind, cls, params, given)
         if given and catalog.unexpected_params(cls, dict.fromkeys(given)):
+            # Not "make it one of several": that sent agents padding it with a
+            # NoTask, which does not build either.
             errors.append(
-                f"task.subtasks.{index}.kind: {kind} takes no task_description, which Arena passes an atomic"
-                " task, so it does not build alone; it builds as one of several sequential or parallel subtasks"
+                f"task.subtasks.{index}.kind: {kind} takes no task_description, which Arena passes the one subtask"
+                " of an atomic task, so it cannot be a spec's only subtask: it builds only beside other subtasks"
+                " of a sequential or parallel task, and NoTask cannot be one of them"
+            )
+        # ponytail: NoTask is the one kind Arena registers whose termination has
+        # no timeout and no success; another like it needs naming here.
+        if composition in ("sequential", "parallel") and issubclass(cls, NoTask):
+            errors.append(
+                f"task.subtasks.{index}.kind: {kind} has no timeout and no success, so a {composition} task holding"
+                " it does not build: Arena sums its subtasks' timeouts into the episode's. Remove it; NoTask builds"
+                " only alone, as an atomic task"
             )
         for name in _node_lists(kind) or ():
             value = params.get(name)
@@ -648,6 +680,252 @@ def _subtask_problems(spec: Any) -> list[str]:
             errors.append(
                 f"{where}: {kind} pairs each pick_up_object_list entry with a destination_location_list one,"
                 f" and has {len(picked)} and {len(placed)}"
+            )
+    return errors
+
+
+def _tuple_problems(where: str, kind: str, hints: dict[str, Any], params: dict[str, Any]) -> list[str]:
+    """The params `hints` annotates as a run of numbers — a range, a position,
+    a quaternion — against what `params` holds: that many, and a range's min
+    not above its max. Arena passes them through, and a step unpacks them."""
+    errors = []
+    for name, value in params.items():
+        runs = [typing.get_args(branch) for branch in _branches(hints.get(name)) if typing.get_origin(branch) is tuple]
+        numbers = runs[0] if runs and runs[0] and all(member in (float, int) for member in runs[0]) else ()
+        if not numbers or value is None or isinstance(value, str):
+            continue  # a string is an id to Arena, which says so
+        ranged = name.endswith("_range") and len(numbers) == 2
+        if not isinstance(value, list) or len(value) != len(numbers) or not all(_number(item) for item in value):
+            shape = ", [min, max]" if ranged else ""
+            errors.append(f"{where}.{name}: {kind} takes a list of {len(numbers)} numbers here{shape}")
+        elif ranged and value[0] > value[1]:
+            errors.append(
+                f"{where}.{name}: {kind} reads it as [min, max], and {value[0]} is above {value[1]}, so nothing is"
+                " ever in it"
+            )
+    return errors
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+#: The tasks that put a contact sensor on one node, filtered against another,
+#: as they are built: the params naming the two, paired item by item in lists.
+#: ponytail: the three constructors that call `get_contact_sensor_cfg`, read
+#: off Arena; a fourth needs a line here.
+_CONTACTS = {
+    "PickAndPlaceTask": ("pick_up_object", "destination_location"),
+    "SortMultiObjectTask": ("pick_up_object_list", "destination_location_list"),
+    "ObjectInTask": ("object", "target"),
+}
+
+#: An object type as a line says what a node is.
+_A_TYPE = {"articulation": "an articulation", "base": "a base", "deformable": "deformable"}
+
+
+def _value_problems(spec: Any) -> list[str]:
+    """What each subtask's constructor asserts of the values its params hold,
+    which Arena's validator checks only for naming a declared node: the class
+    a node param is annotated with — an Openable, a Placeable — a level the
+    knob has, a rigid body to sense contact on and to filter it against, the
+    initial pose a lift reads before placement solves one, and the numbers
+    in a tuple param."""
+    from isaaclab_arena.affordances.turnable import Turnable
+    from isaaclab_arena.assets.object import Object
+    from isaaclab_arena.assets.registries import TaskRegistry
+    from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
+        find_node_ref_params_in_signature,
+    )
+    from isaaclab_arena.tasks.lift_object_task import LiftObjectTask
+
+    registry, nodes = TaskRegistry(), _nodes(spec)
+    # Arena gives an anchor the identity pose before it builds the task.
+    anchors = {
+        subject
+        for relation in _entries(spec, "relations")
+        if relation.get("kind") == "is_anchor" and isinstance(subject := relation.get("subject"), str)
+    }
+
+    def node(node_id: Any) -> _Node | None:
+        return nodes.get(node_id) if isinstance(node_id, str) else None
+
+    errors = []
+    for index, subtask in _indexed(spec.get("task") if isinstance(spec, dict) else None, "subtasks"):
+        kind, params = subtask.get("kind"), subtask.get("params")
+        if not isinstance(kind, str) or not registry.is_registered(kind) or not isinstance(params, dict):
+            continue
+        cls, where = registry.get_task_by_name(kind), f"task.subtasks.{index}.params"
+        # Arena resolves the same hints to build the task, so a kind they fail for does not build.
+        hints = typing.get_type_hints(cls.__init__)
+        errors += _tuple_problems(where, kind, hints, params)
+        for name in find_node_ref_params_in_signature(cls):
+            needed = _node_classes(hints[name])
+            for node_id in _listed(params.get(name)):
+                if not (built := node(node_id)):
+                    continue
+                if needed and not issubclass(built.cls, needed):
+                    errors.append(_class_problem(f"{where}.{name}", kind, needed, node_id, built, nodes))
+                elif issubclass(built.cls, Turnable):
+                    errors += _level_problems(where, params, node_id, built)
+        if kind in _CONTACTS:
+            sensor, against = _CONTACTS[kind]
+            for on_id, off_id in zip(_listed(params.get(sensor)), _listed(params.get(against))):
+                if (on := node(on_id)) and on.object_type in ("articulation", "base"):
+                    errors.append(
+                        f"{where}.{sensor}: {kind} puts a contact sensor on {on_id!r},"
+                        f" {_A_TYPE[on.object_type]}, where it needs a rigid body"
+                    )
+                off = node(off_id)
+                # A reference is filtered against by its prim path, whatever it is.
+                articulated = off and off.object_type == "articulation" and issubclass(off.cls, Object)
+                if off and (articulated or off.object_type == "deformable"):
+                    # An articulation's links are rigid bodies, and a reference to one names its prim.
+                    fix = "; name an object reference to the part to use, such as a tray, instead"
+                    errors.append(
+                        f"{where}.{against}: {kind} filters its contact sensor against {off_id!r},"
+                        f" {_A_TYPE[off.object_type]}, where it needs a rigid body or a base"
+                        + (fix if articulated else "")
+                    )
+        lifted = params.get("lift_object") if issubclass(cls, LiftObjectTask) else None
+        if (built := node(lifted)) and built.where.startswith(("objects.", "object_sets.")) and lifted not in anchors:
+            if built.params.get("initial_pose") is None:
+                errors.append(
+                    f"{where}.lift_object: {kind} reads the initial pose of {lifted!r} as it is built, before"
+                    f" placement solves one, and the spec gives it none; set {built.where}.params.initial_pose,"
+                    " as {position_xyz: [x, y, z]}"
+                )
+    return errors
+
+
+def _listed(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value]
+
+
+class _Node(NamedTuple):
+    """What Arena builds for an id, as far as a check needs it."""
+
+    cls: type
+    #: Its object type, where its class says it without the USD being read.
+    object_type: str | None
+    #: What it is, as a line says it: `a banana_ycb_robolab`.
+    label: str
+    #: Its entry: `objects.2`.
+    where: str
+    params: dict[str, Any]
+
+
+def _nodes(spec: Any) -> dict[str, _Node]:
+    """Each id `spec` declares, as Arena builds it: the class behind a
+    `registry_name`, an object set, or the reference its one affordance param
+    makes. An entry Arena cannot build — an unregistered name, two
+    affordances — is left out, for the checks that name it to report."""
+    from isaaclab_arena.assets.deformable_object import DeformableObject
+    from isaaclab_arena.assets.object_reference import ObjectReference
+    from isaaclab_arena.assets.object_set import RigidObjectSet
+    from isaaclab_arena.assets.registries import AssetRegistry
+
+    # Private API: the params that make a reference an affordance, each its own class.
+    from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import _AFFORDANCE_REFERENCE_CLASSES
+
+    registry, nodes = AssetRegistry(), {}
+    slots = [(role, spec.get(role)) for role in ("embodiment", "background")] if isinstance(spec, dict) else []
+    slots += [(f"objects.{index}", entry) for index, entry in _indexed(spec, "objects")]
+    for where, entry in slots:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+            continue
+        name = entry.get("registry_name")
+        if isinstance(name, str) and registry.is_registered(name):
+            cls = registry.get_asset_by_name(name)
+            # A background's type, and a prop's that names its USD, are set as it is built.
+            declared = getattr(inspect.getattr_static(cls, "object_type", None), "value", None)
+            kind = "deformable" if issubclass(cls, DeformableObject) else declared
+            nodes[entry["id"]] = _Node(cls, kind, f"a {name}", where, _params(entry))
+    for index, entry in _indexed(spec, "object_sets"):
+        if isinstance(entry.get("id"), str):
+            nodes[entry["id"]] = _Node(RigidObjectSet, "rigid", "an object set", f"object_sets.{index}", _params(entry))
+    for index, entry in _indexed(spec, "object_references"):
+        params = _params(entry)
+        joints = [name for name in _AFFORDANCE_REFERENCE_CLASSES if name in params]
+        if not isinstance(entry.get("id"), str) or len(joints) > 1:
+            continue
+        where = f"object_references.{index}"
+        if joints:
+            label = f"an object reference with {joints[0]}"
+            nodes[entry["id"]] = _Node(_AFFORDANCE_REFERENCE_CLASSES[joints[0]], "articulation", label, where, params)
+        else:
+            object_type = entry.get("object_type")
+            nodes[entry["id"]] = _Node(ObjectReference, object_type, "a plain object reference", where, params)
+    return nodes
+
+
+def _params(entry: dict[str, Any]) -> dict[str, Any]:
+    params = entry.get("params")
+    return params if isinstance(params, dict) else {}
+
+
+def _branches(annotation: Any) -> tuple[Any, ...]:
+    """The members of a union but None, or `annotation` alone."""
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        return tuple(member for member in typing.get_args(annotation) if member is not type(None))
+    return (annotation,)
+
+
+def _node_classes(annotation: Any) -> tuple[type, ...]:
+    """The classes a node param's annotation asks for, as Arena reads them:
+    `Openable` of `Openable`, `Asset` of `list[Asset] | None`."""
+    found = []
+    for branch in _branches(annotation):
+        if typing.get_origin(branch) is list:
+            branch = next(iter(typing.get_args(branch)), None)
+        if isinstance(branch, type):
+            found.append(branch)
+    return tuple(found)
+
+
+def _class_problem(
+    where: str, kind: str, needed: tuple[type, ...], node_id: str, node: _Node, nodes: dict[str, _Node]
+) -> str:
+    """The line for a task param naming a node of the wrong class, with what
+    would do: an id of the spec of the class, the affordance param a
+    reference lacks, or the registered assets of the class."""
+    from isaaclab_arena.assets.object_reference import ObjectReference
+    from isaaclab_arena.assets.registries import AssetRegistry
+    from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import _AFFORDANCE_REFERENCE_CLASSES
+
+    wanted = _a_class(needed)
+    line = f"{where}: {kind} needs {wanted} here, and {node_id!r} is {node.label}, which is not one"
+    joint = next((name for name, cls in _AFFORDANCE_REFERENCE_CLASSES.items() if issubclass(cls, needed)), None)
+    give = f"give it params.{joint}" if joint and issubclass(node.cls, ObjectReference) else ""
+    if fits := [repr(other) for other, built in nodes.items() if issubclass(built.cls, needed)]:
+        return f"{line}; did you mean {_either(fits)}" + (f", or to {give}?" if give else "?")
+    if give:
+        return f"{line}; {give}"
+    registry = AssetRegistry()
+    registered = [name for name in registry.get_all_keys() if issubclass(registry.get_asset_by_name(name), needed)]
+    options = [repr(name) for name in sorted(registered)[:3]]
+    options += [f"an object reference with params.{joint}"] if joint else []
+    return f"{line}; {wanted} is {_either(options)}" if options else line
+
+
+def _a_class(needed: tuple[type, ...]) -> str:
+    """`needed` as a line asks for it: ``an Openable``."""
+    names = " or ".join(cls.__name__ for cls in needed)
+    return f"{'an' if names[0] in 'AEIOU' else 'a'} {names}"
+
+
+def _level_problems(where: str, params: dict[str, Any], node_id: str, node: _Node) -> list[str]:
+    """A knob level a task gives against the levels the knob it names has:
+    one past them is never reached, and a reset to one asserts."""
+    levels = node.params.get("num_levels", inspect.getattr_static(node.cls, "num_levels", None))
+    if not isinstance(levels, int):
+        return []
+    errors = []
+    for name, outcome in (("target_level", "never reached"), ("reset_level", "refused at the first reset")):
+        level = params.get(name)
+        if _number(level) and not -1 <= level < levels:
+            errors.append(
+                f"{where}.{name}: {node_id!r} turns through levels -1 to {levels - 1}, so {level} is {outcome}"
             )
     return errors
 
@@ -688,6 +966,73 @@ def _override_problems(spec: Any) -> list[str]:
     except (AssertionError, ValueError) as error:
         return [f"env_cfg_override: {error}"]
     return []
+
+
+#: Keys Arena's validator refuses by name rather than drops.
+_REFUSED_KEYS = frozenset({"placement_validators"})
+
+
+def _ignored_problems(spec: Any) -> list[str]:
+    """The keys Arena's validator drops without a word, so the build goes on
+    without them: `openable_joint_name` beside a reference's `prim_path`
+    rather than in its `params`, `parms:` on an object. pydantic ignores a key
+    its model has no field for, and Arena's models say nothing else."""
+    from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
+
+    return list(_ignored(spec, ArenaEnvGraphSpec, ""))
+
+
+def _ignored(value: Any, model: type, where: str) -> Iterator[str]:
+    """The keys of `value` that `model` would drop, and those of the entries
+    under its fields that are models in turn, each at its path."""
+    from pydantic import BaseModel
+
+    # A model that forbids extra keys refuses them itself, by name.
+    if not isinstance(value, dict) or model.model_config.get("extra", "ignore") != "ignore":
+        return
+    fields = model.model_fields
+    for key in value:
+        if key in fields or key in _REFUSED_KEYS:
+            continue
+        close = difflib.get_close_matches(str(key), list(fields), n=1)
+        hint = f"did you mean {close[0]!r}?" if close else f"did you mean params.{key}?" if "params" in fields else ""
+        yield f"{where}{key}: Arena ignores this key" + (f"; {hint}" if hint else "")
+    for name, info in fields.items():
+        inner = _branches(info.annotation)[0]
+        listed = typing.get_origin(inner) is list
+        inner = next(iter(typing.get_args(inner)), None) if listed else inner
+        if not (isinstance(inner, type) and issubclass(inner, BaseModel)):
+            continue
+        if not listed:
+            yield from _ignored(value.get(name), inner, f"{where}{name}.")
+        elif isinstance(entries := value.get(name), list):
+            for index, entry in enumerate(entries):
+                yield from _ignored(entry, inner, f"{where}{name}.{index}.")
+
+
+def _placer_problems(spec: Any) -> list[str]:
+    """The check names `placer_params` gives against the checks there are:
+    Arena leaves out a name nothing registers without a word, so a misspelt
+    `no_overlap` turns the check off."""
+    placer = spec.get("placer_params") if isinstance(spec, dict) else None
+    if not isinstance(placer, dict):
+        return []
+    from isaaclab_arena.relations.validation.pre_physics import get_build_time_checks
+    from isaaclab_arena.relations.validation.types import PlacementCheck
+
+    known = sorted({str(check) for check in (*PlacementCheck, *get_build_time_checks())})
+    errors = []
+    for key in ("enabled_checks", "required_checks"):
+        names = placer.get(key)
+        for index, name in enumerate(names if isinstance(names, list) else []):
+            if isinstance(name, str) and name not in known:
+                close = difflib.get_close_matches(name, known, n=1)
+                hint = f"did you mean {close[0]!r}?" if close else f"the checks are {', '.join(known)}"
+                errors.append(
+                    f"placer_params.{key}.{index}: no placement check is called {name!r}, and Arena leaves it out"
+                    f" without a word; {hint}"
+                )
+    return errors
 
 
 def _targets(value: Any) -> Iterator[Any]:
@@ -843,6 +1188,10 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
       hands it back to the kind's default. Dropping a task down to one subtask
       switches its composition back to ``atomic``.
 
+    Writing a whole subtask, by ``set`` or ``insert``, points a node param
+    naming a node of another class than its kind needs — the menu's
+    placeholder — at the first id of that class, see :func:`_fit_node_params`.
+
     One leaf at a time rather than whole sections, so a key the editor's form
     never shows is not dropped by a write that passes over it. Which file the
     edit lands in, and whether the result validates, are :class:`SpecFiles`'
@@ -865,6 +1214,8 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             target = files.section(key) if len(steps) == 1 else _walk(document, steps)
             target.append(value)
             changed = [f"added an entry to {_label(steps)}"]
+            if steps == ["task", "subtasks"]:
+                changed += _fit_node_params(files, f"task.subtasks.{len(target) - 1}", target[-1])
             if steps == ["task", "subtasks"] and (bumped := _keep_composition_valid(files)):
                 changed.append(bumped)
             return files.write(changed, (f"{_label(steps)}.{len(target) - 1}",))
@@ -895,6 +1246,9 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
                 dropped := _drop_params_not_taken(parent, value)
             ):
                 changed.append(f"dropped {key}.params {', '.join(dropped)}, which {value} does not take")
+            # A whole subtask: the panel's, of a kind picked from its menu.
+            if steps[:2] == ["task", "subtasks"] and len(steps) == 3:
+                changed += _fit_node_params(files, _label(steps), parent[last])
             return files.write(changed, (_label(steps),))
         if op == "remove":
             changed = [f"removed {_label(steps)}"]
@@ -1221,6 +1575,48 @@ def _keep_composition_valid(files: SpecFiles) -> str | None:
         task["composition"] = "atomic"
         return "set task.composition to 'atomic': one subtask cannot be sequential or parallel"
     return None
+
+
+def _fit_node_params(files: SpecFiles, where: str, subtask: Any) -> list[str]:
+    """Point each node param of `subtask`, the whole entry an edit wrote at
+    `where`, that names a node of another class than its kind asks for at the
+    first id of that class, one line per param moved.
+
+    The panel writes a new subtask with the first id in each node param, a
+    placeholder that keeps the spec loading; an `OpenDoorTask` would open the
+    robot, which its constructor refuses. With no id of the class, the param
+    stays, and the refusal says what would do.
+    """
+    params = subtask.get("params") if isinstance(subtask, dict) else None
+    if not isinstance(params, dict):
+        return []
+    try:
+        from isaaclab_arena.assets.registries import TaskRegistry
+        from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
+            find_node_ref_params_in_signature,
+        )
+
+        kind, registry = subtask.get("kind"), TaskRegistry()
+        if not isinstance(kind, str) or not registry.is_registered(kind):
+            return []
+        cls, nodes = registry.get_task_by_name(kind), _nodes(files.merged())
+        hints = typing.get_type_hints(cls.__init__)
+        changed = []
+        for name, listed in find_node_ref_params_in_signature(cls).items():
+            needed, value = _node_classes(hints[name]), params.get(name)
+            fits = [node_id for node_id, node in nodes.items() if needed and issubclass(node.cls, needed)]
+            if listed or not fits or not isinstance(value, str) or value not in nodes or value in fits:
+                continue
+            params[name] = fits[0]
+            changed.append(
+                f"set {where}.params.{name} to {fits[0]!r}: {kind} needs {_a_class(needed)} there, and {value!r} is"
+                " not one"
+            )
+        return changed
+    except Exception as error:
+        # A nicety on top of the edit, which the checks judge either way.
+        print(f"arena-composer: _fit_node_params skipped: {type(error).__name__}: {error}", file=sys.stderr)
+        return []
 
 
 def _drop_params_not_taken(entry: Any, registry_name: Any) -> list[str]:
