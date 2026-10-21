@@ -739,6 +739,8 @@ def _value_problems(spec: Any) -> list[str]:
     )
     from isaaclab_arena.tasks.lift_object_task import LiftObjectTask
 
+    from arena_composer import catalog
+
     registry, nodes = TaskRegistry(), _nodes(spec)
     # Arena gives an anchor the identity pose before it builds the task.
     anchors = {
@@ -760,7 +762,7 @@ def _value_problems(spec: Any) -> list[str]:
         hints = typing.get_type_hints(cls.__init__)
         errors += _tuple_problems(where, kind, hints, params)
         for name in find_node_ref_params_in_signature(cls):
-            needed = _node_classes(hints[name])
+            needed = catalog.node_classes(hints[name])
             for node_id in _listed(params.get(name)):
                 if not (built := node(node_id)):
                     continue
@@ -869,18 +871,6 @@ def _branches(annotation: Any) -> tuple[Any, ...]:
     if typing.get_origin(annotation) in (typing.Union, types.UnionType):
         return tuple(member for member in typing.get_args(annotation) if member is not type(None))
     return (annotation,)
-
-
-def _node_classes(annotation: Any) -> tuple[type, ...]:
-    """The classes a node param's annotation asks for, as Arena reads them:
-    `Openable` of `Openable`, `Asset` of `list[Asset] | None`."""
-    found = []
-    for branch in _branches(annotation):
-        if typing.get_origin(branch) is list:
-            branch = next(iter(typing.get_args(branch)), None)
-        if isinstance(branch, type):
-            found.append(branch)
-    return tuple(found)
 
 
 def _class_problem(
@@ -1596,6 +1586,8 @@ def _fit_node_params(files: SpecFiles, where: str, subtask: Any) -> list[str]:
             find_node_ref_params_in_signature,
         )
 
+        from arena_composer import catalog
+
         kind, registry = subtask.get("kind"), TaskRegistry()
         if not isinstance(kind, str) or not registry.is_registered(kind):
             return []
@@ -1603,7 +1595,7 @@ def _fit_node_params(files: SpecFiles, where: str, subtask: Any) -> list[str]:
         hints = typing.get_type_hints(cls.__init__)
         changed = []
         for name, listed in find_node_ref_params_in_signature(cls).items():
-            needed, value = _node_classes(hints[name]), params.get(name)
+            needed, value = catalog.node_classes(hints[name]), params.get(name)
             fits = [node_id for node_id, node in nodes.items() if needed and issubclass(node.cls, needed)]
             if listed or not fits or not isinstance(value, str) or value not in nodes or value in fits:
                 continue

@@ -29,7 +29,8 @@ the conventions of a spec, and what to do when a check fails.
 3. **Find every object with `search_assets`.** Never write a `registry_name` it did not return.
    If nothing fits, `reindex_assets` builds the index of NVIDIA's SimReady props, which the search
    covers from then on. Add each object with `add_object`, giving `on` the id of what it stands on.
-4. **Write the task** in the task YAML, using `list_kinds` for the task kinds and their params.
+4. **Write the task** in the task YAML, using `list_kinds` for the task kinds and their params,
+   and the class each param that names an object `needs`.
    Point it at the new objects before removing the scaffold's banana and bowl with
    `remove_object`: an edit that leaves the task naming a missing id is refused.
 5. **Write the relations** in the scene YAML, using `list_kinds` for the relation kinds and their

@@ -231,15 +231,6 @@ def _signature(cls: type) -> list[inspect.Parameter]:
     return [param for param in inspect.signature(cls.__init__).parameters.values() if param.name != "self"]
 
 
-#: Modules whose classes name a node in the graph rather than a value. A
-#: parameter annotated with one holds an id — ``pick_up_object: apple`` — so it
-#: is edited by picking from the spec's ids, not by typing.
-_NODE_REF_MODULES = (
-    "isaaclab_arena.assets.asset",
-    "isaaclab_arena.affordances",
-    "isaaclab_arena.embodiments",
-)
-
 #: Already carried by the spec itself rather than by ``params``.
 _NOT_PARAMS = frozenset({"self", "parent", "task_description"})
 
@@ -259,6 +250,10 @@ class Field:
     default: Any
     #: The values of an `enum`, empty for every other kind.
     options: tuple[str, ...] = ()
+    #: The class the entry a `node_ref` names has to be, which the task asserts
+    #: as Arena builds it: `Asset` for any, or one narrower, such as `Openable`.
+    #: Empty for every other kind.
+    needs: str = ""
 
 
 @dataclass(frozen=True)
@@ -275,8 +270,9 @@ class Kind:
     agent_ready: bool = False
     #: The parameters no control edits — a tuple, a list of assets, a Literal,
     #: a callable — by name: their annotated `type`, whether one is `required`
-    #: and the `default`. A text edit can still set what a form cannot, so the
-    #: kind's whole signature stays readable.
+    #: and the `default`, and for a list of ids the class each `needs`. A text
+    #: edit can still set what a form cannot, so the kind's whole signature
+    #: stays readable.
     other_params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -297,11 +293,29 @@ def tasks() -> tuple[Kind, ...]:
     from isaaclab_arena.assets.registries import TaskRegistry
 
     registry = TaskRegistry()
-    return tuple(_kind(registry.get_task_by_name(name), name) for name in sorted(registry.get_all_keys()))
+    found = [(name, registry.get_task_by_name(name)) for name in sorted(registry.get_all_keys())]
+    return tuple(_kind(cls, name, refs=_node_refs(cls)) for name, cls in found)
 
 
-def _kind(cls: type, name: str, unary: bool | None = None) -> Kind:
-    hints = _hints(cls)
+def _node_refs(cls: type) -> dict[str, bool]:
+    """The params of task `cls` that name a node, each True when it takes a
+    list of ids: those Arena swaps for the entries they name as it builds the
+    task. Empty when the annotations do not resolve, as then Arena cannot build
+    the task either, and one project's task should not take the rest down."""
+    from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
+        find_node_ref_params_in_signature,
+    )
+
+    try:
+        return find_node_ref_params_in_signature(cls)
+    except Exception:
+        return {}
+
+
+def _kind(cls: type, name: str, unary: bool | None = None, refs: dict[str, bool] | None = None) -> Kind:
+    """`refs` are the params that name a node, as :func:`_node_refs` finds
+    them. A relation has none: Arena passes it its params as they are written."""
+    hints, refs = _hints(cls), refs or {}
     fields, other = [], {}
     for param in inspect.signature(cls.__init__).parameters.values():
         if param.name in _NOT_PARAMS or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
@@ -310,8 +324,8 @@ def _kind(cls: type, name: str, unary: bool | None = None) -> Kind:
         # assets — gets no field, only a line under `other_params`. Edits
         # address one leaf at a time, so a value the form never shows still
         # survives a write.
-        annotation = hints.get(param.name, param.annotation)
-        if (field := _field(param, annotation)) is not None:
+        annotation, ref = hints.get(param.name, param.annotation), refs.get(param.name)
+        if (field := _field(param, annotation, ref)) is not None:
             fields.append(field)
         else:
             required = param.default is inspect.Parameter.empty
@@ -319,6 +333,7 @@ def _kind(cls: type, name: str, unary: bool | None = None) -> Kind:
                 "type": _type_name(annotation),
                 "required": required,
                 "default": None if required else _plain(param.default),
+                **({"needs": _needs(annotation)} if ref else {}),
             }
     return Kind(
         name=name,
@@ -337,12 +352,14 @@ def _type_name(annotation: Any) -> str:
     return re.sub(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.([A-Za-z_]\w*)", r"\1", text)
 
 
-def _field(param: inspect.Parameter, annotation: Any) -> Field | None:
+def _field(param: inspect.Parameter, annotation: Any, ref: bool | None = None) -> Field | None:
+    """`ref` is False for a param that names one node, and True for one that
+    takes a list of ids, which no control picks."""
     required = param.default is inspect.Parameter.empty
     default = None if required else _plain(param.default)
 
-    def made(kind: str, optional: bool, options: tuple[str, ...] = ()) -> Field:
-        return Field(param.name, kind, optional, required, default, options)
+    def made(kind: str, optional: bool, options: tuple[str, ...] = (), needs: str = "") -> Field:
+        return Field(param.name, kind, optional, required, default, options, needs)
 
     # Before unwrapping the union: `Side | str` is an enum parameter that also
     # accepts the enum's value as a string.
@@ -358,9 +375,27 @@ def _field(param: inspect.Parameter, annotation: Any) -> Field | None:
         return made("int", optional)
     if base is str:
         return made("text", optional)
-    if isinstance(base, type) and base.__module__.startswith(_NODE_REF_MODULES):
-        return made("node_ref", optional)
+    if ref is False:
+        return made("node_ref", _accepts_none(annotation), needs=_needs(annotation))
     return None
+
+
+def node_classes(annotation: Any) -> tuple[type, ...]:
+    """The classes a node param's annotation asks for, as Arena reads them:
+    `Openable` of `Openable`, `Asset` of `list[Asset] | None`."""
+    union = get_origin(annotation) in (typing.Union, types.UnionType)
+    found = []
+    for branch in get_args(annotation) if union else (annotation,):
+        if get_origin(branch) is list:
+            branch = next(iter(get_args(branch)), None)
+        if isinstance(branch, type) and branch is not type(None):
+            found.append(branch)
+    return tuple(found)
+
+
+def _needs(annotation: Any) -> str:
+    """What a node param's annotation asks for, as a field says it: `Openable`."""
+    return " or ".join(cls.__name__ for cls in node_classes(annotation))
 
 
 def _hints(cls: type) -> dict[str, Any]:
