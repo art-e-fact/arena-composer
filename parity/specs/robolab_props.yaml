@@ -1,0 +1,119 @@
+env_name: lineup_robolab
+embodiment:
+  id: robot
+  registry_name: franka_ik
+  params:
+    initial_pose:
+      position_xyz:
+      - -1.6
+      - 0.0
+      - 0.0
+background:
+  id: table
+  registry_name: office_table_background
+objects:
+- id: avocado01_fruits_veggies_robolab
+  registry_name: avocado01_fruits_veggies_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.8183917425572872
+      - -0.34086173854768276
+      - 0.5328255366226659
+- id: lime01_fruits_veggies_robolab
+  registry_name: lime01_fruits_veggies_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.7110810367763042
+      - -0.3417039503157139
+      - 0.5332184796321672
+- id: orange_01_fruits_veggies_robolab
+  registry_name: orange_01_fruits_veggies_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.5971259143948554
+      - -0.33376991271972656
+      - 0.5329227175067063
+- id: pomegranate01_fruits_veggies_robolab
+  registry_name: pomegranate01_fruits_veggies_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.4610684248805045
+      - -0.31246887788176536
+      - 0.5332100905112457
+- id: red_onion_fruits_veggies_robolab
+  registry_name: red_onion_fruits_veggies_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.3363439073413609
+      - -0.34140036337077617
+      - 0.5391049032956362
+- id: lemon_01_fruits_veggies_robolab
+  registry_name: lemon_01_fruits_veggies_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.22914507947862128
+      - -0.3451962423324585
+      - 0.5318761086715386
+- id: spoon_big_vomp_robolab
+  registry_name: spoon_big_vomp_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.06632041431963423
+      - -0.3489578542113304
+      - 0.5332354717144044
+- id: serving_bowl_vomp_robolab
+  registry_name: serving_bowl_vomp_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.13824878476560137
+      - -0.28991176456212997
+      - 0.5332465689030942
+- id: plate_large_vomp_robolab
+  registry_name: plate_large_vomp_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.4235024147480728
+      - -0.2045881998538971
+      - 0.5302418595571071
+- id: red_block_basic_robolab
+  registry_name: red_block_basic_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.652416335642338
+      - -0.34649778984487056
+      - 0.5565022101551295
+- id: milkjug_a01_vomp_robolab
+  registry_name: milkjug_a01_vomp_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.7543345589190724
+      - -0.3316900086402893
+      - 0.533
+- id: plasticpail_a02_vomp_robolab
+  registry_name: plasticpail_a02_vomp_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.7519935429096222
+      - 0.0930182394385338
+      - 0.5329999952316286
+relations:
+- kind: is_anchor
+  subject: table
+task:
+  composition: atomic
+  description: No task.
+  subtasks:
+  - kind: NoTask
+    params: {}

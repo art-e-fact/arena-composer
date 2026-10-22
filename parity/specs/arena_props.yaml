@@ -1,0 +1,103 @@
+env_name: lineup_arena_small
+embodiment:
+  id: robot
+  registry_name: franka_ik
+  params:
+    initial_pose:
+      position_xyz:
+      - -1.6
+      - 0.0
+      - 0.0
+background:
+  id: table
+  registry_name: office_table_background
+objects:
+- id: peg
+  registry_name: peg
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.8380210002884269
+      - -0.35802100028842687
+      - 0.533
+- id: hole
+  registry_name: hole
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.7260420019179582
+      - -0.3100000013411045
+      - 0.5419999996125698
+- id: blue_exhaust_pipe
+  registry_name: blue_exhaust_pipe
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.6088984389603137
+      - -0.35287094570696353
+      - 0.5330061124560489
+- id: red_block_basic_robolab
+  registry_name: red_block_basic_robolab
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.5282374113053082
+      - -0.34649778984487056
+      - 0.5565022101551295
+- id: power_drill
+  registry_name: power_drill
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.3725548373162745
+      - -0.27658245980739593
+      - 0.5615954903811217
+- id: mustard_bottle
+  registry_name: mustard_bottle
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.19236152395606024
+      - -0.27434999763965606
+      - 0.562124228283763
+- id: sugar_box
+  registry_name: sugar_box
+  params:
+    initial_pose:
+      position_xyz:
+      - -0.05801173359155637
+      - -0.2818732288479805
+      - 0.5555674696266651
+- id: beer_bottle
+  registry_name: beer_bottle
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.052349776327610203
+      - -0.3459776182472706
+      - 0.635000005543232
+- id: red_cube
+  registry_name: red_cube
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.116842202258995
+      - -0.3695299558213446
+      - 0.5334700441786554
+- id: small_gear
+  registry_name: small_gear
+  params:
+    initial_pose:
+      position_xyz:
+      - 0.07763924675760811
+      - -0.3481730007380247
+      - 0.5230000002235174
+relations:
+- kind: is_anchor
+  subject: table
+task:
+  composition: atomic
+  description: No task.
+  subtasks:
+  - kind: NoTask
+    params: {}

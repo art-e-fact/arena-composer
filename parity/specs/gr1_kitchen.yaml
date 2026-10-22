@@ -1,0 +1,110 @@
+env_name: showcase_kitchen_gshaped_humanoid
+embodiment:
+  id: gr1
+  registry_name: gr1_joint
+  params: {}
+background:
+  id: kitchen
+  registry_name: lightwheel_kitchen_g_shaped_modern2
+  params:
+    collision_mode: mesh
+    repair_collision_mesh_non_watertight: false
+object_references:
+- id: floor
+  parent_id: kitchen
+  prim_path: floor_room/geometry
+  object_type: base
+  params: {}
+- id: counter_top
+  parent_id: kitchen
+  prim_path: counter_main_main_group/top_geometry
+  object_type: base
+  params: {}
+relations:
+- kind: is_anchor
+  subject: floor
+  params: {}
+- kind: is_anchor
+  subject: counter_top
+  params: {}
+- kind: 'on'
+  subject: gr1
+  reference: floor
+  params: {}
+- kind: next_to
+  subject: gr1
+  reference: counter_top
+  params:
+    side: negative_y
+    distance_m: 0.05
+    tolerance_m: 0.1
+- kind: rotate_around_solution
+  subject: gr1
+  params:
+    yaw_rad: 1.57
+- kind: 'on'
+  subject: eggplant_a01
+  reference: counter_top
+  params: {}
+- kind: 'on'
+  subject: boc_choy_a01
+  reference: counter_top
+  params: {}
+- kind: 'on'
+  subject: onion_b01
+  reference: counter_top
+  params: {}
+- kind: 'on'
+  subject: orange_a01_02
+  reference: counter_top
+  params: {}
+- kind: 'on'
+  subject: granny_smith_apple_a01
+  reference: counter_top
+  params: {}
+- kind: 'on'
+  subject: apple_a01
+  reference: counter_top
+  params: {}
+- kind: 'on'
+  subject: boc_choy_a03
+  reference: counter_top
+  params: {}
+objects:
+- id: eggplant_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Vegetables/Eggplant_A01/sm_food_produce_eggplant_a01_01.usd
+- id: boc_choy_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Vegetables/Boc_Choy_A01/sm_food_produce_bocChoy_a01_01.usd
+- id: onion_b01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Vegetables/Onion_B01/sm_food_produce_onion_b01_01.usd
+- id: orange_a01_02
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Fruit/Orange_A01_02/sm_food_produce_orange_a01_01.usd
+- id: granny_smith_apple_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Fruit/Granny_Smith_Apple_A01/sm_food_produce_apple_grannySmith_a01_01.usd
+- id: apple_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Fruit/Apple_A01/sm_apple_a01_01.usd
+- id: boc_choy_a03
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Vegetables/Boc_Choy_A03/sm_food_produce_bocChoy_a03_01.usd
+task:
+  composition: atomic
+  description: Pick up the eggplant_a01 and place it on the boc_choy_a01.
+  subtasks:
+  - kind: PickAndPlaceTask
+    params:
+      pick_up_object: eggplant_a01
+      destination_location: boc_choy_a01
+      background_scene: kitchen

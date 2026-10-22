@@ -42,6 +42,7 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - [Install](#install)
 - [Developing](#developing)
     - [The showcase on Artefacts](#the-showcase-on-artefacts)
+    - [The Isaac Sim comparison on Artefacts](#the-isaac-sim-comparison-on-artefacts)
 - [License](#license)
 
 ## Highlights
@@ -186,6 +187,24 @@ artefacts run showcase
 
 The dashboard gets a test per environment and a PNG per environment and view. More in the
 [Artefacts docs](https://docs.artefacts.com/).
+
+### The Isaac Sim comparison on Artefacts
+
+The composer draws a scene without Isaac Sim, so [parity/](parity/) checks it against Isaac Sim's own
+renders. A second job in [artefacts.yaml](artefacts.yaml) builds a handful of specs in Isaac Sim and
+draws each from the same cameras in both, after moving the composer's scene to where physics left
+everything. Each camera is a test, which fails when the composer draws further from Isaac Sim than
+it did before. The dashboard shows the two pictures side by side.
+
+It also needs Isaac Sim in Arena's venv and a GPU that RTX renders on, and its EULA accepted, which
+nothing here does for you:
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES artefacts run parity
+```
+
+How the pictures are scored, and how to record a closer baseline, is in
+[docs/development.md](docs/development.md#the-isaac-sim-comparison).
 
 ## License
 
