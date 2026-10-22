@@ -180,7 +180,8 @@ def test_a_spec_that_no_longer_reads_still_carries_the_reason(tmp_path: Path, mo
 def test_a_problem_goes_to_the_card_of_the_entry_it_names():
     """By path, after the file a line names first where the spec is two, or by
     id, as the solve's warnings name theirs. A line naming no entry the panel
-    draws a card for has nowhere to go."""
+    draws a card for has nowhere to go. A file named after a key, `task.yaml`,
+    is still a file."""
     spec = {
         "embodiment": {"id": "droid"},
         "background": {"id": "table"},
@@ -189,9 +190,9 @@ def test_a_problem_goes_to_the_card_of_the_entry_it_names():
     }
     errors = [
         "../scenes/scene.yaml: relations.12.params.foo: on takes no 'foo'",
-        "task.subtasks.1.params.bogus: PickAndPlaceTask takes no 'bogus'",
+        "task.yaml: task.subtasks.1.params.bogus: PickAndPlaceTask takes no 'bogus'",
         "task.subtasks: atomic takes exactly one subtask",
-        "placer_params.enabled_checks.0: no check is called 'nope'",
+        "task.yaml: placer_params.enabled_checks.0: no check is called 'nope'",
         "TypeError: object.__init__() takes exactly one argument",
     ]
     warnings = [

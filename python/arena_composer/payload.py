@@ -225,6 +225,10 @@ def _attributed(spec: dict[str, Any], errors: list[str], warnings: list[str]) ->
         for line in lines:
             # The second, after the file a line names first where the spec is two.
             for head in line.split(": ")[:2]:
+                # A file is no entry, however it is named: `task.yaml` reads as
+                # the task's path, and `.yaml` as a key under it.
+                if "/" in head or head.endswith((".yaml", ".yml")):
+                    continue
                 if match := _ENTRY.match(head):
                     path = [int(step) if step.isdigit() else step for step in match[1].split(".")]
                 elif head in ids:
