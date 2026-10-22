@@ -124,7 +124,8 @@ with the subtask count in the same edit, so a task can grow past one subtask at 
 
 A new check only has to produce lines for the merged dict; the compare treats them as text. Two
 things keep it compatible: the line starts with the path to the entry, `objects.2.params.scale`, so
-the file prefix, the normalisation and `touched` all find it; and it tolerates any shape a hand edit
+the file prefix, the normalisation, `touched` and the panel's mark on the entry's card all find it;
+and it tolerates any shape a hand edit
 leaves — `objects: null`, `relations: 'on'` — since it runs on specs the validator refuses
 (`_indexed`, `_entries`).
 
@@ -152,7 +153,7 @@ leaves — `objects: null`, `relations: 'on'` — since it runs on specs the val
 | Surface | A wrong spec | A wrong argument, or a crash |
 | --- | --- | --- |
 | the MCP tools, [mcp_server.py](../python/arena_composer/mcp_server.py) | `{"ok": false, "errors": [...]}`, the `Result` as a dict; `describe_scene` answers a `SpecError` the same way. `render_views` and `get_prim_tree` raise a `ToolError` instead, since each has a result or a reason, never both | a `ToolError` for what the tool saw coming: no file at the path, a scene where the task was asked for (`_spec_path`, `spec_edit.check_entry`), a module that does not import (`_quiet`). The SDK withholds every other exception behind a bare `Error executing tool`, so a crash is a bug; the tests' `_refusal` helper fails on one |
-| the panel, [view.py](../python/arena_composer/view.py) | a refused edit is answered once, with the unchanged spec and the reason, and `remaining_errors` go to stderr. A change on disk Arena cannot build leaves the last layout up and sends the reason with the spec as it now reads or, where it no longer reads, as it last did (`payload.encode_spec`). The panel shows each line as a toast ([editor.md](editor.md)) | the loop outlives it: `_files` answers a file that does not read with a `Result`, `_solved` catches whatever Arena raises, and a group that cannot run skips itself |
+| the panel, [view.py](../python/arena_composer/view.py) | a refused edit is answered once, with the unchanged spec and the reason, and `remaining_errors` go to stderr. A change on disk Arena cannot build leaves the last layout up and sends the reason with the spec as it now reads or, where it no longer reads, as it last did (`payload.encode_spec`). The panel shows each as a toast. Every message also carries what is wrong with the spec it sends, at the entry each line names: `check`'s lines, and the last solve's warnings while the file still reads to the spec that solve read (`payload._problems`). The panel marks that entry's card with a ⚠ ([editor.md](editor.md#cards)) | the loop outlives it: `_files` answers a file that does not read with a `Result`, `_solved` catches whatever Arena raises, and a group that cannot run skips itself |
 | the commands | `arena-resolve-layout` raises, and a traceback is the answer in a terminal. `arena-render` prints `<spec>: <reason>` on stderr, `spec_edit.reasons` as the MCP tools give them, draws the other specs and exits 1; a layout that fails placement is drawn, its verdict on stderr. `arena-composer new` and `init` answer a path they cannot use through `parser.error`, as `arena-render` answers a spec that is missing or a scene, before Arena is imported | a module named by `--import` or `ARENA_COMPOSER_IMPORTS` that does not import is one line on stderr and exit 1, from `arena-view`, `arena-resolve-layout` and `arena-render` alike, naming the module and where it was named (`catalog.load_extensions`) |
 
 ## Adding a check

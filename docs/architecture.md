@@ -57,7 +57,7 @@ Measured, JSON spent ~760 ms formatting the geometry as decimal text against ~2 
   [usd/AGENTS.md](../python/arena_composer/usd/AGENTS.md).
 - **Absent means no news.** Everything around the arrays is an ordinary map: unknown keys are
   ignored, absent ones default. On a message, only `assets` (the layout), `remote`, `indexing`,
-  `errors` and `solving` may be absent, and each one absent means "keep what you have"
+  `errors`, `solving` and `problems` may be absent, and each one absent means "keep what you have"
   ([scene.rs](../src/scene.rs) `Scene`). `layouts`, every layout the solve drew with `assets` the
   first, and the `seed` they were drawn from, ride with `assets`. Every message carries the whole
   editor half — spec, file owners and vocabulary — so `editor::Form::take` never pieces one
