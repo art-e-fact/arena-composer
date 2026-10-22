@@ -65,8 +65,9 @@ pub fn drop_onto_the_layout(
         .cursor_position()
         .and_then(|cursor| camera.viewport_to_world(transform, cursor).ok())
         .and_then(|ray| ray_cast.cast_ray(ray, &MeshRayCastSettings::default()).first().map(|(_, hit)| hit.point));
+    // The embodiment is never stood on.
     let target = hit
-        .and_then(|point| target(&placed, arena_to_bevy().inverse() * point))
+        .and_then(|point| target(&placed, arena_to_bevy().inverse() * point, |asset| asset.role != "embodiment"))
         .or_else(|| relations::find(&placed, anchor(&form.spec)?));
 
     if let Some(parent) = target {
@@ -81,18 +82,22 @@ pub fn drop_onto_the_layout(
 }
 
 /// What a point on the layout, in Arena's frame, stands for: the smallest box
-/// that holds it.
+/// that holds it, among the assets `keep` lets through. A click in the view
+/// reads a hit the same way ([`super::pick`]).
 ///
 /// Smallest, so a point on a counter lands on the `table_top` reference and
 /// not on the kitchen around it — a reference draws nothing of its own, so a
 /// ray can only ever hit its parent. Where the two boxes are the same, as when
 /// the reference names the whole of its parent, the reference still wins: it
-/// is the node the spec stands things on. The embodiment is never stood on.
-fn target(placed: &Placed, point: Vec3) -> Option<&Asset> {
+/// is the node the spec stands things on.
+// ponytail: the box rule can hand a hit on the table to the robot standing
+// over it, where the robot's box is the smaller; the hit entity's `AssetId`
+// would say which mesh was hit, if that ever misleads.
+pub fn target(placed: &Placed, point: Vec3, keep: impl Fn(&Asset) -> bool) -> Option<&Asset> {
     placed
         .0
         .iter()
-        .filter(|asset| asset.role != "embodiment")
+        .filter(|asset| keep(asset))
         .map(|asset| (asset, world_aabb(asset)))
         .filter(|(_, (min, max))| point.cmpge(*min - SLACK).all() && point.cmple(*max + SLACK).all())
         .min_by_key(|(asset, bounds)| (cubic_cm(*bounds), asset.role != "object_reference"))
@@ -134,18 +139,23 @@ mod tests {
         asset.map(|asset| asset.id.as_str())
     }
 
+    /// What a drop may land on.
+    fn stood_on(asset: &Asset) -> bool {
+        asset.role != "embodiment"
+    }
+
     /// The bowl's rim is the bowl, however much larger boxes also hold it.
     #[test]
     fn a_hit_lands_on_the_smallest_box_that_holds_it() {
-        assert_eq!(id(target(&layout(), Vec3::new(0.5, 0.45, 0.9))), Some("bowl"));
+        assert_eq!(id(target(&layout(), Vec3::new(0.5, 0.45, 0.9), stood_on)), Some("bowl"));
     }
 
     /// The tabletop beside the bowl is the reference, which draws nothing and
     /// so is never what the ray hits — and a hit a hair above it still counts.
     #[test]
     fn a_hit_on_the_top_lands_on_the_reference_to_it() {
-        assert_eq!(id(target(&layout(), Vec3::new(0.1, 0.1, 0.805))), Some("table_top"));
-        assert_eq!(id(target(&layout(), Vec3::new(0.1, 0.1, 0.4))), Some("table"), "a table leg");
+        assert_eq!(id(target(&layout(), Vec3::new(0.1, 0.1, 0.805), stood_on)), Some("table_top"));
+        assert_eq!(id(target(&layout(), Vec3::new(0.1, 0.1, 0.4), stood_on)), Some("table"), "a table leg");
     }
 
     /// A reference to the whole of its parent reports the parent's box, to the
@@ -158,13 +168,16 @@ mod tests {
                 placed("table", "background", [0.0, 0.0, 0.0], [0.7, 1.0, 0.7]),
                 placed("table_top", "object_reference", [0.0, 0.0, 0.0], [0.7, 1.0, top]),
             ]);
-            assert_eq!(id(target(&layout, Vec3::new(0.3, 0.5, 0.7))), Some("table_top"), "top at {top}");
+            assert_eq!(id(target(&layout, Vec3::new(0.3, 0.5, 0.7), stood_on)), Some("table_top"), "top at {top}");
         }
     }
 
-    /// The robot's arm, out past the table, is nothing to stand on.
+    /// The robot's arm, out past the table, is nothing to stand on — but a
+    /// click lands on it.
     #[test]
     fn the_embodiment_is_never_a_target() {
-        assert_eq!(id(target(&layout(), Vec3::new(1.5, 1.5, 1.0))), None);
+        let arm = Vec3::new(1.5, 1.5, 1.0);
+        assert_eq!(id(target(&layout(), arm, stood_on)), None);
+        assert_eq!(id(target(&layout(), arm, |_| true)), Some("droid"));
     }
 }

@@ -17,6 +17,7 @@ spec, every add picked from the vocabulary.
 | [graph.rs](../src/editor/graph.rs) | the spatial graph: its layout, and a pick that opens a card |
 | [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's tiles, the objects' cards and their nodes |
 | [drop.rs](../src/editor/drop.rs) | dragging an asset onto the layout |
+| [pick.rs](../src/editor/pick.rs) | a click in the view: what it picks, and the double click that focuses the camera |
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
 **Rust never writes YAML.** [spec_edit.py](../python/arena_composer/spec_edit.py) is the only writer:
@@ -198,6 +199,25 @@ A number being dragged is previewed before it is sent. `PanelState::editing` hol
 its spec path, and `form::pending` lays it over the relation the gizmos are built from, so the
 shape follows the drag while the object stays where the last solve left it. The edit goes out once,
 when the drag ends.
+
+## Picking in the view
+
+A click on something in the 3D view picks it as a click on its node in the graph does, through the
+same `Pick`: the panel opens its card and scrolls to it, and the graph outlines its node. Hovering
+outlines what a click would pick, as hovering its node does, and a double click brings the orbit
+camera round to it, as far off as `layout::fitting_distance` would frame it. A click on the backdrop
+drops the pick, as a click on the graph's background does. All of it is [pick.rs](../src/editor/pick.rs).
+
+What a hit stands for is the drop's rule, `drop::target`: the smallest placed box that holds the hit
+point. So a click on the island's top picks `island_top`, the reference, and not the kitchen whose
+mesh the ray hit — a reference draws nothing of its own. Unlike a drop, a click can land on the robot.
+
+The click travels as a `Clicked` message, which `form::draw` takes up a frame later as it takes the
+graph's pick, since the view is read after the panel. The ray is cast as the pointer moves, not every
+frame, and never while a button is held: a drag is turning the view, not pointing at it. Whether the
+pointer is the view's at all is the camera gate's own answer, `pointer_in_the_view`
+([mod.rs](../src/editor/mod.rs)), so whatever press the camera would take, the pick takes too, and
+neither takes one on the panels or on an asset being carried.
 
 ## Adding an object
 

@@ -38,7 +38,8 @@
 //!
 //! Hovering a relation draws what it asks for over the layout, and a toggle on
 //! each keeps it drawn; see [`relations`]. The [`graph`] draws the spec's
-//! nodes and relations as a graph, and a click on one opens its card.
+//! nodes and relations as a graph, and a click on one opens its card; so does
+//! a click on the object itself in the view ([`pick`]).
 
 mod browser;
 mod card;
@@ -47,6 +48,7 @@ mod dock;
 mod drop;
 mod form;
 mod graph;
+mod pick;
 mod relations;
 mod thumbnails;
 
@@ -71,9 +73,14 @@ pub fn plugin(app: &mut App) {
         .init_resource::<PointerOverPanel>()
         .init_resource::<Placed>()
         .init_gizmo_group::<relations::RelationGizmos>()
+        .add_message::<pick::Clicked>()
         // The panel belongs in egui's own pass, not in `Update`: that is where
-        // a context exists to draw into.
-        .add_systems(EguiPrimaryContextPass, (form::draw, drop::drop_onto_the_layout).chain())
+        // a context exists to draw into. The view's pick and the drop follow
+        // it, in that order: see `pick::pick_in_the_view`.
+        .add_systems(
+            EguiPrimaryContextPass,
+            (form::draw, pick::pick_in_the_view, drop::drop_onto_the_layout).chain(),
+        )
         // Between the two, so the camera acts on the pass that just ran:
         // `ProcessOutput` is where egui publishes what this frame's panel made
         // of the pointer, and the camera set is what reads `enabled` after. In
@@ -324,16 +331,21 @@ fn keep_the_camera_off_the_panel(
 ) {
     let Some(mut camera) = camera else { return };
     let held = mouse.get_pressed().next().is_some() && mouse.get_just_pressed().next().is_none();
-    // The two halves of "egui is busy with the pointer": the panel, which only
-    // [`PointerOverPanel`] knows about, and everything drawn above it, which
-    // only egui does.
-    let busy = over_panel.0 || egui.wants_any_pointer_input();
-    let Some(takes) = camera_takes_input(held, busy) else {
+    let Some(takes) = camera_takes_input(held, !pointer_in_the_view(&over_panel, &egui)) else {
         return;
     };
     if camera.enabled != takes {
         camera.enabled = takes;
     }
+}
+
+/// Whether the pointer is the view's: not over the panel or the dock, and not
+/// taken by anything egui draws above them. The two halves of "egui is busy
+/// with the pointer": the panel, which only [`PointerOverPanel`] knows about,
+/// and everything drawn above it, which only egui does. What the camera reads
+/// before it takes a drag, and the pick before it takes a click.
+fn pointer_in_the_view(over_panel: &PointerOverPanel, egui: &EguiWantsInput) -> bool {
+    !(over_panel.0 || egui.wants_any_pointer_input())
 }
 
 /// Whether the camera takes pointer input from here on, or `None` to leave the
