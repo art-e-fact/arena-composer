@@ -208,9 +208,12 @@ outlines what a click would pick, as hovering its node does, and a double click 
 camera round to it, as far off as `layout::fitting_distance` would frame it. A click on the backdrop
 drops the pick, as a click on the graph's background does. All of it is [pick.rs](../src/editor/pick.rs).
 
-What a hit stands for is the drop's rule, `drop::target`: the smallest placed box that holds the hit
-point. So a click on the island's top picks `island_top`, the reference, and not the kitchen whose
-mesh the ray hit — a reference draws nothing of its own. Unlike a drop, a click can land on the robot.
+What a hit stands for is `pick::picked`: of the asset whose mesh the ray hit and that asset's own
+object references, the smallest box that holds the hit point, by the drop's rule (`drop::target`).
+So a click on the island's top picks `island_top`, the reference, and not the kitchen whose mesh the
+ray hit — a reference draws nothing of its own. The mesh decides first because a box alone cannot: a
+robot placed by its stand (`placement_bbox_stand_only`) reports the stand's box, and a hit on its arm
+lies in no box but the room's. Unlike a drop, a click can land on the robot.
 
 The click travels as a `Clicked` message, which `form::draw` takes up a frame later as it takes the
 graph's pick, since the view is read after the panel. The ray is cast as the pointer moves, not every

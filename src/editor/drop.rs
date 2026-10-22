@@ -83,16 +83,14 @@ pub fn drop_onto_the_layout(
 
 /// What a point on the layout, in Arena's frame, stands for: the smallest box
 /// that holds it, among the assets `keep` lets through. A click in the view
-/// reads a hit the same way ([`super::pick`]).
+/// reads a hit the same way, among the asset hit and its references
+/// ([`super::pick`]).
 ///
 /// Smallest, so a point on a counter lands on the `table_top` reference and
 /// not on the kitchen around it — a reference draws nothing of its own, so a
 /// ray can only ever hit its parent. Where the two boxes are the same, as when
 /// the reference names the whole of its parent, the reference still wins: it
 /// is the node the spec stands things on.
-// ponytail: the box rule can hand a hit on the table to the robot standing
-// over it, where the robot's box is the smaller; the hit entity's `AssetId`
-// would say which mesh was hit, if that ever misleads.
 pub fn target(placed: &Placed, point: Vec3, keep: impl Fn(&Asset) -> bool) -> Option<&Asset> {
     placed
         .0
