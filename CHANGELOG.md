@@ -80,6 +80,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   white all over.
 - An asset whose USD says it is Y-up is drawn as Isaac Sim spawns it, as authored: the factory
   `peg` and `hole` lay on their side.
+- Metal in Lightwheel's kitchens and other OmniPBR assets is drawn as metal, as Isaac Sim draws it:
+  an ORM map's metallic and roughness count by the material's own influences, and only where it
+  turns the map on. They were multiplied by its constants, usually 0 and 0.5, so stoves, sinks and
+  fridges drew as grey plastic. The map's occlusion no longer darkens the colour, which drew every
+  kitchen cabinet near-black, and a restyled kitchen's cabinets keep their colour, which its colour
+  map, read as a normal map too, turned grey.
+- The window, `arena-render` and `render_views` draw a scene about as bright as Isaac Sim draws it
+  under Arena's dome light, where an object close-up came out 1.6 times brighter.
 - `check_spec` says where a misspelt object or background param shows: it passes the check, and
   `describe_scene`, `arena-render` and the window stop on it seconds in, with
   `TypeError: object.__init__() takes exactly one argument`, which names neither the param nor the

@@ -258,8 +258,9 @@ def Xform "Asset"
 
 
 def omnipbr(tmp_path: Path, inputs: str):
-    """The material of a quad whose OmniPBR authors ``inputs``, beside an `albedo.png`."""
-    (tmp_path / "albedo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    """The material of a quad whose OmniPBR authors ``inputs``, beside `albedo.png` and `orm.png`."""
+    for name in ("albedo.png", "orm.png"):
+        (tmp_path / name).write_bytes(b"\x89PNG\r\n\x1a\n")
     usda = tmp_path / "omnipbr.usda"
     usda.write_text(OMNIPBR.format(inputs=inputs), encoding="utf-8")
     return extract(open_stage(str(usda)))[0].material
@@ -325,3 +326,53 @@ def test_a_roughness_past_one_is_clamped(tmp_path: Path) -> None:
     material = omnipbr(tmp_path, "float inputs:reflection_roughness_constant = 45.25")
 
     assert material.roughness == 1.0
+
+
+def test_an_enabled_orm_map_gives_metal_and_roughness_alone(tmp_path: Path) -> None:
+    """Lightwheel's cabinet doors enable their ORM map with both influences 1.
+
+    OmniPBR then takes metallic and roughness from the map alone. Multiplied by
+    the unauthored constants, 0 and 0.5, every metal in the kitchens drew as a
+    dielectric. The map's occlusion stays out: OmniPBR darkens by it only through
+    `ao_to_diffuse`, and the cabinets drew dark under it.
+    """
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:ORM_texture = @./orm.png@
+                bool inputs:enable_ORM_texture = 1
+                float inputs:metallic_texture_influence = 1
+                float inputs:reflection_roughness_texture_influence = 1""",
+    )
+
+    assert material.textures["metallic_roughness"] == str(tmp_path / "orm.png")
+    assert (material.metallic, material.roughness) == (1.0, 1.0)
+    assert "occlusion" not in material.textures
+
+
+def test_an_orm_map_left_off_is_not_read(tmp_path: Path) -> None:
+    """robolab's `bin_a06` authors an ORM map but never enables it: RTX draws its constants."""
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:ORM_texture = @./orm.png@
+                float inputs:reflection_roughness_constant = 0.3""",
+    )
+
+    assert "metallic_roughness" not in material.textures
+    assert "occlusion" not in material.textures
+    assert material.roughness == pytest.approx(0.3)
+
+
+def test_a_normal_map_that_is_the_colour_map_is_dropped(tmp_path: Path) -> None:
+    """Lightwheel's modern1 cabinet doors author `blue_gray_0.png` as colour and normal map.
+
+    Read as normals, a colour map tips the surface's shading and greyed the
+    cabinets; RTX draws them blue-grey, as if they had no normal map.
+    """
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:diffuse_texture = @./albedo.png@
+                asset inputs:normalmap_texture = @./albedo.png@""",
+    )
+
+    assert material.textures["base_color"] == str(tmp_path / "albedo.png")
+    assert "normal" not in material.textures

@@ -39,8 +39,18 @@ OmniPBR, and SimPBR and the vendor modules built on it, are the one dialect that
 constant colour into its texture: it draws the texture when it has one, scaled by `albedo_brightness`,
 or `diffuse_color_constant` when it has not, 0.2 unless authored, and multiplies either by
 `diffuse_tint` (`_albedo`). Its `emissive_color` counts only under `enable_emission`, off unless
-authored. Both are what RTX does with `OmniPBR.mdl`; check a new rule against an Isaac Sim render of
-the asset, not against what looks right.
+authored. Its `ORM_texture` counts only under `enable_ORM_texture` (off unless authored, but for
+SimPBR), blending each constant toward the map's channel by `metallic_texture_influence` and
+`reflection_roughness_texture_influence`; Bevy multiplies instead, which is exact where an influence
+is 1, as Lightwheel authors both (`_orm`). Its occlusion reaches the colour only through
+`ao_to_diffuse`, which almost nothing authors, so it is not drawn. All of this is what RTX does with
+`OmniPBR.mdl`; check a new rule against an Isaac Sim render of the asset, not against what looks
+right. A vendor module wrapping OmniPBR sets its own defaults in its `.mdl`, which nothing here
+reads: the inputs the USD authors are all there is.
+
+Lightwheel's restyled kitchens write a colour map into the ORM and normal-map inputs as well. The
+ORM one RTX reads as it is, so the composer does too. The normal map is dropped where it is the
+colour map's own file: read as normals, it tipped the cabinets' shading grey.
 
 **Add a name to a slot's list only once an asset proves the mapping** — a texture named for its own
 channel layout, or a filename suffix that says what it is. Guessing costs more than it saves: handing a

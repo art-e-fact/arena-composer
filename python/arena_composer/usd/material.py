@@ -35,9 +35,10 @@ _METALLIC = ("metallic", "metallic_constant")
 _ROUGHNESS = ("roughness", "reflection_roughness_constant")
 _EMISSIVE = ("emissiveColor",)
 
-# OmniPBR's albedo inputs, which SimPBR and the vendor modules built on OmniPBR
-# keep, and which it combines differently from every other dialect: see `_albedo`.
-_OMNIPBR_ALBEDO = ("diffuse_color_constant", "diffuse_texture", "diffuse_tint")
+# OmniPBR's own inputs, which SimPBR and the vendor modules built on OmniPBR
+# keep, and which it reads differently from every other dialect: see `_albedo`
+# and `_orm`.
+_OMNIPBR_INPUTS = ("diffuse_color_constant", "diffuse_texture", "diffuse_tint", "ORM_texture")
 _OMNIPBR_MODULES = ("OmniPBR", "SimPBR")
 
 _BASE_COLOR_TEX = (
@@ -47,7 +48,8 @@ _BASE_COLOR_TEX = (
 _NORMAL_TEX = ("normal", "normalmap_texture", "normal_map_texture", "MainNormalInput", "Normal")
 # Maps packing occlusion, roughness and metallic into one image, in glTF's
 # channel order: R occlusion, G roughness, B metallic. Bevy reads both
-# `metallic_roughness` and `occlusion` that way, so one file feeds both slots.
+# `metallic_roughness` and `occlusion` that way, so one file feeds both slots,
+# except where OmniPBR's rules for its `ORM_texture` say otherwise (`_orm`).
 # The names are self-describing in the assets that use them —
 # `AO_R_Rough_G_Metallic_B_` resolves to `*_ao_r_m.png`, `MergeMapInput` to `*_ORM.png`.
 _ORM_TEX = ("ORM_texture", "MergeMapInput", "AO_R_Rough_G_Metallic_B_")
@@ -109,8 +111,16 @@ def read_material(prim: Any, fallback: Any = None) -> Material:
     ):
         if (path := _texture(shader, names)) is not None:
             material.textures[slot] = path
+    # Lightwheel's restyled kitchens write their colour map into the normal-map
+    # input too. Read as a normal map it tips every normal off the surface, and
+    # greyed their cabinets; RTX draws them as if they had none.
+    if material.textures.get("normal") == material.textures.get("base_color"):
+        material.textures.pop("normal", None)
 
-    _albedo(shader, material)
+    omnipbr =any(shader.GetInput(name) for name in _OMNIPBR_INPUTS) or _mdl_module(shader).startswith(
+        _OMNIPBR_MODULES
+    )
+    _albedo(shader, material, omnipbr)
     # Fractions, clamped: agibot's A2D authors a roughness of 45.25, which RTX
     # clamps and Bevy would take at its word.
     if (opacity := _scalar(_constant(shader, _OPACITY))) is not None:
@@ -121,14 +131,15 @@ def read_material(prim: Any, fallback: Any = None) -> Material:
         material.roughness = _unit(roughness)
     if (color := _constant(shader, emissive)) is not None:
         material.emissive = _rgb(color)
+    if omnipbr:
+        _orm(shader, material)
     return material
 
 
-def _albedo(shader: UsdShade.Shader, material: Material) -> None:
+def _albedo(shader: UsdShade.Shader, material: Material, omnipbr: bool) -> None:
     """Set the base colour the way the shader's dialect combines a constant with a texture."""
     textured = "base_color" in material.textures
-    omnipbr = any(shader.GetInput(name) for name in _OMNIPBR_ALBEDO)
-    if omnipbr or _mdl_module(shader).startswith(_OMNIPBR_MODULES):
+    if omnipbr:
         # OmniPBR takes the texture when it has one, scaled by `albedo_brightness`,
         # and `diffuse_color_constant` (0.2 unless authored) when it has not, then
         # multiplies by `diffuse_tint`. The constant never tints the texture.
@@ -152,6 +163,32 @@ def _albedo(shader: UsdShade.Shader, material: Material) -> None:
         # A texture with no constant beside it is the colour itself, as
         # UsdPreviewSurface's `diffuseColor` connected to one is.
         material.base_color = (1.0, 1.0, 1.0)
+
+
+def _orm(shader: UsdShade.Shader, material: Material) -> None:
+    """OmniPBR's metallic, roughness and occlusion: what its ORM map is let do.
+
+    It blends each constant toward the map's channel by an influence,
+    `lerp(constant, map, influence)`, and only under `enable_ORM_texture`, which
+    is off unless authored in all but SimPBR. Bevy can only multiply the map by a
+    factor, which is exact where the influence is 1 or the constant 0: Lightwheel's
+    kitchens author both influences 1 on all but a few hundred of their 11k maps.
+    Multiplying by the constants instead took every metal in them for a dielectric.
+    """
+    enabled = _constant(shader, ("enable_ORM_texture",))
+    if enabled is None:
+        enabled = _mdl_module(shader).startswith("SimPBR")
+    metal = _scalar(_constant(shader, ("metallic_texture_influence",))) or 0.0
+    rough = _scalar(_constant(shader, ("reflection_roughness_texture_influence",))) or 0.0
+    if enabled and (metal or rough) and "metallic_roughness" in material.textures:
+        material.metallic = metal + material.metallic * (1 - metal)
+        material.roughness = rough + material.roughness * (1 - rough)
+    else:
+        material.textures.pop("metallic_roughness", None)
+    # Occlusion darkens OmniPBR's colour only by `ao_to_diffuse`, 0 unless authored;
+    # 2 of the library's 18k OmniPBR shaders do. It made every kitchen cabinet dark.
+    if not _scalar(_constant(shader, ("ao_to_diffuse",))):
+        material.textures.pop("occlusion", None)
 
 
 def _mdl_module(shader: UsdShade.Shader) -> str:

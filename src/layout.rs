@@ -85,6 +85,12 @@ pub fn view_layers(i: usize) -> RenderLayers {
     RenderLayers::from_layers(&[0, i + 1])
 }
 
+/// Both lights are scaled to draw a scene as bright as Isaac Sim's RTX draws it
+/// under Arena's dome light, measured on object close-ups from matched cameras:
+/// unscaled, the composer drew them 1.6 times brighter. The scale is below 1/1.6
+/// because the tonemapper compresses what it takes away from the highlights.
+const MATCH_ISAAC: f32 = 0.44;
+
 /// Stand in for the dome light Arena injects at build time when neither the
 /// spec nor the background USD supplies one, for a light the spec lists as an
 /// object, and for the lights a background's USD carries: none of them is
@@ -95,7 +101,7 @@ pub fn spawn_lighting(world: &mut World, scene: &Scene) {
     if scene.lighting.auto_injected_dome_light {
         world.spawn((
             DirectionalLight {
-                illuminance: 6_000.0,
+                illuminance: 6_000.0 * MATCH_ISAAC,
                 ..default()
             },
             Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.6), Vec3::Y),
@@ -108,7 +114,7 @@ pub fn spawn_lighting(world: &mut World, scene: &Scene) {
 /// wants it has to carry its own.
 pub fn ambient() -> AmbientLight {
     AmbientLight {
-        brightness: 400.0,
+        brightness: 400.0 * MATCH_ISAAC,
         ..default()
     }
 }
