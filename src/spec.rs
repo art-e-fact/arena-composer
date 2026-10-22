@@ -284,7 +284,7 @@ pub enum Request {
 ///
 /// Hashable, so a whole path can name the widget that edits it: every leaf is
 /// drawn once, and its path is what a half-made edit is kept against.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Step {
     Key(String),
@@ -301,6 +301,22 @@ impl From<usize> for Step {
     fn from(index: usize) -> Self {
         Step::Index(index)
     }
+}
+
+/// Something wrong with one entry of the spec, for the card that draws it.
+///
+/// Python finds the entry by the path or id the line starts with
+/// (`arena_composer.payload._attributed`), so nothing here reads the text.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Problem {
+    /// Where the entry is, as its card is keyed: `["relations", 2]`.
+    pub path: Vec<Step>,
+    /// The line itself, as `check_spec` gives it to an agent.
+    pub line: String,
+    /// A solve's warning: Arena builds it, and the sim will not do what was
+    /// meant. Otherwise the build would refuse it.
+    pub warning: bool,
 }
 
 /// `null` where a list is expected.
@@ -435,6 +451,22 @@ mod tests {
         let named = Node { registry_name: "banana_ycb_robolab".into(), ..Default::default() };
         assert!(banana.is_named_by(&named));
         assert!(!banana.is_named_by(&node));
+    }
+
+    /// A problem's path decodes to the one its card is keyed by: a key, then
+    /// an index.
+    #[test]
+    fn a_problem_names_its_entry_as_its_card_is_keyed() {
+        let packed = rmp_serde::to_vec_named(&serde_json::json!({
+            "path": ["task", "subtasks", 1],
+            "line": "task.subtasks.1.params.bogus: PickAndPlaceTask takes no 'bogus'",
+            "warning": false,
+        }))
+        .unwrap();
+
+        let problem: Problem = rmp_serde::from_slice(&packed).unwrap();
+        assert_eq!(problem.path, [Step::from("task"), Step::from("subtasks"), Step::from(1usize)]);
+        assert!(!problem.warning);
     }
 
     /// The dropdowns offer exactly the ids Arena will accept, in the order the

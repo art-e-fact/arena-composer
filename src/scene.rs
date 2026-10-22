@@ -21,7 +21,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 
-use crate::spec::{CatalogAsset, Spec, Vocabulary};
+use crate::spec::{CatalogAsset, Problem, Spec, Vocabulary};
 
 /// Lays Arena's Z-up world down onto Bevy's Y-up one.
 pub fn arena_to_bevy() -> Quat {
@@ -79,6 +79,11 @@ pub struct Scene {
     /// say the view it is over has yet to catch up. Absent, for the same
     /// reason as `errors`, from a message that knows nothing of the solve.
     pub solving: Option<bool>,
+    /// What is wrong with `spec`, a line per problem at the entry it is about,
+    /// for the panel to mark that entry's card. Where `errors` are events, these
+    /// are the spec as it stands, so each message's replace the last. Absent
+    /// where the file no longer reads, and `spec` is the one it last read to.
+    pub problems: Option<Vec<Problem>>,
 }
 
 impl Scene {

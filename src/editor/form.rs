@@ -14,7 +14,7 @@ use bevy_egui::{EguiContexts, egui};
 use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::browser;
-use super::card::{Card, Icon, Role, cross};
+use super::card::{Card, FAILED, Icon, Role, cross};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
 use super::dock::{self, Dock};
 use super::graph::{Item, Pick};
@@ -224,9 +224,9 @@ pub fn draw(
     Ok(())
 }
 
-/// What a layout that passes is said in, and one that fails, as an error is.
+/// What a layout that passes is said in. One that fails is said as an error
+/// is, in [`FAILED`].
 const PASSED: egui::Color32 = egui::Color32::from_rgb(130, 200, 140);
-const FAILED: egui::Color32 = egui::Color32::from_rgb(240, 130, 115);
 
 /// The head of the panel, over the spec: which of the layouts the last solve
 /// drew the view shows, what the checks made of it, and the button that solves
@@ -403,6 +403,7 @@ fn embodiment(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let path = [Step::from("embodiment")];
     section(ui, "embodiment", None, form.owner("embodiment"), state.revealing(&path), |ui| {
         let card = Card::new(&path, Icon::Node(Role::Embodiment)).summary(&node.registry_name).folded();
+        let card = card.problems(form.problems_at(&path));
         card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
             ui,
             state,
@@ -428,6 +429,7 @@ fn background(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let path = [Step::from("background")];
     section(ui, "background", None, form.owner("background"), state.revealing(&path), |ui| {
         let card = Card::new(&path, Icon::Node(Role::Background)).summary(&node.registry_name).folded();
+        let card = card.problems(form.problems_at(&path));
         card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
             ui,
             state,
@@ -471,7 +473,7 @@ fn objects(ui: &mut egui::Ui, form: &Form, state: &mut PanelState, pictures: &mu
             let icon = asset
                 .and_then(|asset| pictures(&asset.thumbnail))
                 .map_or(Icon::Node(Role::Object), |picture| Icon::Picture(Role::Object, picture));
-            let card = Card::new(&path, icon).summary(name).folded().removable();
+            let card = Card::new(&path, icon).summary(name).folded().removable().problems(form.problems_at(&path));
             let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
@@ -507,6 +509,7 @@ fn object_sets(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
             let path = vec![Step::from("object_sets"), Step::from(index)];
             let members = entry.members.join(", ");
             let card = Card::new(&path, Icon::Node(Role::ObjectSet)).summary(&members).removable();
+            let card = card.problems(form.problems_at(&path));
             let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
@@ -543,6 +546,7 @@ fn object_references(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
         for (index, entry) in references.iter().enumerate() {
             let path = vec![Step::from("object_references"), Step::from(index)];
             let card = Card::new(&path, Icon::Node(Role::ObjectReference)).summary(&entry.parent_id).removable();
+            let card = card.problems(form.problems_at(&path));
             let card = card.picked(state.picked(&path)).reveal(state.revealing(&path)).show(
                 ui,
                 state,
@@ -597,7 +601,7 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
             let mut pinned = state.pinned.contains(&index);
             let (picked, revealing) = (state.picked(&path), state.revealing(&path));
             let card = Card::new(&path, Icon::Glyph("🔗")).summary(summary).pin(&mut pinned).removable();
-            let card = card.picked(picked).reveal(revealing).show(
+            let card = card.problems(form.problems_at(&path)).picked(picked).reveal(revealing).show(
                 ui,
                 state,
                 |ui, _| {
@@ -683,7 +687,7 @@ fn task(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
     let subtasks = with(&path, "subtasks");
     let ids = form.spec.node_ids();
     section(ui, "task", None, form.owner("task"), state.revealing(&path), |ui| {
-        Card::new(&path, Icon::Glyph("🎯")).summary(&task.composition).show(
+        Card::new(&path, Icon::Glyph("🎯")).summary(&task.composition).problems(form.problems_at(&path)).show(
             ui,
             state,
             |ui, state| {
@@ -702,7 +706,8 @@ fn task(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) {
                     let path = with(&subtasks, index);
                     let kind = form.vocabulary.task(&subtask.kind);
                     let summary = nodes_named(kind, &subtask.params);
-                    let card = Card::new(&path, Icon::Glyph("✔")).summary(summary).removable().show(
+                    let card = Card::new(&path, Icon::Glyph("✔")).summary(summary).removable();
+                    let card = card.problems(form.problems_at(&path)).show(
                         ui,
                         state,
                         |ui, _| {
@@ -861,7 +866,7 @@ fn section(
 mod tests {
     use super::*;
     use crate::editor::graph::Pick;
-    use crate::spec::{Field, Params};
+    use crate::spec::{Field, Params, Problem};
     use std::collections::HashMap;
 
     /// Every kind in the menu writes an entry Arena can build the relation
@@ -1074,20 +1079,65 @@ mod tests {
             };
             let mut turned = None;
             let output = self.ctx.run_ui(input, |ui| turned = header(ui, form));
-            let texts = output
-                .shapes
-                .iter()
-                .filter_map(|clipped| match &clipped.shape {
-                    egui::Shape::Text(text) => {
-                        let at = egui::Rect::from_min_size(text.pos, text.galley.size()).center();
-                        Some((text.galley.text().to_owned(), at))
-                    }
-                    _ => None,
-                })
-                .collect();
+            let texts = texts_at(&output).into_iter().collect();
             output.drop_without_applying_deltas();
             (turned, texts)
         }
+    }
+
+    /// Every text drawn, and the centre of where it was drawn.
+    fn texts_at(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    let at = egui::Rect::from_min_size(text.pos, text.galley.size()).center();
+                    Some((text.galley.text().to_owned(), at))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A card whose entry is wrong carries a ⚠ in its own header, and says
+    /// what on hover; a card whose entry is right carries none.
+    #[test]
+    fn a_card_marks_what_is_wrong_with_its_entry() {
+        let relation = |kind: &str| Relation { kind: kind.into(), subject: "bowl".into(), ..Default::default() };
+        let line = "relations.1.params.foo: next_to takes no 'foo'";
+        let mut form = Form::default();
+        form.spec.relations = vec![relation("on"), relation("next_to")];
+        form.problems = vec![Problem { path: vec!["relations".into(), 1usize.into()], line: line.into(), warning: false }];
+        let ctx = egui::Context::default();
+        let mut state = PanelState::default();
+        let mut frame = |time: f64, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 800.0))),
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                panel(ui, &form, &mut state, &mut |_| None);
+            });
+            let texts = texts_at(&output);
+            output.drop_without_applying_deltas();
+            texts
+        };
+
+        let texts = frame(1.0, vec![]);
+        let marks: Vec<egui::Pos2> = texts.iter().filter(|(text, _)| text == "⚠").map(|(_, at)| *at).collect();
+        let row = |kind: &str| texts.iter().find(|(text, _)| text == kind).map(|(_, at)| at.y);
+        assert_eq!(marks.len(), 1, "{texts:?}");
+        assert!((marks[0].y - row("next_to").unwrap()).abs() < 4.0, "on another card: {texts:?}");
+
+        // Hovered, then held still past egui's tooltip delay; a tooltip is
+        // laid out unseen on its first frame, and drawn from the next.
+        frame(2.0, vec![egui::Event::PointerMoved(marks[0])]);
+        frame(3.0, vec![]);
+        let texts = frame(4.0, vec![]);
+        assert!(texts.iter().any(|(text, _)| text == line), "nothing said on hover: {texts:?}");
     }
 
     fn click(at: egui::Pos2) -> Vec<egui::Event> {

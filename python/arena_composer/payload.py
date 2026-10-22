@@ -26,11 +26,16 @@ The SimReady props travel apart for the opposite reason. They are a megabyte of
 table that changes only when the index is rebuilt or a thumbnail lands, so
 `remote` rides the message that changed it and no other; the panel keeps the
 last list it was sent.
+
+What is wrong with the spec rides with it, a line per problem at the entry it
+is about, for the panel to mark that entry's card — see :func:`_problems`.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import sys
 from dataclasses import asdict
 from functools import cache
 from pathlib import Path
@@ -54,6 +59,18 @@ _STAND_IN = Material(base_color=(0.3, 0.55, 0.9))
 # opens on the first layout's and takes every spec that reads after that. What a
 # message about a file that no longer reads carries instead — see `encode_spec`.
 _last_read: dict[Path, tuple[dict[str, Any], dict[str, str]]] = {}
+
+# The spec each file's last solve read, and what that solve warned of: sent on
+# while the file still reads to that spec — see `_problems`.
+_last_solved: dict[Path, tuple[dict[str, Any], list[str]]] = {}
+
+#: How a problem line names the entry it is about: by its path, first in the
+#: line or after the file `SpecFiles.explain` names, as docs/errors.md has every
+#: check write it.
+_ENTRY = re.compile(
+    r"(task\.subtasks\.\d+|task|embodiment|background|(?:objects|object_sets|object_references|relations)\.\d+)"
+    r"(?=[.:]|$)"
+)
 
 
 def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
@@ -120,10 +137,17 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
 
     spec, owners = dump.get("spec") or {}, _owners(dump.get("spec_path"))
     lighting = dump.get("lighting", {})
+    problems = None
     if dump.get("spec_path"):
+        key = Path(dump["spec_path"]).resolve()
         # The first layout only: a later one's spec was read when its solve
         # began, and the panel may be edits past it by the time it lands.
-        _last_read.setdefault(Path(dump["spec_path"]).resolve(), (spec, owners))
+        _last_read.setdefault(key, (spec, owners))
+        _last_solved[key] = spec, list(dump.get("warnings", []))
+        # What the panel opens with; it takes a later layout's from the spec
+        # sent behind it. The file can have moved on since the solve read it,
+        # and a change it has not solved is solved again at once.
+        problems = _problems(key, spec)
     placement = dump.get("placement", {})
     # A dump of one sample carries it as `assets` alone, its verdict in the summary.
     solved = dump.get("layouts") or [{**placement, "assets": dump["assets"]}]
@@ -159,7 +183,61 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
         # A layout that resolved is the answer to whatever was asked of it, so
         # this clears whatever the last refusal put in front of the form.
         "errors": [],
+        "problems": problems,
     }
+
+
+def _problems(spec_path: Path, spec: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """What is wrong with `spec`, the one `spec_path` reads to, at the entries
+    the panel's cards draw: what `spec_edit.check` finds in the file, and what
+    the last solve warned of, while the file still reads to the spec that solve
+    read. A warning names its entry by position, which an edit since may have
+    handed to another, so it waits for the solve of the spec it is about.
+
+    A nicety: one that cannot be found is left out of the message rather than
+    taking it down, since that message may be an edit's answer.
+    """
+    from arena_composer import spec_edit
+
+    try:
+        solved, warnings = _last_solved.get(spec_path, (None, []))
+        return _attributed(spec, spec_edit.check(spec_path).errors, warnings if solved == spec else [])
+    except Exception as error:
+        print(f"arena-composer: problems skipped: {type(error).__name__}: {error}", file=sys.stderr)
+        return None
+
+
+def _attributed(spec: dict[str, Any], errors: list[str], warnings: list[str]) -> list[dict[str, Any]]:
+    """`errors` and `warnings`, lines about `spec`, each at the path of the
+    entry it is about: the path its card in the panel is keyed by,
+    ``["relations", 2]``.
+
+    A line names its entry by path, ``relations.2.params.side: ...``, or by
+    id, ``bowl: ...``, as the solve's warnings do. One that names neither, or
+    names a key with no card, such as ``placer_params``, is left out: the panel
+    has nowhere to put it.
+    """
+    ids = {node["id"]: [key] for key in ("embodiment", "background") if isinstance(node := spec.get(key), dict)}
+    for key in ("objects", "object_sets", "object_references"):
+        ids.update((entry["id"], [key, index]) for index, entry in enumerate(spec.get(key) or []))
+    found = []
+    for warning, lines in ((False, errors), (True, warnings)):
+        for line in lines:
+            # The second, after the file a line names first where the spec is two.
+            for head in line.split(": ")[:2]:
+                # A file is no entry, however it is named: `task.yaml` reads as
+                # the task's path, and `.yaml` as a key under it.
+                if "/" in head or head.endswith((".yaml", ".yml")):
+                    continue
+                if match := _ENTRY.match(head):
+                    path = [int(step) if step.isdigit() else step for step in match[1].split(".")]
+                elif head in ids:
+                    path = ids[head]
+                else:
+                    continue
+                found.append({"path": path, "line": line, "warning": warning})
+                break
+    return found
 
 
 def _owners(spec_path: str | None) -> dict[str, str]:
@@ -303,15 +381,22 @@ def encode_spec(
     panel holds, so the reason reaches the panel and the form stays as it is.
     A message with nothing to say raises, as it always has: the next one to
     read says it.
+
+    `problems` are what is wrong with the spec sent, at the entries the panel's
+    cards draw (:func:`_problems`). Left out with a spec the file no longer
+    reads to: the panel keeps the ones it has, which are that spec's.
     """
     from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 
     key = Path(spec_path).resolve()
+    problems = None
     try:
         _last_read[key] = ArenaEnvGraphSpec.from_yaml(spec_path).model_dump(mode="json"), _owners(str(spec_path))
     except Exception:
         if not errors or key not in _last_read:
             raise
+    else:
+        problems = _problems(key, _last_read[key][0])
     spec, owners = _last_read[key]
 
     return msgpack.packb(
@@ -323,6 +408,7 @@ def encode_spec(
             "indexing": indexing,
             "errors": None if errors is None else list(errors),
             "solving": solving,
+            "problems": problems,
         },
         use_bin_type=True,
     )

@@ -49,6 +49,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   would. The seed is shown beside it, to pass back as `--seed`.
 - `arena-resolve-layout --samples N` lists every sample's layout under `layouts`, each with its
   verdict and failed checks, where it counted them.
+- `arena-view`'s panel marks the card of an entry that is wrong with a ⚠, and hovering it says
+  what, in `check_spec`'s words: in red what the build would refuse, such as a param a relation
+  does not take, and in amber what the solve warns of, such as an object nothing places. A spec
+  edited by hand is checked as an edit from the panel is. The panel heard of one only where the
+  solve failed, in a toast naming no entry, and not at all where the solve passed, as it does for
+  a task param naming a node of the wrong class.
 
 ### Changed
 
