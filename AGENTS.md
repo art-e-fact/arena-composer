@@ -61,7 +61,7 @@ how a scene is drawn redraws its picture of the showcase: `python showcase/colla
 | [wire.rs](src/wire.rs) | length-prefixed framing on the pipe, both directions |
 | [layout.rs](src/layout.rs) | putting a layout in a world and framing it; shared by the window and the renderer |
 | [spawn.rs](src/spawn.rs) | payload geometry → meshes and materials |
-| [viewer.rs](src/viewer.rs) | the windowed app: applies incoming messages, draws the status line (`hud_line`) |
+| [viewer.rs](src/viewer.rs) | the windowed app: applies incoming messages, draws the page the panel's header is on (`turn_page`) and the status line (`hud_line`) |
 | [editor/](src/editor/) | the panel: a card per spec entry, the dock with the asset browser and the spatial graph, drag-and-drop, relation gizmos |
 | [render.rs](src/render.rs) | headless renders, a PNG per view |
 | [tour.rs](src/tour.rs), [record.rs](src/record.rs) | the README's video: a storyboard played with a pointer of its own, and recorded |

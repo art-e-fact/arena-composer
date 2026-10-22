@@ -99,8 +99,9 @@ flowchart TB
     - edits a task and the scene it includes as one spec
 - **The visual editor follows the file.** Every change is re-solved and redrawn, whoever made it.
   One that does not solve leaves the last layout up and says why.
-- **Arena places things.** The layout comes from Arena's own placement solver: one of the layouts
-  Arena draws at runtime, held still by a seed.
+- **Arena places things.** The layout comes from Arena's own placement solver: five of the
+  layouts Arena draws at runtime, one per env, to page through, held still by a seed until you
+  ask for new ones.
 - **Isaac Sim never loads.** A lightweight Rust renderer, [Bevy](https://bevy.org), draws the layout,
   and renders need no display.
 - **The vocabulary is Arena's.** Assets, relations and tasks come from Arena's registries, plus

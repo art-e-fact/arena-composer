@@ -15,7 +15,7 @@ Two conventions worth matching in a viewer:
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
   ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first
-  is the one described.
+  is the one described, and ``layouts`` holds every one of them.
 """
 
 from __future__ import annotations
@@ -64,8 +64,10 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: in
     """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
 
     `samples` layouts are solved in one batch, an env each; the first is the
-    one described, and the placement summary counts how many passed. `seed`
-    wins over the spec's ``placer_params.placement_seed``, as Arena's
+    one described, and the placement summary counts how many passed. Where
+    there is more than one, ``layouts`` holds each with its verdict, drawn as
+    its own env draws it: an object set's member is that env's. `seed` wins
+    over the spec's ``placer_params.placement_seed``, as Arena's
     ``--placement_seed`` does, and with neither the seed is ``DEFAULT_SEED``.
 
     Raises :class:`SpecError` for an object whose ``params.usd_path`` cannot be
@@ -95,10 +97,15 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: in
         obstacles = get_placement_collision_objects(placeable, assets.values(), params.solver_params.collision_mode)
         check_reference_boxes(spec, assets, obstacles)
         layouts = ObjectPlacer(params).place(placeable, num_envs=samples, collision_objects=obstacles)
-    layout = layouts[0] if layouts else None
-    entries = [_asset_entry(node_id, assets[node_id], meta, layout) for node_id, meta in _node_meta(spec).items()]
+    nodes = _node_meta(spec)
+    # With nothing to place, every sample is the configured poses: one layout.
+    drawn = [
+        [_asset_entry(node_id, assets[node_id], meta, layout, env) for node_id, meta in nodes.items()]
+        for env, layout in enumerate(layouts or [None])
+    ]
+    entries = drawn[0]
 
-    return {
+    dump = {
         "env_name": spec.env_name,
         "placement": _placement_summary(layouts, seed, samples, {relation.kind for relation in spec.relations}),
         "assets": entries,
@@ -112,6 +119,17 @@ def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: in
         "lighting": _lighting(spec, assets),
         "viewer": _viewer(assets[spec.background.id]),
     }
+    if len(drawn) > 1:
+        # Each sample beside the first that `assets` describes, for a viewer to page through.
+        dump["layouts"] = [
+            {
+                "success": layout.success,
+                "failed_checks": layout.validation_results.get_failed_validation_check_names,
+                "assets": sample,
+            }
+            for layout, sample in zip(layouts, drawn)
+        ]
+    return dump
 
 
 def check_usd_params(objects: Iterable[Any]) -> None:
@@ -320,10 +338,14 @@ def _node_meta(spec: ArenaEnvGraphSpec) -> dict[str, dict[str, Any]]:
     return meta
 
 
-def _asset_entry(node_id: str, asset: Any, meta: dict[str, Any], layout: PlacementResult | None) -> dict[str, Any]:
-    """Describe one asset: identity, geometry source, transform, and local and world bounds."""
+def _asset_entry(
+    node_id: str, asset: Any, meta: dict[str, Any], layout: PlacementResult | None, env: int = 0
+) -> dict[str, Any]:
+    """Describe one asset: identity, geometry source, transform, and local and world bounds.
+
+    `layout` is env `env`'s, which is the env whose member an object set draws."""
     pose = _pose(asset, layout)
-    bbox = _bounding_box(asset)
+    bbox = _bounding_box(asset, env)
     # Turned as the solver turns a box, by the whole rotation; an empty box's corners would turn to NaN.
     world = bbox if bbox.is_empty.any() else bbox.rotated_by_quat(pose.rotation_xyzw)
     world = world.translated(pose.position_xyz)
@@ -333,7 +355,7 @@ def _asset_entry(node_id: str, asset: Any, meta: dict[str, Any], layout: Placeme
         "name": asset.name,
         "prim_path": getattr(asset, "prim_path", None),
         "object_type": _enum_value(getattr(asset, "object_type", None)),
-        **_geometry(asset),
+        **_geometry(asset, env),
         "is_anchor": bool(getattr(asset, "is_anchor", False)),
         "solved": layout is not None and asset in layout.positions,
         "position_xyz": list(pose.position_xyz),
@@ -346,8 +368,8 @@ def _asset_entry(node_id: str, asset: Any, meta: dict[str, Any], layout: Placeme
     }
 
 
-def _geometry(asset: Any) -> dict[str, Any]:
-    """Return the USD the asset spawns from, plus what is needed to draw it."""
+def _geometry(asset: Any, env: int = 0) -> dict[str, Any]:
+    """Return the USD the asset spawns from in env `env`, plus what is needed to draw it."""
     if isinstance(asset, EmbodimentBase):
         # The robot USD is composed (arm + stand) at construction; joints must be posed to match.
         source = asset.get_placement_geometry_source()
@@ -366,8 +388,8 @@ def _geometry(asset: Any) -> dict[str, Any]:
             "prim_path_in_parent_usd": asset.prim_path_in_parent_usd,
         }
     if isinstance(asset, RigidObjectSet):
-        # One member per env, at its own scale; env 0's is what a single-env viewer shows.
-        member = asset.objects[asset.variant_indices_by_env[0] if asset.variant_indices_by_env else 0]
+        # One member per env, at its own scale.
+        member = asset.objects[asset.variant_indices_by_env[env] if asset.variant_indices_by_env else 0]
         return {
             **_usd_paths(member.usd_path or None),
             "scale": list(member.scale),
@@ -385,13 +407,14 @@ def _geometry(asset: Any) -> dict[str, Any]:
     return {**_usd_paths(asset.usd_path or None), "scale": list(asset.scale)}
 
 
-def _bounding_box(asset: Any) -> Any:
-    """Local bounds, using the variant this env actually spawns for an object set."""
+def _bounding_box(asset: Any, env: int = 0) -> Any:
+    """Local bounds, using the variant env `env` actually spawns for an object set."""
     if isinstance(asset, RigidObjectSet) and asset.variant_indices_by_env:
-        # Env 0's variant, the one the described layout was solved with. Asked
-        # for every env assigned, since Arena asserts the count matches.
+        # The variant env `env`'s layout was solved with. Asked for every env
+        # assigned, since Arena asserts the count matches.
         per_env = asset.get_bounding_box_per_env(num_envs=len(asset.variant_indices_by_env))
-        return AxisAlignedBoundingBox(min_point=per_env.min_point[:1], max_point=per_env.max_point[:1])
+        rows = slice(env, env + 1)
+        return AxisAlignedBoundingBox(min_point=per_env.min_point[rows], max_point=per_env.max_point[rows])
     if _unplaceable(asset):
         # A light or a ground plane (check_placeable): an empty box, drawn as nothing.
         return AxisAlignedBoundingBox(min_point=(0.0, 0.0, 0.0), max_point=(0.0, 0.0, 0.0))

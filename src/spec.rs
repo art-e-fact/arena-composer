@@ -260,10 +260,11 @@ pub struct Field {
 /// rejected edit comes back as `errors` on the next scene with the spec
 /// untouched.
 ///
-/// The last asks for assets instead, and is answered by a message carrying
-/// [`Scene::remote`](crate::scene::Scene::remote). It is network, not a write,
-/// so `arena_composer.view` serves it beside the edits rather than in front of
-/// them.
+/// The last two write nothing. `Reindex` asks for assets, and is
+/// answered by a message carrying [`Scene::remote`](crate::scene::Scene::remote).
+/// It is network, not a write, so `arena_composer.view` serves it beside the
+/// edits rather than in front of them. `Regenerate` asks for a solve, and is
+/// answered as an edit is: at once with `solving`, then with the layouts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Request {
@@ -274,6 +275,9 @@ pub enum Request {
     /// from, then fetch every prop's picture. Minutes of network; no prop
     /// itself is downloaded.
     Reindex,
+    /// Solve the spec again from a new seed, and keep that seed for every
+    /// solve after, as `--seed` would.
+    Regenerate,
 }
 
 /// One step into the merged spec: `["relations", 2, "params", "side"]`.

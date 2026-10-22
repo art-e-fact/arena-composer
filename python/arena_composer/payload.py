@@ -59,12 +59,19 @@ _last_read: dict[Path, tuple[dict[str, Any], dict[str, str]]] = {}
 def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
     """Turn a resolved-layout dump into the structure the viewer decodes.
 
+    `layouts` is every layout the solve drew, one per sample, each with its
+    verdict, for the panel to page through; `assets` is the first, which is
+    all a render draws. The layouts share one geometry table, so a sample costs
+    a pose per asset — and a geometry only for an object set's member that no
+    other layout drew.
+
     `remote` carries the SimReady props along. On by default, because a payload
     written to a file is opened on its own by ``arena-viewer`` and has nothing
     else to fill the browser from; a viewer being fed already has the list.
     """
     geometries: list[list[dict[str, Any]]] = []
     by_usd: dict[tuple[str, str], int] = {}
+    boxes: dict[tuple[str, str], int] = {}
 
     def geometry_index(asset: dict[str, Any]) -> int | None:
         """Extract the asset's USD once, however many assets share it at one pose.
@@ -80,12 +87,17 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             # would still pull the camera's framing to where it sits.
             return None
         if not path:
-            # The box it was placed by. It already carries the asset's scale, and
+            # The box it was placed by, once however many layouts stand it
+            # somewhere: the viewer moves a piece the next layout shares rather
+            # than building it again. It already carries the asset's scale, and
             # the viewer applies that again.
             scale = asset.get("scale", [1.0, 1.0, 1.0])
-            surface = box(np.divide(asset["bbox_min"], scale), np.divide(asset["bbox_max"], scale))
-            geometries.append([_encode_node(Node(asset["id"], surface, _STAND_IN))])
-            return len(geometries) - 1
+            key = asset["id"], json.dumps([asset["bbox_min"], asset["bbox_max"], scale])
+            if key not in boxes:
+                boxes[key] = len(geometries)
+                surface = box(np.divide(asset["bbox_min"], scale), np.divide(asset["bbox_max"], scale))
+                geometries.append([_encode_node(Node(asset["id"], surface, _STAND_IN))])
+            return boxes[key]
         joint_pos = asset.get("joint_pos")
         key = path, json.dumps(joint_pos, sort_keys=True)
         if key not in by_usd:
@@ -93,28 +105,42 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             geometries.append([_encode_node(node) for node in extract(open_stage(path), joint_pos)])
         return by_usd[key]
 
+    def placed(asset: dict[str, Any]) -> dict[str, Any]:
+        """One asset where a layout puts it, and what it draws there."""
+        return {
+            "id": asset["id"],
+            "role": asset.get("role", ""),
+            "scale": _floats(asset.get("scale", [1.0, 1.0, 1.0])),
+            "position_xyz": _floats(asset["position_xyz"]),
+            "rotation_xyzw": _floats(asset["rotation_xyzw"]),
+            "bbox_min": _floats(asset["bbox_min"]),
+            "bbox_max": _floats(asset["bbox_max"]),
+            "geometry": geometry_index(asset),
+        }
+
     spec, owners = dump.get("spec") or {}, _owners(dump.get("spec_path"))
     lighting = dump.get("lighting", {})
     if dump.get("spec_path"):
         # The first layout only: a later one's spec was read when its solve
         # began, and the panel may be edits past it by the time it lands.
         _last_read.setdefault(Path(dump["spec_path"]).resolve(), (spec, owners))
+    placement = dump.get("placement", {})
+    # A dump of one sample carries it as `assets` alone, its verdict in the summary.
+    solved = dump.get("layouts") or [{**placement, "assets": dump["assets"]}]
+    layouts = [
+        {
+            "assets": [placed(asset) for asset in layout["assets"]],
+            "success": layout.get("success"),
+            "failed_checks": list(layout.get("failed_checks", [])),
+        }
+        for layout in solved
+    ]
 
     return {
         "env_name": dump.get("env_name", ""),
-        "assets": [
-            {
-                "id": asset["id"],
-                "role": asset.get("role", ""),
-                "scale": _floats(asset.get("scale", [1.0, 1.0, 1.0])),
-                "position_xyz": _floats(asset["position_xyz"]),
-                "rotation_xyzw": _floats(asset["rotation_xyzw"]),
-                "bbox_min": _floats(asset["bbox_min"]),
-                "bbox_max": _floats(asset["bbox_max"]),
-                "geometry": geometry_index(asset),
-            }
-            for asset in dump["assets"]
-        ],
+        "assets": layouts[0]["assets"],
+        "layouts": layouts,
+        "seed": placement.get("seed"),
         "geometries": geometries,
         # The viewer's one stand-in light also stands in for a light the spec
         # lists, and for the lights a background's USD carries: neither is drawn.
