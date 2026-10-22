@@ -11,6 +11,7 @@ use bevy::image::ImageLoaderSettings;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
+use std::collections::HashSet;
 
 use crate::scene::Node;
 
@@ -18,46 +19,49 @@ use crate::scene::Node;
 #[derive(Component)]
 pub struct PrimPath(pub String);
 
-/// Keeps 16-bit greyscale textures drawable: see [`widen_integer_textures`].
+/// Keeps 16-bit textures drawable, and in the right colour space: see [`narrow_16_bit_textures`].
 pub fn plugin(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<SrgbImages>().add_systems(
         Update,
-        widen_integer_textures.run_if(resource_changed::<Assets<Image>>),
+        narrow_16_bit_textures.run_if(resource_changed::<Assets<Image>>),
     );
 }
 
-/// Bevy decodes a 16-bit greyscale PNG (Lightwheel's `marble_5_0.png`) as `R16Uint`, or `Rg16Uint` with
-/// alpha, and `StandardMaterial` cannot sample an integer texture: the material fails to build and the
-/// frame logs an error. `Rgba16Unorm` would keep the depth, but needs a wgpu feature Bevy does not ask
-/// for, so this repacks them as 8-bit RGBA. It runs in `Update`, after the loader has inserted the image
-/// and before the render world extracts it, so the first frame that draws it already sees a float one.
-///
-/// Read as sRGB, which is right for the only slot that has met one, `base_color`: a greyscale colour map.
-// ponytail: a 16-bit greyscale in a data slot (normal, occlusion) would be gamma-decoded; give it its own
-// format when an asset has one.
-fn widen_integer_textures(mut images: ResMut<Assets<Image>>) {
-    let integer: Vec<_> = images
+/// The images a material asked for as sRGB colour. A 16-bit PNG decodes to one format whatever the
+/// loader was told, so this is how [`narrow_16_bit_textures`] knows which it was asked for.
+#[derive(Resource, Default)]
+struct SrgbImages(HashSet<AssetId<Image>>);
+
+/// Bevy decodes a 16-bit PNG to a format of its own, whatever the loader was told. An RGB one becomes
+/// `Rgba16Unorm`, which has no sRGB variant, so a colour map drew as if it were linear: washed out, as
+/// robolab's fruit and Lightwheel's microwaves and toasters did. A greyscale one (Lightwheel's
+/// `marble_5_0.png`) becomes `R16Uint`, or `Rg16Uint` with alpha, which `StandardMaterial` cannot sample
+/// at all. This repacks each as 8-bit RGBA, sRGB where a material asked for it so. It runs in `Update`,
+/// after the loader has inserted the image and before the render world extracts it, so the first frame
+/// that draws it already sees the 8-bit one.
+fn narrow_16_bit_textures(mut images: ResMut<Assets<Image>>, srgb: Res<SrgbImages>) {
+    let wide: Vec<_> = images
         .iter()
         .filter(|(_, image)| {
             matches!(
                 image.texture_descriptor.format,
-                TextureFormat::R16Uint | TextureFormat::Rg16Uint
+                TextureFormat::R16Uint | TextureFormat::Rg16Uint | TextureFormat::Rgba16Unorm
             )
         })
         .map(|(id, _)| id)
         .collect();
-    for id in integer {
+    for id in wide {
         if let Some(mut image) = images.get_mut(id) {
-            widen(&mut image);
+            narrow(&mut image, srgb.0.contains(&id));
         }
     }
 }
 
-fn widen(image: &mut Image) {
-    let channels = if image.texture_descriptor.format == TextureFormat::R16Uint {
-        1
-    } else {
-        2
+fn narrow(image: &mut Image, srgb: bool) {
+    let channels = match image.texture_descriptor.format {
+        TextureFormat::R16Uint => 1,
+        TextureFormat::Rg16Uint => 2,
+        _ => 4,
     };
     let Some(data) = image.data.take() else {
         return;
@@ -66,12 +70,20 @@ fn widen(image: &mut Image) {
     let rgba = data
         .chunks_exact(2 * channels)
         .flat_map(|texel| {
-            let (grey, alpha) = (texel[1], if channels == 2 { texel[3] } else { 255 });
-            [grey, grey, grey, alpha]
+            let high = |channel: usize| texel[2 * channel + 1];
+            match channels {
+                1 => [high(0), high(0), high(0), 255],
+                2 => [high(0), high(0), high(0), high(1)],
+                _ => [high(0), high(1), high(2), high(3)],
+            }
         })
         .collect();
     image.data = Some(rgba);
-    image.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+    image.texture_descriptor.format = if srgb {
+        TextureFormat::Rgba8UnormSrgb
+    } else {
+        TextureFormat::Rgba8Unorm
+    };
 }
 
 /// Spawn one entity per node, parented under `placement`, and return them by
@@ -155,7 +167,7 @@ fn build_material(node: &Node, world: &mut World) -> Handle<StandardMaterial> {
     // Paths are absolute and were checked to exist before they were sent, which
     // is what keeps the asset server from logging a miss per texture.
     //
-    // Colour maps are authored in sRGB, but normal, metallic/roughness and
+    // Colour maps are mostly authored in sRGB, but normal, metallic/roughness and
     // occlusion maps hold measurements, not colour. Bevy's image loader assumes
     // sRGB for both, so the data ones have to say otherwise or every value comes
     // back gamma-decoded — which on a normal map tilts the whole surface and
@@ -168,11 +180,18 @@ fn build_material(node: &Node, world: &mut World) -> Handle<StandardMaterial> {
                 .load::<Image>(path.clone())
         })
     };
-    material.base_color_texture = texture("base_color", true);
-    material.emissive_texture = texture("emissive", true);
+    let colour = |slot: &str| !node.linear.iter().any(|linear| linear == slot);
+    material.base_color_texture = texture("base_color", colour("base_color"));
+    material.emissive_texture = texture("emissive", colour("emissive"));
     material.normal_map_texture = texture("normal", false);
     material.metallic_roughness_texture = texture("metallic_roughness", false);
     material.occlusion_texture = texture("occlusion", false);
+    let mut srgb = world.get_resource_or_init::<SrgbImages>();
+    for (slot, handle) in [("base_color", &material.base_color_texture), ("emissive", &material.emissive_texture)] {
+        if let Some(handle) = handle.as_ref().filter(|_| colour(slot)) {
+            srgb.0.insert(handle.id());
+        }
+    }
 
     world
         .resource_mut::<Assets<StandardMaterial>>()
@@ -196,24 +215,43 @@ mod tests {
         }
     }
 
-    /// A 16-bit greyscale PNG arrives from Bevy's loader as `R16Uint`, which `StandardMaterial` cannot
-    /// sample; it has to come out as a float format with the grey in all three colour channels.
-    #[test]
-    fn a_16_bit_greyscale_texture_is_widened_to_rgba8() {
-        let mut image = Image::new(
+    fn image(texels: &[u16], format: TextureFormat) -> Image {
+        let channels = if format == TextureFormat::R16Uint { 1 } else { 4 };
+        Image::new(
             bevy::render::render_resource::Extent3d {
-                width: 2,
+                width: (texels.len() / channels) as u32,
                 height: 1,
                 depth_or_array_layers: 1,
             },
             bevy::render::render_resource::TextureDimension::D2,
-            [0x00u16, 0xff00].iter().flat_map(|v| v.to_le_bytes()).collect(),
-            TextureFormat::R16Uint,
+            texels.iter().flat_map(|v| v.to_le_bytes()).collect(),
+            format,
             RenderAssetUsages::default(),
-        );
-        widen(&mut image);
-        assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba8UnormSrgb);
-        assert_eq!(image.data.as_deref(), Some(&[0, 0, 0, 255, 0xff, 0xff, 0xff, 255][..]));
+        )
+    }
+
+    /// A 16-bit greyscale PNG arrives from Bevy's loader as `R16Uint`, which `StandardMaterial` cannot
+    /// sample; it has to come out as a float format with the grey in all three colour channels.
+    #[test]
+    fn a_16_bit_greyscale_texture_is_narrowed_to_rgba8() {
+        let mut grey = image(&[0x00, 0xff00], TextureFormat::R16Uint);
+        narrow(&mut grey, true);
+        assert_eq!(grey.texture_descriptor.format, TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(grey.data.as_deref(), Some(&[0, 0, 0, 255, 0xff, 0xff, 0xff, 255][..]));
+    }
+
+    /// A 16-bit RGB PNG arrives as `Rgba16Unorm`, which has no sRGB variant: as a colour map it has to
+    /// come out sRGB, or it draws washed out, and as a data map linear.
+    #[test]
+    fn a_16_bit_colour_texture_is_narrowed_to_srgb_and_a_data_one_to_linear() {
+        let texel = [0x1234, 0x5678, 0x9abc, 0xffff];
+        let mut colour = image(&texel, TextureFormat::Rgba16Unorm);
+        narrow(&mut colour, true);
+        assert_eq!(colour.texture_descriptor.format, TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(colour.data.as_deref(), Some(&[0x12, 0x56, 0x9a, 0xff][..]));
+        let mut data = image(&texel, TextureFormat::Rgba16Unorm);
+        narrow(&mut data, false);
+        assert_eq!(data.texture_descriptor.format, TextureFormat::Rgba8Unorm);
     }
 
     /// A node with positions and indices but no normals still uploads, with
@@ -367,5 +405,32 @@ mod tests {
         let materials = app.world().resource::<Assets<StandardMaterial>>();
         let material = materials.get(&handle).expect("the material was added");
         assert_eq!(material.base_color.to_linear().red, 0.2);
+    }
+
+    /// A colour map the payload calls linear is not narrowed to sRGB when it turns out 16-bit, as
+    /// Lightwheel's floor tiles are; one it does not is.
+    #[test]
+    fn only_a_colour_map_not_called_linear_is_asked_for_as_srgb() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin {
+                unapproved_path_mode: bevy::asset::UnapprovedPathMode::Allow,
+                ..default()
+            },
+        ))
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Image>();
+
+        let mut node = triangle();
+        node.textures.insert("base_color".into(), "/tiles.png".into());
+        node.textures.insert("emissive".into(), "/glow.png".into());
+        node.linear = vec!["base_color".into()];
+        let handle = build_material(&node, app.world_mut());
+
+        let material = app.world().resource::<Assets<StandardMaterial>>().get(&handle).unwrap().clone();
+        let srgb = &app.world().resource::<SrgbImages>().0;
+        assert!(!srgb.contains(&material.base_color_texture.unwrap().id()));
+        assert!(srgb.contains(&material.emissive_texture.unwrap().id()));
     }
 }

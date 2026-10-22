@@ -32,13 +32,16 @@ class Surface:
     face_count: int = 0  # authored faces in the USD mesh, including any too degenerate to triangulate
 
     def select_faces(self, faces: np.ndarray) -> "Surface":
-        """The triangles belonging to ``faces``, with the vertices they use.
+        """The triangles belonging to ``faces``, with the vertices they use."""
+        return self.select_triangles(np.isin(self.face_of_triangle, faces))
+
+    def select_triangles(self, keep: np.ndarray) -> "Surface":
+        """The triangles ``keep`` marks, with the vertices they use.
 
         Compacting matters here in a way it would not in-process: each subset is
         serialized on its own, so carrying the parent mesh's whole vertex array
         would repeat it once per subset — six times over for a Franka link.
         """
-        keep = np.isin(self.face_of_triangle, faces)
         used, remapped = np.unique(self.triangles[keep], return_inverse=True)
         return Surface(
             positions=self.positions[used],

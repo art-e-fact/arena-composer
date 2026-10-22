@@ -430,6 +430,7 @@ def _encode_node(node: Node) -> dict[str, Any]:
         "emissive": _floats(material.emissive),
         "double_sided": bool(material.double_sided),
         "textures": dict(material.textures),
+        "linear": list(material.linear),
     }
 
 

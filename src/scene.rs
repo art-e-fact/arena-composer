@@ -173,6 +173,9 @@ pub struct Node {
     /// Absolute paths, by slot: `base_color`, `normal`, `metallic_roughness`,
     /// `emissive`, `occlusion`. Only paths that exist are sent.
     pub textures: HashMap<String, String>,
+    /// The colour slots whose texture holds linear values, not sRGB: where the USD says so, or leaves
+    /// it to a 16-bit file. The data slots always hold linear values.
+    pub linear: Vec<String>,
 }
 
 impl Node {

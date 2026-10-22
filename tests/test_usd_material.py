@@ -8,6 +8,7 @@ stays honest if each branch has a fixture pinning it.
 
 TODO: cover the rest of the parser in this style.
   * OmniPBR's `albedo_add` and `albedo_desaturation`, once something reads them.
+  * A UDIM tile missing for one slot, which that tile's piece draws without.
   * `displayColor` as the fallback for a prim that binds no material.
   * `GeomSubset` bindings: per-subset materials, and subset faces inheriting the
     mesh's own binding when they bind nothing.
@@ -21,8 +22,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
+from PIL import Image
 
+from arena_composer import usd_assets
 from arena_composer.usd import extract, open_stage
 
 # A quad bound to a UsdPreviewSurface: one constant the shader authors itself,
@@ -246,8 +250,8 @@ def Xform "Asset"
             def Shader "Shader"
             {{
                 uniform token info:implementationSource = "sourceAsset"
-                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
-                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                uniform asset info:mdl:sourceAsset = @{module}.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "{module}"
                 {inputs}
                 token outputs:out
             }}
@@ -257,12 +261,12 @@ def Xform "Asset"
 """
 
 
-def omnipbr(tmp_path: Path, inputs: str):
+def omnipbr(tmp_path: Path, inputs: str, module: str = "OmniPBR"):
     """The material of a quad whose OmniPBR authors ``inputs``, beside `albedo.png` and `orm.png`."""
     for name in ("albedo.png", "orm.png"):
         (tmp_path / name).write_bytes(b"\x89PNG\r\n\x1a\n")
     usda = tmp_path / "omnipbr.usda"
-    usda.write_text(OMNIPBR.format(inputs=inputs), encoding="utf-8")
+    usda.write_text(OMNIPBR.format(inputs=inputs, module=module), encoding="utf-8")
     return extract(open_stage(str(usda)))[0].material
 
 
@@ -376,3 +380,259 @@ def test_a_normal_map_that_is_the_colour_map_is_dropped(tmp_path: Path) -> None:
 
     assert material.textures["base_color"] == str(tmp_path / "albedo.png")
     assert "normal" not in material.textures
+
+
+def test_simpbr_reads_a_missing_orm_map_as_zero(tmp_path: Path) -> None:
+    """robolab's avocado runs SimPBR, whose ORM map is on unless authored off, and gives it none.
+
+    MDL reads a missing texture as 0, so the roughness influence of 1 takes the
+    avocado to roughness 0: RTX draws it glossy, and never reads the roughness map
+    it does author.
+    """
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:reflectionroughness_texture = @./albedo.png@
+                float inputs:reflection_roughness_texture_influence = 1""",
+        module="SimPBR",
+    )
+
+    assert material.roughness == 0.0
+    assert "metallic_roughness" not in material.textures
+
+
+@pytest.mark.parametrize("space, linear", [("", ["base_color"]), (' (colorSpace = "sRGB")', [])])
+def test_a_16_bit_colour_map_is_linear_unless_it_says_srgb(tmp_path: Path, space: str, linear: list) -> None:
+    """Lightwheel's floor tiles are a 16-bit PNG that names no colour space; its appliances' are authored sRGB.
+
+    MDL and USD read a colour map that says nothing, or `auto`, by its file: 8 bits
+    a channel as sRGB, more as linear. Decoded as sRGB, the tiles drew black where
+    RTX draws them grey.
+    """
+    Image.fromarray(np.array([[0, 65535]], dtype=np.uint16)).save(tmp_path / "tiles.png")
+    material = omnipbr(tmp_path, f"asset inputs:diffuse_texture = @./tiles.png@{space}")
+
+    assert material.linear == linear
+
+
+def png(path: Path, values: list[int]) -> None:
+    """A one-row greyscale PNG."""
+    Image.fromarray(np.array([values], dtype=np.uint8)).save(path)
+
+
+def test_separate_metallic_and_roughness_maps_are_packed_into_one(tmp_path: Path, monkeypatch) -> None:
+    """robolab's red onion authors OmniPBR's separate metallic and roughness maps, its ORM map off.
+
+    Bevy reads both from one image, roughness green and metallic blue, so they
+    are packed into one under the asset cache. Left unread, the onion drew at its
+    constants.
+    """
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path / "cache")
+    png(tmp_path / "metal.png", [0, 255])
+    png(tmp_path / "rough.png", [40, 158])
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:metallic_texture = @./metal.png@
+                float inputs:metallic_texture_influence = 1
+                asset inputs:reflectionroughness_texture = @./rough.png@
+                float inputs:reflection_roughness_texture_influence = 1""",
+    )
+
+    packed = Path(material.textures["metallic_roughness"])
+    assert packed.parent == tmp_path / "cache" / "textures"
+    pixels = np.asarray(Image.open(packed))
+    assert pixels[..., 1].tolist() == [[40, 158]]
+    assert pixels[..., 2].tolist() == [[0, 255]]
+    assert (material.metallic, material.roughness) == (1.0, 1.0)
+
+
+def test_a_map_left_out_of_the_pack_leaves_its_constant(tmp_path: Path, monkeypatch) -> None:
+    """robolab's big spoon authors a metallic map alone; its roughness stays OmniPBR's 0.5."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path / "cache")
+    png(tmp_path / "metal.png", [255, 255])
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:metallic_texture = @./metal.png@
+                float inputs:metallic_texture_influence = 1""",
+    )
+
+    pixels = np.asarray(Image.open(material.textures["metallic_roughness"]))
+    assert pixels[..., 1].tolist() == [[255, 255]]
+    assert (material.metallic, material.roughness) == (1.0, 0.5)
+
+
+# A quad bound to a UsdPreviewSurface whose metallic and roughness each connect to
+# a channel of a map. `{connections}` authors the inputs and their readers.
+PREVIEW_MAPS = """#usda 1.0
+(
+    defaultPrim = "Asset"
+)
+
+def Xform "Asset"
+{{
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {{
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        rel material:binding = </Asset/Looks/Paint>
+    }}
+
+    def Scope "Looks"
+    {{
+        def Material "Paint"
+        {{
+            token outputs:surface.connect = </Asset/Looks/Paint/Surface.outputs:surface>
+            {connections}
+        }}
+    }}
+}}
+"""
+
+
+def preview_maps(tmp_path: Path, connections: str):
+    usda = tmp_path / "preview.usda"
+    usda.write_text(PREVIEW_MAPS.format(connections=connections), encoding="utf-8")
+    return extract(open_stage(str(usda)))[0].material
+
+
+def test_a_preview_surface_map_replaces_its_constant(tmp_path: Path) -> None:
+    """SimReady's hospital clogs connect metallic to an ORM map's blue and roughness to its green.
+
+    That is Bevy's own layout, so the map goes as it is; but a connected input has
+    no constant, and the factors were left at the defaults, 0 and 0.5, so none of
+    SimReady's metal drew as metal.
+    """
+    png(tmp_path / "orm.png", [0, 255])
+    material = preview_maps(
+        tmp_path,
+        """def Shader "Surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                float inputs:metallic.connect = </Asset/Looks/Paint/ORM.outputs:b>
+                float inputs:roughness.connect = </Asset/Looks/Paint/ORM.outputs:g>
+                token outputs:surface
+            }
+
+            def Shader "ORM"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @./orm.png@
+                float outputs:b
+                float outputs:g
+            }""",
+    )
+
+    assert material.textures["metallic_roughness"] == str(tmp_path / "orm.png")
+    assert (material.metallic, material.roughness) == (1.0, 1.0)
+
+
+def test_a_preview_surface_map_in_another_channel_is_packed(tmp_path: Path, monkeypatch) -> None:
+    """SimReady's drainage connects roughness alone, to a map's red channel; Bevy reads green."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path / "cache")
+    Image.fromarray(np.array([[[40, 0, 0], [158, 0, 0]]], dtype=np.uint8)).save(tmp_path / "rough.png")
+    material = preview_maps(
+        tmp_path,
+        """def Shader "Surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                float inputs:metallic = 0.2
+                float inputs:roughness.connect = </Asset/Looks/Paint/Rough.outputs:r>
+                token outputs:surface
+            }
+
+            def Shader "Rough"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @./rough.png@
+                float outputs:r
+            }""",
+    )
+
+    pixels = np.asarray(Image.open(material.textures["metallic_roughness"]))
+    assert pixels[..., 1].tolist() == [[40, 158]]
+    assert pixels[..., 2].tolist() == [[255, 255]]
+    assert (material.metallic, material.roughness) == (pytest.approx(0.2), 1.0)
+
+
+def test_a_udim_pair_is_packed_tile_by_tile(tmp_path: Path, monkeypatch) -> None:
+    """Fourier's GR1T2 has a metallic and a roughness map per UDIM tile; the pack is one per tile too."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path / "cache")
+    for tile in (1001, 1002):
+        png(tmp_path / f"metal.{tile}.png", [0, 255])
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:metallic_texture = @./metal.<UDIM>.png@
+                float inputs:metallic_texture_influence = 1""",
+    )
+
+    packed = material.textures["metallic_roughness"]
+    assert packed.endswith(".<UDIM>.png")
+    for tile in ("1001", "1002"):
+        assert np.asarray(Image.open(packed.replace("<UDIM>", tile)))[..., 2].tolist() == [[0, 255]]
+
+
+# Two quads side by side in UV space, over UDIM tiles 1001 and 1002, bound to an
+# OmniPBR whose colour map is one image per tile.
+UDIM = """#usda 1.0
+(
+    defaultPrim = "Asset"
+)
+
+def Xform "Asset"
+{
+    def Mesh "Strip" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (2, 0, 0), (2, 1, 0)]
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 2, 3, 1, 4, 5, 2]
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1), (1, 0), (2, 0), (2, 1), (1, 1)] (
+            interpolation = "faceVarying"
+        )
+        rel material:binding = </Asset/Looks/Omni>
+    }
+
+    def Scope "Looks"
+    {
+        def Material "Omni"
+        {
+            token outputs:mdl:surface.connect = </Asset/Looks/Omni/Shader.outputs:out>
+
+            def Shader "Shader"
+            {
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                asset inputs:diffuse_texture = @./textures/albedo.<UDIM>.png@
+                token outputs:out
+            }
+        }
+    }
+}
+"""
+
+
+def test_a_udim_texture_splits_the_mesh_by_tile(tmp_path: Path) -> None:
+    """SimReady's eggplant authors `T_opaque__organic__eggplant_a_Albedo.<UDIM>.png` over tiles 1001 and 1002.
+
+    No file has that name, so the path was dropped and the eggplant drew grey. Each
+    tile's triangles now draw with that tile's image, their UVs moved into the unit
+    square (V is flipped, as every UV is).
+    """
+    (tmp_path / "textures").mkdir()
+    for tile in (1001, 1002):
+        (tmp_path / "textures" / f"albedo.{tile}.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    usda = tmp_path / "udim.usda"
+    usda.write_text(UDIM, encoding="utf-8")
+
+    nodes = extract(open_stage(str(usda)))
+
+    assert [node.material.textures["base_color"] for node in nodes] == [
+        str(tmp_path / "textures" / f"albedo.{tile}.png") for tile in (1001, 1002)
+    ]
+    for node in nodes:
+        assert node.surface.uvs.min() == 0.0 and node.surface.uvs.max() == 1.0
+        assert np.ptp(node.surface.positions[:, 0]) == 1.0

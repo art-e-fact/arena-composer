@@ -30,10 +30,17 @@ its box, box the drawn prims the same way: for kuka_allegro, franka_joint_pos, d
 g1_wbc_joint and gr1_joint that agrees to under a millimetre.
 
 `material.py` resolves texture paths through `Sdf.AssetPath.resolvedPath`, never the authored string,
-and drops paths that do not exist — otherwise the viewer's asset server logs a miss per texture. Every
+and drops paths that do not exist — otherwise the viewer's asset server logs a miss per texture. A
+UDIM path (`<UDIM>`, an image per tile of UV space) is the exception: USD resolves it to nothing, so
+it is anchored with `UsdShade.UdimUtils` and kept while a tile exists, and `extract` splits the mesh
+into a piece per tile, each with its own tile's images and its UVs moved into the unit square. Every
 field is a list of input names tried in order, because these assets mix `UsdPreviewSurface`,
 OmniPBR/OmniSurface MDL, per-material bespoke MDL modules (PascalCase names such as `AlbedoTexture` and
-`MainNormalInput`) and bare `displayColor`. Colours are linear, as all of them author them.
+`MainNormalInput`) and bare `displayColor`. Colours are linear, as all of them author them. A colour
+map is sRGB or linear as its input, or its reader's `sourceColorSpace`, says; where it says `auto` or
+nothing, MDL and USD both go by the file, 8 bits a channel being sRGB and more linear (`_srgb`), and
+the payload lists the colour slots that are linear. Bevy decodes every 16-bit PNG to one format
+whatever it is told, so `spawn.rs` narrows those to 8 bits in the colour space the material asked for.
 
 OmniPBR, and SimPBR and the vendor modules built on it, are the one dialect that does not multiply its
 constant colour into its texture: it draws the texture when it has one, scaled by `albedo_brightness`,
@@ -42,11 +49,19 @@ or `diffuse_color_constant` when it has not, 0.2 unless authored, and multiplies
 authored. Its `ORM_texture` counts only under `enable_ORM_texture` (off unless authored, but for
 SimPBR), blending each constant toward the map's channel by `metallic_texture_influence` and
 `reflection_roughness_texture_influence`; Bevy multiplies instead, which is exact where an influence
-is 1, as Lightwheel authors both (`_orm`). Its occlusion reaches the colour only through
-`ao_to_diffuse`, which almost nothing authors, so it is not drawn. All of this is what RTX does with
+is 1, as Lightwheel authors both (`_orm`). With the ORM map off, a separate `metallic_texture` and
+`reflectionroughness_texture` take its place, packed into one image under the asset cache
+(`_pack`), because Bevy reads both from one. A map it is told to read and not given reads as 0, as
+MDL reads a missing texture: robolab's fruit run SimPBR with no ORM map, and RTX draws them glossy.
+Its occlusion reaches the colour only through `ao_to_diffuse`, which almost nothing authors, so it is
+not drawn. All of this is what RTX does with
 `OmniPBR.mdl`; check a new rule against an Isaac Sim render of the asset, not against what looks
 right. A vendor module wrapping OmniPBR sets its own defaults in its `.mdl`, which nothing here
 reads: the inputs the USD authors are all there is.
+
+UsdPreviewSurface's `metallic` and `roughness`, connected, take a channel of their map in place of
+the constant (`_preview_maps`). SimReady's props connect both to one map in Bevy's own layout, blue
+and green, which goes as it is with both factors 1; any other layout is packed into that one.
 
 Lightwheel's restyled kitchens write a colour map into the ORM and normal-map inputs as well. The
 ORM one RTX reads as it is, so the composer does too. The normal map is dropped where it is the
@@ -90,13 +105,9 @@ What currently doesn't draw. Check here before treating a render bug as new.
 - Objects spawned from a shape config instead of a USD (`procedural_cube`, `procedural_table`,
   `sphere`). Arena bounds them by the shape and the payload draws that box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape: they keep their configured pose
   and an empty box, the payload draws nothing for them, and a relation naming one is refused.
-- UDIM textures (`<UDIM>` in the path, one image per tile: Fourier's GR1T2 has nine albedo tiles along
-  U). The path matches no file, so it is dropped and the robot is its base grey. Fixing it means
-  packing the tiles into one image and remapping the UVs, which needs the same texture cache as below.
-- The separate single-channel OmniPBR `metallic_texture`/`reflectionroughness_texture` pair, read as its
-  scalar constants instead. Packing the two into one image needs a texture cache.
 - OmniPBR's `albedo_add` and `albedo_desaturation`, which offset and grey a texture where a material
-  can only multiply it. The galileo backgrounds grade their textures with them. Also a texture cache's.
+  can only multiply it. The galileo backgrounds grade their textures with them. Writing the graded
+  image under the asset cache, as `_pack` does, would draw them.
 
 Sweeping the local asset cache is the cheap way to find more: extraction needs only `usd-core`, so a few
 hundred assets run through `extract()` in a couple of minutes with no Kit bootstrap, and the failures

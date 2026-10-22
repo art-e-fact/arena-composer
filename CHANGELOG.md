@@ -88,6 +88,15 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   map, read as a normal map too, turned grey.
 - The window, `arena-render` and `render_views` draw a scene about as bright as Isaac Sim draws it
   under Arena's dome light, where an object close-up came out 1.6 times brighter.
+- Colour textures stored as 16-bit PNGs are drawn in the colour space their material names, where
+  they drew washed out: robolab's fruit, and Lightwheel's microwaves, coffee machines and toasters.
+  One that names none is read as Isaac Sim reads it, by its bit depth.
+- UDIM textures, one image per tile of the UV map, are drawn: Fourier's GR1T2 and SimReady's
+  eggplant, bok choy and plywood crate drew untextured.
+- OmniPBR's separate metallic and roughness maps are read. A material that turns on a map it lacks
+  is drawn as Isaac Sim draws it, as if the map were black: robolab's fruit are glossy.
+- SimReady props' metal is drawn as metal. Their UsdPreviewSurface takes metallic and roughness from
+  a map, which was multiplied by 0 and 0.5.
 - `check_spec` says where a misspelt object or background param shows: it passes the check, and
   `describe_scene`, `arena-render` and the window stop on it seconds in, with
   `TypeError: object.__init__() takes exactly one argument`, which names neither the param nor the

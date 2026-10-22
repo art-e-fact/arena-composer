@@ -41,8 +41,9 @@ spawns it and as Arena bounds it to place it:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
@@ -84,7 +85,8 @@ def extract(stage: Usd.Stage, joint_pos: Mapping[str, float] | None = None) -> l
                 continue
             matrix = to_asset(prim)
             for piece, material in _split(prim, surface):
-                nodes.append(Node(str(prim.GetPath()), _place(piece, matrix), material))
+                for tile, tile_material in _tiles(piece, material):
+                    nodes.append(Node(str(prim.GetPath()), _place(tile, matrix), tile_material))
     return nodes
 
 
@@ -149,6 +151,27 @@ def _split(prim: Usd.Prim, surface: Surface) -> Iterator[tuple[Surface, Material
         piece = surface.select_faces(rest)
         if piece.triangles.size:
             yield piece, read_material(prim)
+
+
+def _tiles(surface: Surface, material: Material) -> Iterator[tuple[Surface, Material]]:
+    """One piece per UDIM tile the material's textures are split into, each with its own tile's images.
+
+    A UDIM texture is an image per unit square of UV space, numbered from 1001 at the origin, on by one
+    along U and by ten up V: Fourier's GR1T2 has nine along U. A material samples one image, so the
+    mesh is split by the tile each triangle falls in, and each piece's UVs are moved into the unit
+    square. A tile with no image of a slot draws without it. USD's `st`, before `_place` flips V.
+    """
+    if surface.uvs is None or not any("<UDIM>" in path for path in material.textures.values()):
+        yield surface, material
+        return
+    tiles = np.floor(surface.uvs[surface.triangles].mean(axis=1)).astype(np.int64)
+    numbers = 1001 + tiles[:, 0] + 10 * tiles[:, 1]
+    for number in np.unique(numbers):
+        keep = numbers == number
+        piece = surface.select_triangles(keep)
+        piece.uvs = piece.uvs - tiles[keep][0].astype(np.float32)
+        textures = {slot: path.replace("<UDIM>", str(number)) for slot, path in material.textures.items()}
+        yield piece, replace(material, textures={slot: path for slot, path in textures.items() if os.path.isfile(path)})
 
 
 def _asset_frame(
