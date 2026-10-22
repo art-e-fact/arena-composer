@@ -25,9 +25,12 @@ jobs:
       - uses: actions/checkout@v4
       # The platform tag follows the newest glibc symbol the extension uses, so
       # the wheel is built against manylinux_2_28's glibc, not the runner's.
+      # rust-cache cannot reach a build inside that container, so sccache keeps
+      # the compiled dependencies in the Actions cache; a pull request reads main's.
       - uses: PyO3/maturin-action@v1
         with:
           manylinux: "2_28"
+          sccache: true
           args: --release --locked --out dist
       - uses: actions/upload-artifact@v4
         with:
