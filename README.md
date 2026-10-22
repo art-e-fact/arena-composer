@@ -20,9 +20,9 @@
 <table>
   <tr>
     <!-- assets.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/5ff587be-97c6-42da-8223-bff1dd378992"><img src="https://github.com/user-attachments/assets/5ff587be-97c6-42da-8223-bff1dd378992" alt="The visual editor with the asset browser searched"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/922d6113-1147-494b-af1e-5bf4135aa213"><img src="https://github.com/user-attachments/assets/922d6113-1147-494b-af1e-5bf4135aa213" alt="The visual editor with the asset browser searched"></a></td>
     <!-- graph.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/2a4d1072-dc74-4db4-8b02-c7f14f009f74"><img src="https://github.com/user-attachments/assets/2a4d1072-dc74-4db4-8b02-c7f14f009f74" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/601364f0-b122-4aad-9030-5ccaca08cebd"><img src="https://github.com/user-attachments/assets/601364f0-b122-4aad-9030-5ccaca08cebd" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
@@ -169,7 +169,7 @@ See [AGENTS.md](AGENTS.md) and [docs/](docs/).
 ### The showcase on Artefacts
 
 <!-- showcase.png -->
-<a href="https://github.com/user-attachments/assets/023dc688-b29b-47c6-975b-8fa8d8474ea3"><img src="https://github.com/user-attachments/assets/023dc688-b29b-47c6-975b-8fa8d8474ea3" alt="Six showcase environments, drawn by arena-render: an AgiBot, a Galbot and a DROID in Lightwheel kitchens, a KUKA arm over a bench of hand tools, a DROID in a Replicator kitchen, and a GR1's kitchen from above"></a>
+<a href="https://github.com/user-attachments/assets/0b29eaef-155c-4eba-9de4-e11814505922"><img src="https://github.com/user-attachments/assets/0b29eaef-155c-4eba-9de4-e11814505922" alt="Six showcase environments, drawn by arena-render: an AgiBot, a Galbot and a DROID in Lightwheel kitchens, a KUKA arm over a bench of hand tools, a DROID in a Replicator kitchen, and a GR1's kitchen from above"></a>
 
 The [showcase](docs/development.md#the-showcase) builds about twenty environments and draws each
 from four views. [artefacts.yaml](artefacts.yaml) runs it as an
