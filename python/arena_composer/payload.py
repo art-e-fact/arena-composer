@@ -53,7 +53,8 @@ _UNDRAWN_ROLES = {"object_reference"}
 
 # An asset with no USD to read is drawn as its bounding box, in a colour of its
 # own: in the default grey it vanishes into a white table seen from above.
-_STAND_IN = Material(base_color=(0.3, 0.55, 0.9))
+# Linear, like every colour in the payload: sRGB (0.3, 0.55, 0.9).
+_STAND_IN = Material(base_color=(0.073, 0.263, 0.787))
 
 # The spec and owners each file last read to, which is what the panel holds: it
 # opens on the first layout's and takes every spec that reads after that. What a

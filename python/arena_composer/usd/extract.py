@@ -28,9 +28,12 @@ spawns it and as Arena bounds it to place it:
   solved layout. Isaac Lab's spawner replaces the rotation too, with the
   asset's initial pose, so on an asset whose root authors one, Arena's box and
   the sim disagree; this follows the box the layout was solved by.
-* An **unauthored** ``upAxis`` or ``metersPerUnit`` means Z-up metres, not USD's
-  Y-up centimetres. Arena composes robot USDs on the fly and authors neither;
-  under USD's own fallbacks the robot would lie on its side at 1/100 scale.
+* ``upAxis`` and ``metersPerUnit`` are **ignored**, authored or not: a stage is
+  read as Z-up metres. Isaac Lab references a USD without converting it and
+  Arena bounds it as authored, so honouring them draws what neither does — the
+  factory peg and hole author Y-up over Z-up geometry and would lie on their
+  side, and Arena's robots, composed on the fly, author neither, so USD's
+  fallbacks would lay them down at 1/100 scale.
 * A robot is **posed** at the joint positions it is reset to, which Arena
   bounds it by, rather than drawn at the pose its file authors.
 """
@@ -154,11 +157,10 @@ def _asset_frame(
     """Build ``prim -> 4x4`` taking prim-local points into the asset's frame.
 
     USD's row-vector convention means the chain reads left to right:
-    ``p · localToWorld · pose · unbake · convention``, where ``pose`` is the
-    identity for a prim no joint moves.
+    ``p · localToWorld · pose · unbake``, where ``pose`` is the identity for a
+    prim no joint moves.
     """
     cache = UsdGeom.XformCache()
-    convention = _convention(stage)
     unbake = Gf.Matrix4d(1)
     if root:
         world = cache.GetLocalToWorldTransform(root)
@@ -166,7 +168,7 @@ def _asset_frame(
         # rotation. Doing it as a matrix pair sidesteps having to know the
         # order its xform ops were authored in.
         unbake = world.GetInverse() * Gf.Matrix4d().SetRotate(Gf.Transform(world).GetRotation())
-    tail = np.array(unbake * convention)
+    tail = np.array(unbake)
     pose = _posing(stage, root, joint_pos) if root and joint_pos else lambda path: None
 
     def to_asset(prim: Usd.Prim) -> np.ndarray:
@@ -204,18 +206,6 @@ def _posing(
     joints = resolve_joint_pos_patterns(articulation_joint_prims(root), joint_pos)
     deltas = compute_posed_prim_world_deltas(stage, str(root.GetPath()), joints)
     return lambda path: resolve_prim_world_delta(path, deltas)
-
-
-def _convention(stage: Usd.Stage) -> Gf.Matrix4d:
-    """The stage's axis and unit convention, expressed in Arena's frame."""
-    matrix = Gf.Matrix4d(1)
-    if stage.HasAuthoredMetadata("upAxis") and stage.GetMetadata("upAxis") == "Y":
-        matrix = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0), 90))
-    if stage.HasAuthoredMetadata("metersPerUnit"):
-        meters = float(stage.GetMetadata("metersPerUnit"))
-        if meters > 0:
-            matrix = matrix * Gf.Matrix4d().SetScale(meters)
-    return matrix
 
 
 def _place(surface: Surface, matrix: np.ndarray) -> Surface:

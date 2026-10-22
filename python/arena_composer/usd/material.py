@@ -6,6 +6,8 @@ Omniverse's OmniPBR/OmniSurface MDL shaders, and the occasional bare
 ``displayColor``. Rather than branch per dialect, every field below is a tuple
 of input names tried in order — the first that resolves wins.
 
+Colours are linear, as USD and MDL author them, and the viewer reads them so.
+
 Texture paths come from ``Sdf.AssetPath.resolvedPath``, never ``.path``: a USD
 authors them relative to the layer that wrote them, so only the resolved value
 is anchored. Paths that do not exist are dropped here rather than passed on,
@@ -27,13 +29,16 @@ from pxr import Sdf, UsdGeom, UsdShade
 # Input names to try, most specific dialect first. `diffuseColor` appears in
 # both the colour and the texture list because UsdPreviewSurface uses one input
 # for both — a constant when unconnected, a texture node when connected.
-_BASE_COLOR = (
-    "diffuseColor", "diffuse_color_constant", "base_color_constant", "diffuse_tint", "ColorAlbedo"
-)
+_BASE_COLOR = ("diffuseColor", "base_color_constant", "ColorAlbedo")
 _OPACITY = ("opacity", "opacity_constant")
 _METALLIC = ("metallic", "metallic_constant")
 _ROUGHNESS = ("roughness", "reflection_roughness_constant")
-_EMISSIVE = ("emissiveColor", "emissive_color")
+_EMISSIVE = ("emissiveColor",)
+
+# OmniPBR's albedo inputs, which SimPBR and the vendor modules built on OmniPBR
+# keep, and which it combines differently from every other dialect: see `_albedo`.
+_OMNIPBR_ALBEDO = ("diffuse_color_constant", "diffuse_texture", "diffuse_tint")
+_OMNIPBR_MODULES = ("OmniPBR", "SimPBR")
 
 _BASE_COLOR_TEX = (
     "diffuseColor", "diffuse_texture", "base_color_texture", "diffuse_color_texture",
@@ -54,7 +59,7 @@ _ORM_TEX = ("ORM_texture", "MergeMapInput", "AO_R_Rough_G_Metallic_B_")
 # scalar `metallic`/`roughness` constants are read instead, which is an
 # approximation but not a wrong one. Packing the pair is a job for a texture cache.
 _METALLIC_ROUGHNESS_TEX = ("metallic",) + _ORM_TEX
-_EMISSIVE_TEX = ("emissiveColor", "emissive_mask_texture", "Emission")
+_EMISSIVE_TEX = ("emissiveColor", "Emission")
 _OCCLUSION_TEX = ("occlusion", "ao_texture") + _ORM_TEX
 
 # What a texture-reading shader calls the input holding its file path.
@@ -63,9 +68,10 @@ _FILE_INPUTS = ("file", "texture", "diffuse_texture", "normalmap_texture")
 
 @dataclass(slots=True)
 class Material:
-    """A `StandardMaterial` in all but name. Defaults match Bevy's own."""
+    """A `StandardMaterial` in all but name. Colours are linear."""
 
-    base_color: tuple[float, float, float] = (0.8, 0.8, 0.8)
+    # The light grey a material comes out in when it says nothing this can read.
+    base_color: tuple[float, float, float] = (0.6, 0.6, 0.6)
     opacity: float = 1.0
     metallic: float = 0.0
     roughness: float = 0.5
@@ -88,27 +94,70 @@ def read_material(prim: Any, fallback: Any = None) -> Material:
         _apply_display_color(material, prim if _display_color(prim) is not None else fallback)
         return material
 
-    if (color := _constant(shader, _BASE_COLOR)) is not None:
-        material.base_color = _rgb(color)
-    if (opacity := _scalar(_constant(shader, _OPACITY))) is not None:
-        material.opacity = opacity
-    if (metallic := _scalar(_constant(shader, _METALLIC))) is not None:
-        material.metallic = metallic
-    if (roughness := _scalar(_constant(shader, _ROUGHNESS))) is not None:
-        material.roughness = roughness
-    if (emissive := _constant(shader, _EMISSIVE)) is not None:
-        material.emissive = _rgb(emissive)
+    # OmniPBR draws its emission only with `enable_emission` on, and it is off
+    # unless authored: the office table's frame authors a red glow it never shows.
+    emissive, emissive_tex = _EMISSIVE, _EMISSIVE_TEX
+    if _constant(shader, ("enable_emission",)) is True:
+        emissive, emissive_tex = emissive + ("emissive_color",), emissive_tex + ("emissive_mask_texture",)
 
     for slot, names in (
         ("base_color", _BASE_COLOR_TEX),
         ("normal", _NORMAL_TEX),
         ("metallic_roughness", _METALLIC_ROUGHNESS_TEX),
-        ("emissive", _EMISSIVE_TEX),
+        ("emissive", emissive_tex),
         ("occlusion", _OCCLUSION_TEX),
     ):
         if (path := _texture(shader, names)) is not None:
             material.textures[slot] = path
+
+    _albedo(shader, material)
+    # Fractions, clamped: agibot's A2D authors a roughness of 45.25, which RTX
+    # clamps and Bevy would take at its word.
+    if (opacity := _scalar(_constant(shader, _OPACITY))) is not None:
+        material.opacity = _unit(opacity)
+    if (metallic := _scalar(_constant(shader, _METALLIC))) is not None:
+        material.metallic = _unit(metallic)
+    if (roughness := _scalar(_constant(shader, _ROUGHNESS))) is not None:
+        material.roughness = _unit(roughness)
+    if (color := _constant(shader, emissive)) is not None:
+        material.emissive = _rgb(color)
     return material
+
+
+def _albedo(shader: UsdShade.Shader, material: Material) -> None:
+    """Set the base colour the way the shader's dialect combines a constant with a texture."""
+    textured = "base_color" in material.textures
+    omnipbr = any(shader.GetInput(name) for name in _OMNIPBR_ALBEDO)
+    if omnipbr or _mdl_module(shader).startswith(_OMNIPBR_MODULES):
+        # OmniPBR takes the texture when it has one, scaled by `albedo_brightness`,
+        # and `diffuse_color_constant` (0.2 unless authored) when it has not, then
+        # multiplies by `diffuse_tint`. The constant never tints the texture.
+        # ponytail: `albedo_add` and `albedo_desaturation` act on the texture too, which a
+        # multiplier cannot (galileo grades its textures with them); a texture cache could.
+        brightness = _scalar(_constant(shader, ("albedo_brightness",)))
+        if not textured:
+            constant = _constant(shader, ("diffuse_color_constant",))
+            color = _rgb(0.2 if constant is None else constant)
+        elif brightness == 0:
+            # Nothing of the texture is left but the offset: the office table's chrome top.
+            del material.textures["base_color"]
+            color = _rgb(_scalar(_constant(shader, ("albedo_add",))) or 0.0)
+        else:
+            color = _rgb(1.0 if brightness is None else brightness)
+        tint = _constant(shader, ("diffuse_tint",))
+        material.base_color = tuple(c * t for c, t in zip(color, _rgb(1.0 if tint is None else tint)))
+    elif (color := _constant(shader, _BASE_COLOR)) is not None:
+        material.base_color = _rgb(color)
+    elif textured:
+        # A texture with no constant beside it is the colour itself, as
+        # UsdPreviewSurface's `diffuseColor` connected to one is.
+        material.base_color = (1.0, 1.0, 1.0)
+
+
+def _mdl_module(shader: UsdShade.Shader) -> str:
+    """The file name of the MDL module a shader runs, or '' for one that runs none."""
+    asset = shader.GetSourceAsset("mdl")
+    return os.path.basename(asset.path) if asset else ""
 
 
 def _bound_material(prim: Any) -> UsdShade.Material | None:
@@ -204,6 +253,10 @@ def _double_sided(prim: Any) -> bool:
     if prim is None or not prim.IsValid():
         return False
     return bool(UsdGeom.Gprim(prim).GetDoubleSidedAttr().Get())
+
+
+def _unit(value: float) -> float:
+    return min(max(value, 0.0), 1.0)
 
 
 def _scalar(value: Any) -> float | None:

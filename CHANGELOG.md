@@ -70,6 +70,16 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- Assets are drawn in the colours Isaac Sim draws them in, in the window, `arena-render` and
+  `render_views`. Colours were read as sRGB where USD authors them linear, so every flat colour drew
+  too dark. OmniPBR materials draw their texture alone rather than tinted by the colour beside it,
+  which turned `dex_cube`'s yellow faces dark green and `grey_bin_robolab` dark red, and an
+  untextured one starts from OmniPBR's dark grey where it drew white, as the milk jug did. A glow
+  is drawn only where the material turns emission on: the office table's frame and some Lightwheel
+  faucets drew salmon pink. A roughness past 1 is clamped, as Isaac Sim does, where agibot drew
+  white all over.
+- An asset whose USD says it is Y-up is drawn as Isaac Sim spawns it, as authored: the factory
+  `peg` and `hole` lay on their side.
 - `check_spec` says where a misspelt object or background param shows: it passes the check, and
   `describe_scene`, `arena-render` and the window stop on it seconds in, with
   `TypeError: object.__init__() takes exactly one argument`, which names neither the param nor the

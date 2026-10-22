@@ -7,9 +7,7 @@ spelling for anything, so the parser is a pile of aliases and fallbacks that onl
 stays honest if each branch has a fixture pinning it.
 
 TODO: cover the rest of the parser in this style.
-  * MDL/OmniPBR inputs — `diffuse_color_constant`, `diffuse_texture` holding the
-    asset path directly on the input rather than through a connection, and
-    `outputs:mdl:surface` as the only authored surface output.
+  * OmniPBR's `albedo_add` and `albedo_desaturation`, once something reads them.
   * `displayColor` as the fallback for a prim that binds no material.
   * `GeomSubset` bindings: per-subset materials, and subset faces inheriting the
     mesh's own binding when they bind nothing.
@@ -207,3 +205,123 @@ def test_a_packed_orm_map_feeds_both_slots_that_read_it(mdl_dir: Path) -> None:
     orm = str(mdl_dir / "T_Props_ao_r_m.png")
     assert material.textures["metallic_roughness"] == orm
     assert material.textures["occlusion"] == orm
+
+
+def test_a_preview_surface_texture_is_the_colour_itself(stage_dir: Path) -> None:
+    """`diffuseColor` connected to a texture leaves no constant to multiply it by.
+
+    It came out at the default grey times the texture, so every textured
+    UsdPreviewSurface drew 40% darker than RTX draws it.
+    """
+    material = extract(open_stage(str(stage_dir / "asset.usda")))[0].material
+
+    assert material.base_color == (1.0, 1.0, 1.0)
+
+
+# A quad bound to OmniPBR, the MDL most of the library is authored in. `{inputs}`
+# is where each test authors what it asserts on.
+OMNIPBR = """#usda 1.0
+(
+    defaultPrim = "Asset"
+)
+
+def Xform "Asset"
+{{
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {{
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        rel material:binding = </Asset/Looks/Omni>
+    }}
+
+    def Scope "Looks"
+    {{
+        def Material "Omni"
+        {{
+            token outputs:mdl:surface.connect = </Asset/Looks/Omni/Shader.outputs:out>
+
+            def Shader "Shader"
+            {{
+                uniform token info:implementationSource = "sourceAsset"
+                uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+                uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+                {inputs}
+                token outputs:out
+            }}
+        }}
+    }}
+}}
+"""
+
+
+def omnipbr(tmp_path: Path, inputs: str):
+    """The material of a quad whose OmniPBR authors ``inputs``, beside an `albedo.png`."""
+    (tmp_path / "albedo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    usda = tmp_path / "omnipbr.usda"
+    usda.write_text(OMNIPBR.format(inputs=inputs), encoding="utf-8")
+    return extract(open_stage(str(usda)))[0].material
+
+
+def test_omnipbr_draws_its_texture_rather_than_its_constant(tmp_path: Path) -> None:
+    """`dex_cube` authors a blue `diffuse_color_constant` beside its texture.
+
+    OmniPBR picks one or the other, and only the tint multiplies the texture.
+    Multiplied by the blue, its yellow faces drew dark green.
+    """
+    material = omnipbr(
+        tmp_path,
+        """color3f inputs:diffuse_color_constant = (0.13, 0.37, 0.8)
+                asset inputs:diffuse_texture = @./albedo.png@
+                color3f inputs:diffuse_tint = (1, 0.5, 1)""",
+    )
+
+    assert material.textures["base_color"] == str(tmp_path / "albedo.png")
+    assert material.base_color == pytest.approx((1, 0.5, 1))
+
+
+def test_an_untextured_omnipbr_starts_from_its_dark_grey(tmp_path: Path) -> None:
+    """The milk jug's body authors only a white tint over OmniPBR's 0.2 default.
+
+    Taking the tint for the colour drew it white.
+    """
+    material = omnipbr(tmp_path, "color3f inputs:diffuse_tint = (1, 1, 1)")
+
+    assert material.base_color == pytest.approx((0.2, 0.2, 0.2))
+
+
+def test_omnipbr_at_zero_brightness_is_its_offset_alone(tmp_path: Path) -> None:
+    """The office table's chrome top scales its texture to nothing and adds 0.11."""
+    material = omnipbr(
+        tmp_path,
+        """asset inputs:diffuse_texture = @./albedo.png@
+                float inputs:albedo_brightness = 0
+                float inputs:albedo_add = 0.11""",
+    )
+
+    assert "base_color" not in material.textures
+    assert material.base_color == pytest.approx((0.11, 0.11, 0.11))
+
+
+@pytest.mark.parametrize("enabled, glow", [(0, (0, 0, 0)), (1, (1, 0.1, 0.1))])
+def test_omnipbr_glows_only_with_emission_enabled(tmp_path: Path, enabled: int, glow: tuple) -> None:
+    """The office table's frame authors a red `emissive_color` with emission off.
+
+    RTX draws no glow; reading the colour anyway drew the frame salmon.
+    """
+    material = omnipbr(
+        tmp_path,
+        f"""color3f inputs:emissive_color = (1, 0.1, 0.1)
+                bool inputs:enable_emission = {enabled}""",
+    )
+
+    assert material.emissive == pytest.approx(glow)
+
+
+def test_a_roughness_past_one_is_clamped(tmp_path: Path) -> None:
+    """agibot's A2D authors a roughness of 45.25, which drew the robot white."""
+    material = omnipbr(tmp_path, "float inputs:reflection_roughness_constant = 45.25")
+
+    assert material.roughness == 1.0

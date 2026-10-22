@@ -224,6 +224,20 @@ def test_the_default_prim_keeps_its_rotation_and_drops_its_translate_and_scale(t
     assert positions.max(axis=0).round(6).tolist() == [0, 1, 0]
 
 
+def test_up_axis_and_units_are_drawn_as_authored(tmp_path: Path) -> None:
+    """The factory peg and hole author `upAxis = "Y"` over geometry modelled Z-up.
+
+    Isaac Lab references a USD without converting it, and Arena bounds it as
+    authored. Turning the stage upright for its metadata laid the peg on its side.
+    """
+    usda = tmp_path / "asset.usda"
+    stage = QUAD.format(normals="", extra="").replace('upAxis = "Z"', 'upAxis = "Y"')
+    usda.write_text(stage.replace("metersPerUnit = 1", "metersPerUnit = 0.01"), encoding="utf-8")
+    positions = extract(open_stage(str(usda)))[0].surface.positions
+
+    assert positions.max(axis=0).tolist() == [1, 1, 0]
+
+
 def test_a_cube_scaled_flat_keeps_the_normals_of_its_two_faces(tmp_path: Path) -> None:
     """A zero scale leaves no inverse to transform the normals by.
 

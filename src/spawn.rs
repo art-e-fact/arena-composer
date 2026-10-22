@@ -135,7 +135,8 @@ fn build_material(node: &Node, world: &mut World) -> Handle<StandardMaterial> {
     let [er, eg, eb] = node.emissive;
 
     let mut material = StandardMaterial {
-        base_color: Color::srgba(red, green, blue, node.opacity),
+        // Linear, as USD and MDL author colours: read as sRGB, OmniPBR's 0.2 grey drew as 0.03.
+        base_color: Color::linear_rgba(red, green, blue, node.opacity),
         perceptual_roughness: node.roughness,
         metallic: node.metallic,
         emissive: LinearRgba::rgb(er, eg, eb),
@@ -349,5 +350,22 @@ mod tests {
         assert!(matches!(material.alpha_mode, AlphaMode::Blend));
         assert_eq!(material.base_color.alpha(), 0.5);
         assert!(material.double_sided && material.cull_mode.is_none());
+    }
+
+    /// The payload's colours are linear; read as sRGB, every constant colour drew darker.
+    #[test]
+    fn base_color_is_linear() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>();
+
+        let mut node = triangle();
+        node.base_color = [0.2, 0.2, 0.2];
+        let handle = build_material(&node, app.world_mut());
+
+        let materials = app.world().resource::<Assets<StandardMaterial>>();
+        let material = materials.get(&handle).expect("the material was added");
+        assert_eq!(material.base_color.to_linear().red, 0.2);
     }
 }
