@@ -24,7 +24,10 @@ it knows which of the two files a key belongs in, keeps comments, and quotes wha
 as a boolean. Rust's half is a form that cannot reach an invalid state — ids come from dropdowns, and
 a unary relation has no `reference` slot at all. What construction cannot prevent comes back in the
 payload's `errors`, each shown as a toast in the corner of the 3D view until it is closed (`toasts` in
-[form.rs](../src/editor/form.rs)).
+[form.rs](../src/editor/form.rs)). What is wrong with the spec as it stands comes back as `problems`
+instead, each marked on the card of the entry it names ([Cards](#cards)). A toast is an event, an
+edit refused or a solve failed, and stays until it is closed; a mark is the spec's state, and goes
+when its entry is fixed.
 
 ## The header
 
@@ -45,9 +48,19 @@ a solve runs, a spinner takes the ⟳'s place, as one takes the browser's reinde
 
 Every entry of the spec — the robot, the background, each object, set, reference, relation, the task
 and each subtask — is a `Card`, after Blender's modifier stack. The header is the fold arrow, an
-icon, the title, and at the far edge the eye (relations only) and the × that removes the entry. The
-title is the entry's id, always a box to type in; a relation or subtask has no id, so its kind menu
-takes the title's place. An object's icon is its asset's picture, where the asset has one.
+icon, a ⚠ where the entry has problems, the title, and at the far edge the eye (relations only) and
+the × that removes the entry. The title is the entry's id, always a box to type in; a relation or
+subtask has no id, so its kind menu takes the title's place. An object's icon is its asset's
+picture, where the asset has one.
+
+The ⚠ is red where the build would refuse the entry, and amber where Arena builds it and the sim
+will not do what was meant, a solve's warning; hovering it reads every line (`card::mark`). Python
+puts each line at its entry by the path or id it starts with (`payload._attributed`), and
+`Form::problems_at` hands a card its own by the path the card is keyed by, so a line naming
+nothing with a card, such as `placer_params`, is not shown, and a subtask's is on its own card
+alone. A solve's warnings name their entry by position, which an edit can hand to another, so they
+are sent only while the file reads to the spec that solve read: after an edit they wait for its
+solve.
 
 A node's card wears the colours its node has in the graph, from `card::Role`: a stripe down its
 left edge in the node's border colour, its fill tinted a little toward the node's fill, and its

@@ -3,10 +3,11 @@
 //! entry's settings — folds away under it.
 //!
 //! The header reads left to right: the fold arrow, an icon for what sort of
-//! entry it is, the title — the entry's id, or a relation's kind — and at the
-//! far edge the entry's toggle and the × that removes it. Every section draws
-//! its entries through here, so one added later looks and behaves like the
-//! rest: it says what goes in the title and in the body, and nothing else.
+//! entry it is, a ⚠ where something is wrong with it, the title — the entry's
+//! id, or a relation's kind — and at the far edge the entry's toggle and the ×
+//! that removes it. Every section draws its entries through here, so one added
+//! later looks and behaves like the rest: it says what goes in the title and in
+//! the body, and nothing else.
 //!
 //! A node's card wears its node's colours from the graph, so that the two are
 //! matched by eye: a stripe down its left edge in the node's border colour,
@@ -16,6 +17,15 @@
 use bevy_egui::egui;
 use egui::collapsing_header::{CollapsingState, paint_default_icon};
 use egui::Color32;
+
+use crate::spec::Problem;
+
+/// What an error is said in: a layout failing the checks, a toast, and the mark
+/// on a card whose entry the build would refuse.
+pub const FAILED: Color32 = Color32::from_rgb(240, 130, 115);
+/// What a warning is said in: the mark on a card whose entry Arena builds and
+/// the sim will not do as meant.
+const WARNED: Color32 = Color32::from_rgb(235, 190, 100);
 
 /// The glyph each kind of node wears: on its card, on its tile in the asset
 /// browser where it has no picture, and on its node in the graph.
@@ -90,6 +100,7 @@ pub struct Card<'a> {
     removable: bool,
     picked: bool,
     reveal: bool,
+    problems: Vec<&'a Problem>,
 }
 
 /// What a card reports once it is drawn.
@@ -116,6 +127,7 @@ impl<'a> Card<'a> {
             removable: false,
             picked: false,
             reveal: false,
+            problems: Vec::new(),
         }
     }
 
@@ -160,6 +172,12 @@ impl<'a> Card<'a> {
         self
     }
 
+    /// Mark the header with what is wrong with the entry, read on hover.
+    pub fn problems(mut self, problems: Vec<&'a Problem>) -> Self {
+        self.problems = problems;
+        self
+    }
+
     /// Draw the card: `title` in the header, taking whatever width is left to
     /// it, and `body` under it while the card is open.
     ///
@@ -172,7 +190,7 @@ impl<'a> Card<'a> {
         title: impl FnOnce(&mut egui::Ui, &mut C),
         body: impl FnOnce(&mut egui::Ui, &mut C),
     ) -> Shown {
-        let Card { id, icon, summary, open, pin, removable, picked, reveal } = self;
+        let Card { id, icon, summary, open, pin, removable, picked, reveal, problems } = self;
         let colors = icon.role().map(Role::colors);
         ui.push_id(id, |ui| {
             let mut fold = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id("fold"), open);
@@ -191,6 +209,9 @@ impl<'a> Card<'a> {
             inner.horizontal(|ui| {
                 fold.show_toggle_button(ui, paint_default_icon);
                 icon.show(ui);
+                if !problems.is_empty() {
+                    mark(ui, &problems);
+                }
                 // Right to left: the buttons keep the far edge, and the title
                 // spreads over whatever is left between them.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -258,6 +279,16 @@ impl Icon {
             }
         }
     }
+}
+
+/// What is wrong with an entry, as a ⚠ after its icon: in an error's colour
+/// where the build would refuse it, and a warning's where only the sim would
+/// show it. Every line is read on hover.
+fn mark(ui: &mut egui::Ui, problems: &[&Problem]) {
+    let color = if problems.iter().all(|problem| problem.warning) { WARNED } else { FAILED };
+    let lines: Vec<&str> = problems.iter().map(|problem| problem.line.as_str()).collect();
+    let mark = egui::Label::new(egui::RichText::new("⚠").color(color)).selectable(false);
+    ui.add(mark).on_hover_text(lines.join("\n"));
 }
 
 /// The summary of a folded card, after its title in a right-to-left header:

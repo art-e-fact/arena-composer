@@ -5,7 +5,8 @@ props are a megabyte that changes only when the index is rebuilt or a picture is
 fetched, so they ride the message that changed them and no other.
 
 The spec rides every message too, so one about a file that no longer reads
-carries the spec it last read to.
+carries the spec it last read to. So does what is wrong with it, at the entry
+each problem names.
 """
 
 from __future__ import annotations
@@ -174,6 +175,67 @@ def test_a_spec_that_no_longer_reads_still_carries_the_reason(tmp_path: Path, mo
     payload.build_payload({"assets": [], "spec": {"env_name": "solved"}, "spec_path": str(spec)}, remote=False)
     spec.write_text(SPEC.replace("banana_ycb_robolab", "no_such_asset"))
     assert carried(["ValidationError"]) == "from_the_file"
+
+
+def test_a_problem_goes_to_the_card_of_the_entry_it_names():
+    """By path, after the file a line names first where the spec is two, or by
+    id, as the solve's warnings name theirs. A line naming no entry the panel
+    draws a card for has nowhere to go."""
+    spec = {
+        "embodiment": {"id": "droid"},
+        "background": {"id": "table"},
+        "objects": [{"id": "banana"}, {"id": "bowl"}],
+        "object_sets": None,
+    }
+    errors = [
+        "../scenes/scene.yaml: relations.12.params.foo: on takes no 'foo'",
+        "task.subtasks.1.params.bogus: PickAndPlaceTask takes no 'bogus'",
+        "task.subtasks: atomic takes exactly one subtask",
+        "placer_params.enabled_checks.0: no check is called 'nope'",
+        "TypeError: object.__init__() takes exactly one argument",
+    ]
+    warnings = [
+        "bowl: no relation places it and it has no initial_pose, so it spawns at the origin",
+        "droid: its origin, (0.00, 0.00, 0.00), is inside table's box, so the robot spawns inside table",
+    ]
+
+    found = [(problem["path"], problem["warning"]) for problem in payload._attributed(spec, errors, warnings)]
+    assert found == [
+        (["relations", 12], False),
+        (["task", "subtasks", 1], False),
+        (["task"], False),
+        (["objects", 1], True),
+        (["embodiment"], True),
+    ]
+
+
+def test_a_message_carries_what_is_wrong_with_its_spec(tmp_path: Path, monkeypatch):
+    """What `check_spec` would say rides every message, and what the last solve
+    warned of rides while the file still reads to the spec it solved: a warning
+    names its entry by position, which an edit since may have handed on."""
+    from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
+
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    spec = tmp_path / "task.yaml"
+    # A param `on` does not take: the validator passes it, the build would not.
+    planted = "relations:\n- {kind: 'on', subject: bowl, reference: maple_table_robolab, params: {foo: 1}}\n"
+    spec.write_text(SPEC.replace("relations:\n", planted))
+
+    def problems() -> list[tuple[list, bool]]:
+        message = msgpack.unpackb(payload.encode_spec(spec, []))
+        return [(problem["path"], problem["warning"]) for problem in message["problems"]]
+
+    assert problems() == [(["relations", 0], False)]
+
+    solved = ArenaEnvGraphSpec.from_yaml(spec).model_dump(mode="json")
+    warned = "bowl: no relation places it and it has no initial_pose, so it spawns at the origin"
+    dump = {"assets": [], "spec": solved, "spec_path": str(spec), "warnings": [warned]}
+    assert len(payload.build_payload(dump, remote=False)["problems"]) == 2, "the panel opens without them"
+    assert problems() == [(["relations", 0], False), (["objects", 1], True)]
+
+    # Fixed by hand, and not solved since.
+    spec.write_text(SPEC)
+    assert problems() == [], "a warning outlived the spec it was solved from"
 
 
 # A reduction of the KUKA-Allegro's kuka.usd: links are sibling Xforms under the

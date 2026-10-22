@@ -63,7 +63,7 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
 use crate::layout::Placed;
 use crate::scene::{Layout, Scene as Payload};
-use crate::spec::{CatalogAsset, Node, Request, Spec, Vocabulary};
+use crate::spec::{CatalogAsset, Node, Problem, Request, Spec, Step, Vocabulary};
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(EguiPlugin::default())
@@ -144,6 +144,9 @@ pub struct Form {
     /// How many messages have carried errors. The same error again opens no
     /// second toast, so this is what says it came again.
     pub failures: u64,
+    /// What is wrong with the spec, each at the entry it is about, marked on
+    /// that entry's card. See [`Form::take`].
+    pub problems: Vec<Problem>,
 }
 
 impl Form {
@@ -171,6 +174,16 @@ impl Form {
         if let Some(solving) = scene.solving {
             self.solving = solving;
         }
+        // Replaced rather than kept like the errors: they say what is wrong
+        // with the spec as it stands, and a fixed entry is no longer wrong.
+        if let Some(problems) = &scene.problems {
+            self.problems = problems.clone();
+        }
+    }
+
+    /// What is wrong with the entry at `path`, for its card.
+    fn problems_at(&self, path: &[Step]) -> Vec<&Problem> {
+        self.problems.iter().filter(|problem| problem.path == path).collect()
     }
 
     /// Keep what `scene` says about the assets, where it says anything.
@@ -460,6 +473,24 @@ mod tests {
         };
         form.take(&refused);
         assert!(form.revision > revision, "a refused value would stay on screen");
+    }
+
+    /// Problems are the spec as it stands, where errors are events: a message
+    /// carrying them replaces the last, so a fixed entry loses its mark, and
+    /// one about a file that no longer reads, carrying none, leaves them.
+    #[test]
+    fn problems_are_replaced_not_piled_up() {
+        let problem = crate::spec::Problem {
+            path: vec!["relations".into(), 0usize.into()],
+            line: "relations.0.params.foo: on takes no 'foo'".into(),
+            warning: false,
+        };
+        let mut form = Form::default();
+        form.take(&Payload { problems: Some(vec![problem]), ..Default::default() });
+        form.take(&Payload::default());
+        assert_eq!(form.problems.len(), 1, "a message with nothing to say dropped them");
+        form.take(&Payload { problems: Some(vec![]), ..Default::default() });
+        assert!(form.problems.is_empty(), "a fixed entry kept its mark");
     }
 
     /// An error stays up until it is closed: an edit landing after it, or a
