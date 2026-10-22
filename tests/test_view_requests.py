@@ -76,7 +76,7 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
     solving = threading.Event()
     solves: list[int] = []
 
-    def resolve(spec: Path, seed: int) -> bytes:
+    def resolve(spec: Path, seed: int, samples: int) -> bytes:
         solves.append(seed)
         assert solving.wait(timeout=5), "the test never released the solver"
         return msgpack.packb({"assets": [], "spec": {"env_name": "solved"}}, use_bin_type=True)
@@ -93,9 +93,9 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
 
     async def run() -> None:
         viewer = _Viewer()
-        asked = asyncio.Event()
-        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, viewer, asked))
-        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked))
+        asked, reseed = asyncio.Event(), asyncio.Event()
+        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, 1, viewer, asked, reseed))
+        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked, reseed))
         for value in ("one", "two", "three"):
             viewer.edit(value)
 
@@ -108,6 +108,42 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
         # The two edits that landed mid-solve are answered together by the next.
         await asyncio.wait_for(_until(lambda: len(solves) == 2), timeout=5)
         await asyncio.wait_for(_until(lambda: any(a.get("assets") is not None for a in viewer.answers)), timeout=5)
+
+        viewer.stdout.feed_eof()
+        await asyncio.wait_for(reading, timeout=5)
+        solver.cancel()
+
+    asyncio.run(run())
+
+
+def test_new_layouts_are_drawn_from_a_new_seed_that_later_solves_keep(monkeypatch, tmp_path: Path):
+    """Asking for new layouts writes nothing and is answered at once, as an
+    accepted edit is: a solve is coming. That solve draws from a new seed, and
+    so does every one after it, an edit's included — or the layouts asked for
+    would go back to the old seed's at the next edit."""
+    solves: list[tuple[int, int]] = []
+
+    def resolve(spec: Path, seed: int, samples: int) -> bytes:
+        solves.append((seed, samples))
+        return msgpack.packb({"assets": [], "spec": {}}, use_bin_type=True)
+
+    monkeypatch.setattr(view, "_resolve", resolve)
+    monkeypatch.setattr(view, "encode_spec", _packed)
+    monkeypatch.setattr(view.random, "randrange", lambda stop: 7)
+    monkeypatch.setattr(view.spec_edit, "apply", lambda *_: view.spec_edit.Result(ok=True, errors=[], changed=["set"]))
+
+    async def run() -> None:
+        viewer = _Viewer()
+        asked, reseed = asyncio.Event(), asyncio.Event()
+        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, 5, viewer, asked, reseed))
+        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked, reseed))
+
+        viewer.ask({"op": view.REGENERATE})
+        await asyncio.wait_for(_until(lambda: len(solves) == 1), timeout=5)
+        assert viewer.answers[0]["solving"] is True, "the panel was not told a solve is coming"
+        viewer.edit("moved")
+        await asyncio.wait_for(_until(lambda: len(solves) == 2), timeout=5)
+        assert solves == [(7, 5), (7, 5)], "an edit went back to the old seed"
 
         viewer.stdout.feed_eof()
         await asyncio.wait_for(reading, timeout=5)
@@ -167,7 +203,8 @@ def test_a_refused_edit_is_answered_without_a_solve(monkeypatch, tmp_path: Path)
         asked = asyncio.Event()
         viewer.edit("nope")
         viewer.stdout.feed_eof()
-        await asyncio.wait_for(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked), timeout=5)
+        serving = view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked, asyncio.Event())
+        await asyncio.wait_for(serving, timeout=5)
         assert not asked.is_set(), "a refused edit asked for a solve"
         assert [a["errors"] for a in viewer.answers] == [["objects.0: named by a task"]]
         assert viewer.answers[0]["solving"] is False
@@ -185,7 +222,7 @@ def test_a_change_on_disk_that_will_not_build_says_why(monkeypatch, tmp_path: Pa
     solving = threading.Event()
     solves: list[str] = []
 
-    def resolve(path: Path, seed: int) -> bytes:
+    def resolve(path: Path, seed: int, samples: int) -> bytes:
         solves.append(path.read_text())
         assert solving.wait(timeout=5), "the test never released the solver"
         if "[" in solves[-1]:
@@ -199,7 +236,7 @@ def test_a_change_on_disk_that_will_not_build_says_why(monkeypatch, tmp_path: Pa
         _write(spec, "env_name: first\n", 1)
         asked = asyncio.Event()
         running = [
-            asyncio.create_task(view._solve_when_asked(spec, 42, viewer, asked)),
+            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event())),
             asyncio.create_task(view._reload_on_change(spec, viewer, view._watched(spec), asked)),
         ]
         _write(spec, "env_name: [\n", 2)
@@ -237,7 +274,7 @@ def test_an_edit_from_the_panel_is_not_solved_again_as_a_change_on_disk(monkeypa
         time.sleep(0.03)
         return view.spec_edit.Result(ok=True, errors=[], changed=["set"])
 
-    def resolve(path: Path, seed: int) -> bytes:
+    def resolve(path: Path, seed: int, samples: int) -> bytes:
         solves.append(path.read_text())
         raise RuntimeError("placement failed")
 
@@ -249,9 +286,9 @@ def test_an_edit_from_the_panel_is_not_solved_again_as_a_change_on_disk(monkeypa
         _write(spec, "env_name: first\n", 1)
         stamps, asked = view._watched(spec), asyncio.Event()
         running = [
-            asyncio.create_task(view._solve_when_asked(spec, 42, viewer, asked)),
+            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event())),
             asyncio.create_task(view._reload_on_change(spec, viewer, stamps, asked)),
-            asyncio.create_task(view._serve_requests(spec, viewer, stamps, asked)),
+            asyncio.create_task(view._serve_requests(spec, viewer, stamps, asked, asyncio.Event())),
         ]
         viewer.edit("second")
         await asyncio.wait_for(_until(lambda: len(viewer.answers) == 2), timeout=5)
@@ -277,7 +314,7 @@ def test_a_change_on_disk_and_an_edit_from_the_panel_are_solved_in_turn(monkeypa
         _write(path, f"env_name: {value}\n", 3)
         return view.spec_edit.Result(ok=True, errors=[], changed=["set"])
 
-    def resolve(path: Path, seed: int) -> bytes:
+    def resolve(path: Path, seed: int, samples: int) -> bytes:
         solves.append(path.read_text())
         assert solving.wait(timeout=5), "the test never released the solver"
         return msgpack.packb({"assets": [], "env_name": solves[-1]}, use_bin_type=True)
@@ -290,9 +327,9 @@ def test_a_change_on_disk_and_an_edit_from_the_panel_are_solved_in_turn(monkeypa
         _write(spec, "env_name: first\n", 1)
         stamps, asked = view._watched(spec), asyncio.Event()
         running = [
-            asyncio.create_task(view._solve_when_asked(spec, 42, viewer, asked)),
+            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event())),
             asyncio.create_task(view._reload_on_change(spec, viewer, stamps, asked)),
-            asyncio.create_task(view._serve_requests(spec, viewer, stamps, asked)),
+            asyncio.create_task(view._serve_requests(spec, viewer, stamps, asked, asyncio.Event())),
         ]
         _write(spec, "env_name: by hand\n", 2)
         await asyncio.wait_for(_until(lambda: solves), timeout=5)
@@ -346,7 +383,8 @@ def _served(monkeypatch, request: dict, tmp_path: Path) -> list[dict]:
 
     async def run() -> list[dict]:
         viewer = _Viewer()
-        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asyncio.Event()))
+        unused = asyncio.Event(), asyncio.Event()
+        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, *unused))
         viewer.ask(request)
         # The prop list is the last word on any of these, so waiting for one
         # waits for the request to be served through.
@@ -410,7 +448,8 @@ def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
 
     async def run() -> list[dict]:
         viewer = _Viewer()
-        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asyncio.Event()))
+        unused = asyncio.Event(), asyncio.Event()
+        reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, *unused))
         viewer.ask({"op": "reindex"})
         await asyncio.wait_for(_until(lambda: any(a["remote"] for a in viewer.answers)), timeout=5)
         viewer.stdout.feed_eof()

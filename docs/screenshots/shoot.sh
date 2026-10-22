@@ -29,9 +29,10 @@ shoot() {
     local png=$1 scene=$2
     shift 2
     if [[ ! $scene.msgpack -nt $scene.yaml ]]; then
-        # This checkout's packer, not whichever one Arena's venv has installed.
+        # This checkout's packer, not whichever one Arena's venv has installed;
+        # as many samples as arena-view solves, for its header to page through.
         PYTHONPATH=../../python python -m arena_composer.resolve_layout "$scene.yaml" --format text \
-            --payload "$scene.msgpack"
+            --samples 5 --payload "$scene.msgpack"
     fi
     rm -f "$png"
     if ! env DISPLAY="$display" VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \

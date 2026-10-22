@@ -228,6 +228,50 @@ def Xform "kuka" (prepend apiSchemas = ["PhysicsArticulationRootAPI"])
 """
 
 
+def test_each_layout_rides_the_payload_and_shares_what_it_draws():
+    """A solve's samples stand the same pieces in other places, so each costs
+    the payload a pose per asset and no geometry, but for an object set's
+    member that no other layout drew. The first is `assets`, all a render
+    draws, and each carries its own verdict."""
+
+    def placed(node_id: str, x: float, top: float = 1.0) -> dict:
+        """An asset with no USD, drawn as the box it was placed by."""
+        return {
+            "id": node_id, "role": "object", "position_xyz": [x, 0, 0], "rotation_xyzw": [0, 0, 0, 1],
+            "bbox_min": [0, 0, 0], "bbox_max": [1, 1, top],
+        }
+
+    first = [placed("crate", 0.0), placed("snack", 2.0, top=0.2)]
+    dump = {
+        "placement": {"seed": 7, "success": True, "failed_checks": []},
+        "assets": first,
+        "layouts": [
+            {"success": True, "failed_checks": [], "assets": first},
+            # The set's other member, a taller one, in the second env.
+            {"success": False, "failed_checks": ["no_overlap"], "assets": [placed("crate", 1.0), placed("snack", 3.0)]},
+        ],
+    }
+
+    built = payload.build_payload(dump, remote=False)
+    one, two = built["layouts"]
+    assert built["assets"] == one["assets"]
+    assert two["assets"][0]["position_xyz"] == [1.0, 0.0, 0.0]
+    assert one["assets"][0]["geometry"] == two["assets"][0]["geometry"], "the crate was packed twice"
+    assert one["assets"][1]["geometry"] != two["assets"][1]["geometry"], "the set drew one member in both"
+    assert len(built["geometries"]) == 3
+    assert [(layout["success"], layout["failed_checks"]) for layout in built["layouts"]] == [
+        (True, []),
+        (False, ["no_overlap"]),
+    ]
+    assert built["seed"] == 7
+
+    # One sample is `assets` alone, its verdict in the summary.
+    alone = {"placement": {"seed": 7, "success": False, "failed_checks": ["on_relation"]}, "assets": first}
+    built = payload.build_payload(alone, remote=False)
+    assert [(layout["success"], layout["failed_checks"]) for layout in built["layouts"]] == [(False, ["on_relation"])]
+    assert built["layouts"][0]["assets"] == built["assets"]
+
+
 def test_a_robot_is_drawn_at_the_start_pose_arena_places_it_by(tmp_path: Path):
     """Arena bounds a robot at its `init_state.joint_pos`, and props keep clear of
     that box. Drawn at the pose its file authors, the arm stands a metre tall where

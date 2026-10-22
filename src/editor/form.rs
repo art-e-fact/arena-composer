@@ -1,6 +1,7 @@
-//! What the panel shows: a section per part of the spec, each entry in it a
-//! [`Card`]. The dock under the 3D view beside it holds the asset browser and
-//! the spatial graph; see [`super::dock`].
+//! What the panel shows: a header for the layouts a solve drew, and under it a
+//! section per part of the spec, each entry in it a [`Card`]. The dock under
+//! the 3D view beside it holds the asset browser and the spatial graph; see
+//! [`super::dock`].
 //!
 //! A section says what an entry's card holds — its icon, its title, its body —
 //! and the card and the controls in it do the rest; see [`super::card`] and
@@ -21,6 +22,7 @@ use super::relations::{self, RelationGizmos};
 use super::thumbnails::{Files, Images, Pictures, Thumbnails};
 use super::{Form, PointerOverPanel, in_the_view, send};
 use crate::layout::Placed;
+use crate::scene::Layout;
 use crate::spec::{Kind, Relation, Request, Step, Value};
 
 /// How wide the panel opens. Draggable from there.
@@ -148,10 +150,14 @@ pub fn draw(
             .max_rect(ctx.viewport_rect()),
     );
     let mut images = Images::new(&files, &mut contexts);
-    let shown = egui::Panel::right("spec")
-        .default_size(WIDTH)
-        .min_size(240.0)
-        .show(&mut window, |ui| panel(ui, &form, &mut state, &mut |path| thumbnails.get(path, &mut images)));
+    let mut turned = None;
+    let shown = egui::Panel::right("spec").default_size(WIDTH).min_size(240.0).show(&mut window, |ui| {
+        turned = header(ui, &form);
+        panel(ui, &form, &mut state, &mut |path| thumbnails.get(path, &mut images))
+    });
+    if let Some(page) = turned {
+        form.page = page;
+    }
     // After the panel, so the dock spans the view alone and the panel keeps
     // the window's full height, as Isaac Sim lays out its stage and content
     // browser. A pick in its graph reaches the panel on the next frame.
@@ -204,26 +210,81 @@ pub fn draw(
         }
     }
 
-    // Over the 3D view, in the corner of what the panels left of it. The view
-    // is the half that is behind: an accepted edit reaches the form at once and
-    // the layout only once the solver has caught up.
-    if form.solving {
-        let spot = egui::Rect::from_min_size(view.right_top() + egui::vec2(-232.0, 12.0), egui::vec2(220.0, 20.0));
-        // Right to left, so the spinner keeps the corner and the words run
-        // inward from it however long they are.
-        let mut status = window.new_child(
-            egui::UiBuilder::new()
-                .max_rect(spot)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        status.add(spinner());
-        status.weak("Resolving layout…");
-    }
-    // The view's other corner, above the dock and beside the panel.
+    // The view's corner above the dock and beside the panel.
     if let Some(closed) = toasts(&ctx, view, &form.errors) {
         form.errors.remove(closed);
     }
     Ok(())
+}
+
+/// What a layout that passes is said in, and one that fails, as an error is.
+const PASSED: egui::Color32 = egui::Color32::from_rgb(130, 200, 140);
+const FAILED: egui::Color32 = egui::Color32::from_rgb(240, 130, 115);
+
+/// The head of the panel, over the spec: which of the layouts the last solve
+/// drew the view shows, what the checks made of it, and the button that solves
+/// again from a new seed. Returns the page the pager turned to.
+///
+/// While a solve is running a spinner takes the button's place, as it takes
+/// the reindex button's: the view beside the panel is the half behind, since
+/// an accepted edit reaches the form at once and the layout only once the
+/// solver has caught up. The pager still turns the layouts on screen.
+fn header(ui: &mut egui::Ui, form: &Form) -> Option<usize> {
+    let mut turned = None;
+    ui.horizontal(|ui| {
+        // Right to left first, so the button keeps the far edge and the pager
+        // and its verdict take what is left from the near one.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if form.solving {
+                ui.add(spinner()).on_hover_text("solving: the view catches up when the layouts land");
+                ui.weak("solving…");
+            } else {
+                if ui.button("⟳").on_hover_text("solve again from a new seed").clicked() {
+                    send(Request::Regenerate);
+                }
+                if let Some(seed) = form.seed {
+                    ui.weak(format!("seed {seed}"))
+                        .on_hover_text(format!("drawn from seed {seed}: arena-view --seed {seed} draws them again"));
+                }
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let count = form.layouts.len().max(1);
+                let page = form.page.min(count - 1);
+                let back = ui.add_enabled(page > 0, egui::Button::new("⏴").frame(false));
+                if back.on_hover_text("the layout before").clicked() {
+                    turned = Some(page - 1);
+                }
+                ui.label(format!("{} / {count}", page + 1))
+                    .on_hover_text(format!("layout {} of the {count} the solve drew, one per env", page + 1));
+                let next = ui.add_enabled(page + 1 < count, egui::Button::new("⏵").frame(false));
+                if next.on_hover_text("the next layout").clicked() {
+                    turned = Some(page + 1);
+                }
+                verdict(ui, form.layouts.get(page));
+            });
+        });
+    });
+    ui.separator();
+    turned
+}
+
+/// What the checks a dry solve runs made of the layout on screen.
+fn verdict(ui: &mut egui::Ui, layout: Option<&Layout>) {
+    let Some(layout) = layout else { return };
+    match layout.success {
+        Some(true) => {
+            ui.colored_label(PASSED, "✔ valid")
+                .on_hover_text("passes every check a dry solve runs: settling and the robot's reach are the sim's");
+        }
+        Some(false) => {
+            let failed = layout.failed_checks.join(", ");
+            let text = egui::RichText::new(format!("⚠ fails {failed}")).color(FAILED);
+            ui.add(egui::Label::new(text).truncate()).on_hover_text(format!("fails {failed}"));
+        }
+        None => {
+            ui.weak("nothing to place").on_hover_text("no relation places anything, so nothing was solved");
+        }
+    }
 }
 
 /// How wide an error toast is, where the view has the room.
@@ -240,9 +301,9 @@ const TOAST_TEXT_HEIGHT: f32 = 160.0;
 /// could go unread — and the next message is often only the solve catching up.
 /// The text can be selected, and the copy button takes all of it.
 ///
-/// An `Area` rather than a child of the window's `Ui`, as the spinner is: egui
-/// hit-tests what is above the background layer, so the camera gate gives it
-/// the pointer, and a drag across the text selects rather than orbits.
+/// An `Area` rather than a child of the window's `Ui`: egui hit-tests what is
+/// above the background layer, so the camera gate gives it the pointer, and a
+/// drag across the text selects rather than orbits.
 fn toasts(ctx: &egui::Context, view: egui::Rect, errors: &[String]) -> Option<usize> {
     let margin = 12.0;
     let width = TOAST_WIDTH.min(view.width() - 4.0 * margin).max(80.0);
@@ -256,7 +317,7 @@ fn toasts(ctx: &egui::Context, view: egui::Rect, errors: &[String]) -> Option<us
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_width(width);
                     ui.horizontal(|ui| {
-                        ui.colored_label(egui::Color32::from_rgb(240, 130, 115), "⚠ error");
+                        ui.colored_label(FAILED, "⚠ error");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if cross(ui, "close").clicked() {
                                 closed = Some(index);
@@ -980,6 +1041,99 @@ mod tests {
         form.revision += 1;
         frame(&form, &mut state);
         assert!(state.dock.graph.picked.is_none(), "a pick outlived the spec it was made on");
+    }
+
+    /// The header alone, a frame at a time: the page it turned to, and where
+    /// it drew each text.
+    struct Header {
+        ctx: egui::Context,
+        time: f64,
+    }
+
+    impl Header {
+        fn new() -> Self {
+            crate::editor::tests::SENT.with_borrow_mut(Vec::clear);
+            Self { ctx: egui::Context::default(), time: 0.0 }
+        }
+
+        fn frame(&mut self, form: &Form, events: Vec<egui::Event>) -> (Option<usize>, HashMap<String, egui::Pos2>) {
+            // A second a frame, so no two clicks read as a double click.
+            self.time += 1.0;
+            let input = egui::RawInput {
+                events,
+                time: Some(self.time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 200.0))),
+                ..Default::default()
+            };
+            let mut turned = None;
+            let output = self.ctx.run_ui(input, |ui| turned = header(ui, form));
+            let texts = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => {
+                        let at = egui::Rect::from_min_size(text.pos, text.galley.size()).center();
+                        Some((text.galley.text().to_owned(), at))
+                    }
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            (turned, texts)
+        }
+    }
+
+    fn click(at: egui::Pos2) -> Vec<egui::Event> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        vec![egui::Event::PointerMoved(at), button(true), button(false)]
+    }
+
+    /// Two layouts, the second failing a check.
+    fn two_layouts() -> Form {
+        let failing = Layout { success: Some(false), failed_checks: vec!["no_overlap".into()], ..Default::default() };
+        let layouts = vec![Layout { success: Some(true), ..Default::default() }, failing];
+        Form { layouts, seed: Some(42), ..Default::default() }
+    }
+
+    /// The pager turns within the layouts the solve drew, and says what the
+    /// checks made of the one on screen.
+    #[test]
+    fn the_pager_turns_within_the_layouts() {
+        let mut header = Header::new();
+        let mut form = two_layouts();
+        let (_, texts) = header.frame(&form, vec![]);
+        assert!(texts.contains_key("1 / 2") && texts.contains_key("✔ valid"), "{texts:?}");
+        assert_eq!(header.frame(&form, click(texts["⏴"])).0, None, "turned back from the first");
+        let (turned, _) = header.frame(&form, click(texts["⏵"]));
+        assert_eq!(turned, Some(1));
+
+        form.page = 1;
+        let (_, texts) = header.frame(&form, vec![]);
+        assert!(texts.contains_key("2 / 2") && texts.contains_key("⚠ fails no_overlap"), "{texts:?}");
+        assert_eq!(header.frame(&form, click(texts["⏵"])).0, None, "turned on past the last");
+        assert_eq!(header.frame(&form, click(texts["⏴"])).0, Some(0));
+    }
+
+    /// The button asks Python for new layouts, and gives way to a spinner
+    /// while a solve is running, as the reindex button does.
+    #[test]
+    fn regenerate_asks_python_and_waits_out_the_solve() {
+        let mut header = Header::new();
+        let mut form = two_layouts();
+        let (_, texts) = header.frame(&form, vec![]);
+        assert!(texts.contains_key("seed 42"), "{texts:?}");
+        header.frame(&form, click(texts["⟳"]));
+        assert_eq!(crate::editor::tests::SENT.with_borrow(Clone::clone), [Request::Regenerate]);
+
+        form.solving = true;
+        let (_, texts) = header.frame(&form, vec![]);
+        assert!(texts.contains_key("solving…") && !texts.contains_key("⟳"), "{texts:?}");
+        assert!(texts.contains_key("1 / 2"), "the pager went with the button");
     }
 
     /// A folded subtask says what it is done to, in the order its kind lists

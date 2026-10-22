@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import random
 import signal
 import sys
 from pathlib import Path
@@ -38,10 +39,15 @@ WATCH_INTERVAL = 0.5
 # Resolve once it has held still this long.
 SETTLE = 0.3
 
-#: The one thing the panel can ask for that is not an edit — see
-#: :func:`_serve_assets`. It is network against NVIDIA's bucket and does not
-#: touch the spec.
+#: How many layouts a solve draws, one per env, for the panel to page through.
+#: Five cost little more than one: the solver takes them in one batch.
+SAMPLES = 5
+
+#: What the panel asks for that is not an edit: the props, from NVIDIA's
+#: bucket — see :func:`_serve_assets` — and the layouts again, from a new seed.
+#: Neither touches the spec.
 ASSET_REQUEST = "reindex"
+REGENERATE = "regenerate"
 
 #: How many times an asset request's answer is retried. Its message carries the
 #: spec, so a spec caught mid-write fails to build one, and unlike an edit's
@@ -54,7 +60,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("spec", type=Path, help="Path to an ArenaEnvGraphSpec YAML")
     cli.add_spec_options(parser)
     parser.add_argument("--payload", type=Path, help="Also write the packed scene here, for `arena-viewer`")
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=SAMPLES,
+        metavar="N",
+        help=f"Layouts each solve draws, one per env, to page through in the panel (default: {SAMPLES})",
+    )
     args = parser.parse_args(argv)
+    if args.samples < 1:
+        parser.error(f"--samples must be at least 1, got {args.samples}")
 
     cli.apply_spec_options(parser, args)
     # Stamped before the first solve, so a change made during those seconds is
@@ -63,23 +78,25 @@ def main(argv: list[str] | None = None) -> int:
     # The opening payload is the only one that carries the SimReady props: the
     # window keeps the list it is given, and a payload written to a file has
     # nothing else to fill its browser from.
-    payload = _resolve(args.spec, args.seed, remote=True)
+    payload = _resolve(args.spec, args.seed, args.samples, remote=True)
 
     if args.payload:
         args.payload.write_bytes(payload)
 
-    return asyncio.run(_view(args.spec, args.seed, payload, stamps))
+    return asyncio.run(_view(args.spec, args.seed, args.samples, payload, stamps))
 
 
-def _resolve(spec: Path, seed: int | None, remote: bool = False) -> bytes:
-    """Resolve `spec` into a packed scene. Seconds of work."""
+def _resolve(spec: Path, seed: int | None, samples: int, remote: bool = False) -> bytes:
+    """Resolve `spec` into a packed scene of `samples` layouts. Seconds of work."""
     # Arena and the solver print progress to stdout; keep it off stdout so a
     # caller can still pipe this command's own output somewhere.
     with contextlib.redirect_stdout(sys.stderr):
-        return encode(resolve_layout_from_yaml(spec, seed=seed), remote=remote)
+        return encode(resolve_layout_from_yaml(spec, seed=seed, samples=samples), remote=remote)
 
 
-async def _view(spec: Path, seed: int | None, payload: bytes, stamps: dict[Path, int | None]) -> int:
+async def _view(
+    spec: Path, seed: int | None, samples: int, payload: bytes, stamps: dict[Path, int | None]
+) -> int:
     """Draw `payload`, reloading it from `spec` until the window closes.
     `stamps` is the files as they stood when `payload` was solved from them."""
     proc = await asyncio.create_subprocess_exec(
@@ -111,12 +128,12 @@ async def _view(spec: Path, seed: int | None, payload: bytes, stamps: dict[Path,
     # solves at once could land out of order and leave the older layout drawn.
     # The files are stamped as `payload` was solved from them, and the panel
     # stamps its own writes, so the watcher does not ask for those a second
-    # time.
-    asked = asyncio.Event()
+    # time. `reseed` asks the next solve to draw from a new seed.
+    asked, reseed = asyncio.Event(), asyncio.Event()
     running = [
-        asyncio.create_task(_solve_when_asked(spec, seed, proc, asked)),
+        asyncio.create_task(_solve_when_asked(spec, seed, samples, proc, asked, reseed)),
         asyncio.create_task(_reload_on_change(spec, proc, stamps, asked)),
-        asyncio.create_task(_serve_requests(spec, proc, stamps, asked)),
+        asyncio.create_task(_serve_requests(spec, proc, stamps, asked, reseed)),
         asyncio.create_task(_catch_up_on_pictures(spec, proc)),
     ]
     try:
@@ -143,9 +160,14 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
 
 
 async def _serve_requests(
-    spec: Path, proc: asyncio.subprocess.Process, stamps: dict[Path, int | None], asked: asyncio.Event
+    spec: Path,
+    proc: asyncio.subprocess.Process,
+    stamps: dict[Path, int | None],
+    asked: asyncio.Event,
+    reseed: asyncio.Event,
 ) -> None:
-    """Serve what the editor asks for: edits to the spec, and asset requests.
+    """Serve what the editor asks for: edits to the spec, new layouts, and
+    asset requests.
 
     An accepted edit is answered twice: with the spec as soon as it is on disk,
     and with the layout it resolves to once `_solve_when_asked`, which `asked`
@@ -161,6 +183,10 @@ async def _serve_requests(
 
     An asset request is neither written nor solved — it is minutes of network
     — so it goes to :func:`_serve_assets` and this loop reads on.
+
+    New layouts are a solve and no write: `reseed` tells
+    :func:`_solve_when_asked` to draw from a new seed, and the answer says one
+    is coming, as an accepted edit's does.
     """
     assert proc.stdout is not None
     crawls: asyncio.Queue[None] = asyncio.Queue()
@@ -174,6 +200,12 @@ async def _serve_requests(
                 # clicks when one is asked for, not when one starts.
                 with contextlib.suppress(Exception):
                     await _send(proc, encode_spec(spec, indexing=True))
+                continue
+            if op == REGENERATE:
+                reseed.set()
+                asked.set()
+                with contextlib.suppress(Exception):
+                    await _send(proc, encode_spec(spec, solving=True))
                 continue
 
             result = await asyncio.to_thread(
@@ -283,24 +315,39 @@ async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) ->
         await _answer(proc, spec)
 
 
-async def _solve_when_asked(spec: Path, seed: int | None, proc: asyncio.subprocess.Process, asked: asyncio.Event) -> None:
-    """Re-resolve `spec` whenever `asked` — by an edit from the panel, or a change
-    on disk — and draw what comes out.
+async def _solve_when_asked(
+    spec: Path,
+    seed: int | None,
+    samples: int,
+    proc: asyncio.subprocess.Process,
+    asked: asyncio.Event,
+    reseed: asyncio.Event,
+) -> None:
+    """Re-resolve `spec` whenever `asked` — by an edit from the panel, a change
+    on disk, or the panel asking for new layouts — and draw what comes out.
 
-    The one solver for both, so no two solves overlap: each reads the file
-    after the last one did, and the layouts land in the order of the files
-    they were solved from.
+    The one solver for all of them, so no two solves overlap: each reads the
+    file after the last one did, and the layouts land in the order of the
+    files they were solved from.
 
     One solve per burst of edits, not one per edit: `asked` is cleared before
     the solve and set again by anything that arrives during it, so the edits
     made while the solver was busy are answered together by the next one. They
     are all in the file by then — the layout is a function of the spec, not of
     the edits that got it there.
+
+    And of the seed, which `reseed` replaces with a random one. Every solve
+    after keeps it, an edit's included, as ``--seed`` would: the layouts asked
+    for stay up rather than going back to the old seed's at the next edit.
     """
     while True:
         await asked.wait()
         asked.clear()
-        layout, errors = await asyncio.to_thread(_solved, spec, seed)
+        if reseed.is_set():
+            reseed.clear()
+            # Six digits, to read off the panel and pass back as --seed.
+            seed = random.randrange(1_000_000)
+        layout, errors = await asyncio.to_thread(_solved, spec, seed, samples)
         if proc.returncode is not None:
             return  # the window closed while we were resolving
         # `asked` set again means the edits that arrived during this solve have
@@ -309,10 +356,10 @@ async def _solve_when_asked(spec: Path, seed: int | None, proc: asyncio.subproce
         await _draw(proc, spec, layout, errors, solving=asked.is_set())
 
 
-def _solved(spec: Path, seed: int | None) -> tuple[bytes | None, list[str]]:
+def _solved(spec: Path, seed: int | None, samples: int) -> tuple[bytes | None, list[str]]:
     """The scene `spec` resolves to, and what stopped it where it does not."""
     try:
-        return _resolve(spec, seed), []
+        return _resolve(spec, seed, samples), []
     except Exception as error:
         # Anything Arena raises on a spec that will not build: one from the
         # panel that validates but will not place, or a change on disk that

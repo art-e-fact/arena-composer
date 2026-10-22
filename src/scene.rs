@@ -37,6 +37,12 @@ pub struct Scene {
     /// the solver has caught up with it; what is drawn stays drawn until it
     /// has. See [`Scene::assets`].
     pub assets: Option<Vec<Asset>>,
+    /// Every layout the solve drew, one per sample, the first being `assets`:
+    /// the layouts the viewer pages through. Empty on a message carrying no
+    /// layout, and from a payload packed before there were samples.
+    pub layouts: Vec<Layout>,
+    /// The placement seed the layouts were drawn from, absent with no layout.
+    pub seed: Option<i64>,
     /// Extracted USD stages, shared by index — assets spawned from the same
     /// USD point at the same entry.
     pub geometries: Vec<Vec<Node>>,
@@ -92,6 +98,19 @@ impl Scene {
             .and_then(|index| self.geometries.get(index))
             .map_or(&[], Vec::as_slice)
     }
+}
+
+/// One of the layouts a solve drew, and what the checks a dry solve runs made
+/// of it.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Layout {
+    pub assets: Vec<Asset>,
+    /// Whether it passed every check; absent where nothing was placed, and so
+    /// nothing checked.
+    pub success: Option<bool>,
+    /// The checks it failed, by Arena's names for them.
+    pub failed_checks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

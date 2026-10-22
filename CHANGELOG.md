@@ -36,8 +36,19 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   `EmbodimentBase`, the robot, for `LiftObjectTaskRL`'s `embodiment`, and `Asset`, any entry, for
   most. A list of ids under `other_params` says it too. It said only `node_ref`, so agents learnt
   the class from `check_spec`'s refusal.
+- `arena-view`'s panel has a header that pages the view through the layouts a solve draws, one
+  per env, five by default (`--samples N`), and says whether each passes the checks or which it
+  fails. A page stays turned across edits, so the layout on screen moves only as far as an edit
+  moves it. It drew one layout, and another took a restart with another `--seed`.
+- The header's ⟳ solves again from a new random seed, and every solve after keeps it, as `--seed`
+  would. The seed is shown beside it, to pass back as `--seed`.
+- `arena-resolve-layout --samples N` lists every sample's layout under `layouts`, each with its
+  verdict and failed checks, where it counted them.
 
 ### Changed
+
+- The spinner saying a solve is under way is in the panel's header, where the ⟳ is, rather than
+  over the corner of the view.
 
 - The line for a task kind that cannot be a task's only subtask, such as `GoalPoseTask`, no longer
   suggests making it one of several, which sent agents padding it with a `NoTask` that does not

@@ -18,9 +18,12 @@
 //! refused edit needs no undo: the spec never changed.
 //!
 //! The layout takes a second answer, seconds later, because solving it is the
-//! slow half — so [`Form::solving`] is true in between, and a spinner over the
-//! 3D view says so. The panel itself is answered from the spec alone and needs
-//! no such notice; only the view it sits beside is still catching up.
+//! slow half — so [`Form::solving`] is true in between, and a spinner in the
+//! panel's header says so. The panel itself is answered from the spec alone
+//! and needs no such notice; only the view it sits beside is still catching up.
+//!
+//! A solve draws several layouts, one per sample, and the header pages the
+//! view through them: [`Form::page`] is the one the viewer draws.
 //!
 //! Nothing here knows the name of a relation kind or the parameters it takes
 //! either. [`Vocabulary`] arrives in the payload carrying a
@@ -59,7 +62,7 @@ use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass, egui};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
 use crate::layout::Placed;
-use crate::scene::Scene as Payload;
+use crate::scene::{Layout, Scene as Payload};
 use crate::spec::{CatalogAsset, Node, Request, Spec, Vocabulary};
 
 pub fn plugin(app: &mut App) {
@@ -122,6 +125,14 @@ pub struct Form {
     pub errors: Vec<String>,
     /// Whether the layout under the panel is still catching up with this spec.
     pub solving: bool,
+    /// The layouts the last solve drew, one per sample, each with what the
+    /// checks made of it, and the seed they were drawn from. See
+    /// [`Form::take_layouts`].
+    pub layouts: Vec<Layout>,
+    pub seed: Option<i64>,
+    /// The layout the view shows, by index into `layouts`: the header's pager
+    /// turns it, and the viewer draws whichever it names.
+    pub page: usize,
     /// Bumped when a different spec lands, or an edit is refused. A half-made
     /// edit is kept against the spec it was made on and dropped when that spec
     /// is replaced, so a number does not snap back to its old value between
@@ -176,6 +187,20 @@ impl Form {
         if let Some(indexing) = scene.indexing {
             self.indexing = indexing;
         }
+    }
+
+    /// Keep the layouts `scene` carries, where it carries a solve.
+    ///
+    /// The page stays where it was, so an edit leaves the view on the same
+    /// sample: one env, solved again from the same start, which moves only as
+    /// far as the edit moved it.
+    pub fn take_layouts(&mut self, scene: &Payload) {
+        if scene.assets.is_none() {
+            return;
+        }
+        self.layouts = scene.layouts.clone();
+        self.seed = scene.seed;
+        self.page = self.page.min(self.layouts.len().saturating_sub(1));
     }
 
     /// Keep the errors `scene` carries until they are closed: one toast per

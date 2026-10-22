@@ -58,8 +58,10 @@ Measured, JSON spent ~760 ms formatting the geometry as decimal text against ~2 
 - **Absent means no news.** Everything around the arrays is an ordinary map: unknown keys are
   ignored, absent ones default. On a message, only `assets` (the layout), `remote`, `indexing`,
   `errors` and `solving` may be absent, and each one absent means "keep what you have"
-  ([scene.rs](../src/scene.rs) `Scene`). Every message carries the whole editor half — spec, file
-  owners and vocabulary — so `editor::Form::take` never pieces one together.
+  ([scene.rs](../src/scene.rs) `Scene`). `layouts`, every layout the solve drew with `assets` the
+  first, and the `seed` they were drawn from, ride with `assets`. Every message carries the whole
+  editor half — spec, file owners and vocabulary — so `editor::Form::take` never pieces one
+  together.
 - **The JSON dump is a superset.** `arena-resolve-layout --output` writes the resolver's full dump;
   that stays the human- and agent-readable artifact. The payload carries a strict subset of its
   fields.
@@ -121,8 +123,9 @@ the stream closes the window.
   [catalog.py](../python/arena_composer/catalog.py), never listed by hand. The SimReady props are the
   exception and ride `remote` ([assets.md](assets.md)).
 - **Up stdout** — `spec::Request` ([spec.rs](../src/spec.rs)): three edits (`Set`, `Insert`,
-  `Remove`) applied through `spec_edit.apply`, and `Reindex`, served by `view._serve_assets`. The
-  child's stdout is this channel and nothing else: Bevy logs to stderr.
+  `Remove`) applied through `spec_edit.apply`; `Reindex`, served by `view._serve_assets`; and
+  `Regenerate`, a solve from a new seed, answered as an accepted edit is but with nothing written.
+  The child's stdout is this channel and nothing else: Bevy logs to stderr.
 
 ### Two answers per edit
 

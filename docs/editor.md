@@ -9,7 +9,7 @@ spec, every add picked from the vocabulary.
 | File | What it is |
 | --- | --- |
 | [mod.rs](../src/editor/mod.rs) | `Form` (the last spec sent), the camera gate, the framing |
-| [form.rs](../src/editor/form.rs) | the panel: a section per top-level key, what each entry's card holds; `PanelState` |
+| [form.rs](../src/editor/form.rs) | the panel: its header, a section per top-level key, what each entry's card holds; `PanelState` |
 | [card.rs](../src/editor/card.rs) | the card every entry is drawn as |
 | [controls.rs](../src/editor/controls.rs) | the controls inside a card, each turning an edit into a `Request` |
 | [dock.rs](../src/editor/dock.rs) | the dock under the view: its fold, and a tab each for the browser and the graph |
@@ -25,6 +25,21 @@ as a boolean. Rust's half is a form that cannot reach an invalid state — ids c
 a unary relation has no `reference` slot at all. What construction cannot prevent comes back in the
 payload's `errors`, each shown as a toast in the corner of the 3D view until it is closed (`toasts` in
 [form.rs](../src/editor/form.rs)).
+
+## The header
+
+Over the cards, the panel's header pages the view through the layouts the last solve drew, one per
+sample: each is the layout one env starts from, as `arena-resolve-layout --samples` solves them,
+five by default (`arena-view --samples`). `Form::page` is the one on screen, and `viewer::turn_page`
+draws whichever it names. Another layout of the same solve stands the same pieces elsewhere, so a
+page turns by moving the placements and builds nothing; a new solve, and a layout whose object set
+draws another member, are built afresh. The page outlives a solve: the same env, solved again from
+the same start, moves only as far as an edit moved it.
+
+Beside the pager is what the checks a dry solve runs made of the layout on screen, and the seed the
+layouts were drawn from. The ⟳ asks for new ones (`Request::Regenerate`): `view._solve_when_asked`
+draws from a new random seed and keeps it for every solve after, as `--seed` would keep one. While
+a solve runs, a spinner takes the ⟳'s place, as one takes the browser's reindex button's.
 
 ## Cards
 
