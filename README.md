@@ -1,6 +1,7 @@
 # arena-composer
 
 [![Artefacts CI: showcase](https://app.artefacts.com/api/artefacts/arena-composer/badges/showcase.png)](https://app.artefacts.com/artefacts/arena-composer)
+[![Artefacts CI: parity](https://app.artefacts.com/api/artefacts/arena-composer/badges/parity.png)](https://app.artefacts.com/artefacts/arena-composer)
 [![Guide](https://img.shields.io/badge/guide-online-5b4ca9)](https://art-e-fact.github.io/arena-composer/)
 
 
