@@ -58,6 +58,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Changed
 
+- The MCP server and the `author-arena-spec` skill have an agent render a scene more readily: when
+  the user reports that something does not look as it should, when the scene description leaves it
+  unsure, or to make sure an edit went as meant. It had rendered only for questions of shape or
+  contact. A render is still optional, skipped when the description already answers.
 - The spinner saying a solve is under way is in the panel's header, where the ⟳ is, rather than
   over the corner of the view.
 

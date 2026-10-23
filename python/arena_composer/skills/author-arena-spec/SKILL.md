@@ -41,8 +41,10 @@ the conventions of a spec, and what to do when a check fails.
 7. **Run `describe_scene` with `samples=8`.** The spec is done when `placement.passed` equals
    `placement.samples` and `warnings` is empty. Otherwise `check_failures` names the failing
    check, and each warning what cannot work; fix it from the playbook and run this step again.
-8. **Use `render_views`** only for a question about shape or contact, such as whether something
-   rests on its support or whether two objects overlap. Ask only for the views that answer it.
+8. **Use `render_views`** when a picture would settle something: when the user reports that
+   something does not look right, when `describe_scene` leaves you unsure, or to make sure an edit
+   went as meant. It is not required, and takes seconds, so skip it when `describe_scene` already
+   answers. Ask only for the views that answer the question.
 
 ## Conventions
 

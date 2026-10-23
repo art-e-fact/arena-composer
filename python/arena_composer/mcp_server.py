@@ -81,12 +81,16 @@ declares comes with the closest that are. An edit on a spec that is already brok
 what was wrong before comes back as `remaining_errors`, whether the edit
 landed or not, so a spec with two problems is repaired one edit at a time.
 
-`describe_scene` answers "did that land where I meant" more cheaply and more
-precisely than a picture. Reach for `render_views` when the question is about
-shape or contact — does this rest on the surface, do these two overlap, is it
-facing the right way. Ask only for the views that answer it: each image costs
-roughly a thousand tokens to read, and in any single view one object can sit
-behind another.
+`describe_scene` and `render_views` work best together. `describe_scene` says
+precisely where things landed; a picture shows what its numbers do not — an
+object floating, sunk into its support, inside another, facing the wrong way.
+Render when a picture would settle something: when the user reports that
+something does not look as it should, since what they saw was a picture; when
+the numbers leave you unsure; or to make sure an edit went as meant. It is not
+a required step, and a render takes seconds, so skip it when `describe_scene`
+already answers. Ask only for the views that answer the question: each image
+costs roughly a thousand tokens to read, and in any single view one object can
+sit behind another.
 
 What a resolve reports is one seeded sample. Pin `seed` to compare two edits;
 at runtime Arena draws a different valid layout on every reset, so before
