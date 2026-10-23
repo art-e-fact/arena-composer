@@ -255,7 +255,10 @@ def _pack(metallic: tuple[str, int] | None, roughness: tuple[str, int] | None) -
 
     sources = {"metallic": metallic, "roughness": roughness}
     files = {name: _tile_files(source[0]) for name, source in sources.items() if source}
-    stamp = [(name, sources[name][1], [(f, os.stat(f).st_mtime_ns) for f in files[name].values()]) for name in files]
+    mtimes = {name: [(f, os.stat(f).st_mtime_ns) for f in files[name].values()] for name in files}
+    # The leading number stands for how the loop below packs: change one, bump the other, or every
+    # machine that packed before keeps drawing the old images.
+    stamp = [1] + [(name, sources[name][1], mtimes[name]) for name in files]
     key = hashlib.sha1(repr(stamp).encode()).hexdigest()[:16]
     udim = any("<UDIM>" in source[0] for source in sources.values() if source)
     packed = cache_dir() / "textures" / (f"{key}.<UDIM>.png" if udim else f"{key}.png")

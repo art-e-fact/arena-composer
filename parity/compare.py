@@ -47,7 +47,8 @@ HERE = Path(__file__).resolve().parent
 BASELINE = HERE / "baseline.json"
 #: How far a camera's error may rise above its baseline, 0-255: RTX's renders vary a little run to run.
 TOLERANCE = 3.0
-#: The composer's backdrop as it comes out of the tonemapper (`viewer.rs`'s `BACKDROP`).
+#: The composer's backdrop: `arena-render` sets no clear colour, so it is Bevy's default, which the
+#: tonemapper leaves alone. Not the window's, `viewer.rs`'s `BACKDROP`.
 BACKDROP = np.array([43, 44, 47])
 BLOCK = 8
 
@@ -65,13 +66,15 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     baseline = json.loads(BASELINE.read_text()) if BASELINE.exists() else {}
 
-    suites, metrics = {}, {}
+    # A failure before the first spec is a case too: an empty report reads as a passing run.
+    suites, metrics = {"setup": [("setup", "error", "did not get past setting up")]}, {}
     try:
         from arena_composer import catalog
         from arena_composer.usd_assets import use_local_asset_cache
 
         catalog.load_extensions(())
         use_local_asset_cache(None)
+        del suites["setup"]
         for spec in args.specs:
             name = spec.stem
             try:
@@ -86,7 +89,8 @@ def main() -> int:
                 metrics[f"{name}.gain"] = round(float(np.median([e["gain"] for e in errors.values()])), 3)
                 metrics[f"{name}.cameras"] = len(errors)
                 if args.write_baseline:
-                    baseline[name] = {cam: e["matched"] for cam, e in errors.items()}
+                    # Per camera: one this run skipped keeps the error it had.
+                    baseline.setdefault(name, {}).update({cam: e["matched"] for cam, e in errors.items()})
     finally:
         write_junit(args.out / "tests_junit.xml", suites)
         for path in filter(None, [args.out / "metrics.json", args.metrics]):
@@ -154,8 +158,11 @@ def capture(spec: Path, work: Path, args) -> tuple[dict | None, str]:
     log = work / "isaac.log"
     (work / "sim_state.json").unlink(missing_ok=True)
     with open(log, "w") as output:
-        # Own process group, so the kill below also reaches Kit's helper processes.
-        proc = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+        # Own process group, so the kill below also reaches Kit's helper processes. No stdin: Kit asks
+        # for the EULA there when OMNI_KIT_ACCEPT_EULA is unset, and would wait out the timeout.
+        proc = subprocess.Popen(
+            cmd, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True
+        )
         try:
             returncode = proc.wait(timeout=args.timeout * 60)
         except subprocess.TimeoutExpired:

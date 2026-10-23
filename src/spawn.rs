@@ -28,7 +28,8 @@ pub fn plugin(app: &mut App) {
 }
 
 /// The images a material asked for as sRGB colour. A 16-bit PNG decodes to one format whatever the
-/// loader was told, so this is how [`narrow_16_bit_textures`] knows which it was asked for.
+/// loader was told, so this is how [`narrow_16_bit_textures`] knows which it was asked for. Only
+/// `build_material` fills it: a 16-bit colour image loaded anywhere else is narrowed as linear.
 #[derive(Resource, Default)]
 struct SrgbImages(HashSet<AssetId<Image>>);
 

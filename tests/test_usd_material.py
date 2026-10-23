@@ -28,6 +28,7 @@ from PIL import Image
 
 from arena_composer import usd_assets
 from arena_composer.usd import extract, open_stage
+from arena_composer.usd.material import read_material
 
 # A quad bound to a UsdPreviewSurface: one constant the shader authors itself,
 # one texture reached through a connection and authored as a *relative* path.
@@ -561,11 +562,15 @@ def test_a_udim_pair_is_packed_tile_by_tile(tmp_path: Path, monkeypatch) -> None
     monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path / "cache")
     for tile in (1001, 1002):
         png(tmp_path / f"metal.{tile}.png", [0, 255])
-    material = omnipbr(
+    omnipbr(
         tmp_path,
         """asset inputs:metallic_texture = @./metal.<UDIM>.png@
                 float inputs:metallic_texture_influence = 1""",
     )
+    # Read before `extract` splits it by tile, which the quad, having no UVs, cannot be. The stage is
+    # held: a prim does not keep it alive.
+    stage = open_stage(str(tmp_path / "omnipbr.usda"))
+    material = read_material(stage.GetPrimAtPath("/Asset/Quad"))
 
     packed = material.textures["metallic_roughness"]
     assert packed.endswith(".<UDIM>.png")
@@ -636,3 +641,18 @@ def test_a_udim_texture_splits_the_mesh_by_tile(tmp_path: Path) -> None:
     for node in nodes:
         assert node.surface.uvs.min() == 0.0 and node.surface.uvs.max() == 1.0
         assert np.ptp(node.surface.positions[:, 0]) == 1.0
+
+
+def test_a_udim_texture_on_a_mesh_without_uvs_is_dropped(tmp_path: Path) -> None:
+    """With no UVs there is no tile to split by, and `albedo.<UDIM>.png` names no file:
+    sent as it is, the viewer's asset server logged a miss for it."""
+    (tmp_path / "textures").mkdir()
+    (tmp_path / "textures" / "albedo.1001.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    usda = tmp_path / "udim.usda"
+    st = UDIM.index("        texCoord2f[]")
+    usda.write_text(UDIM[:st] + UDIM[UDIM.index("rel material:binding") - 8 :], encoding="utf-8")
+
+    (node,) = extract(open_stage(str(usda)))
+
+    assert node.surface.uvs is None
+    assert node.material.textures == {}

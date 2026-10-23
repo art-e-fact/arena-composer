@@ -161,8 +161,12 @@ def _tiles(surface: Surface, material: Material) -> Iterator[tuple[Surface, Mate
     mesh is split by the tile each triangle falls in, and each piece's UVs are moved into the unit
     square. A tile with no image of a slot draws without it. USD's `st`, before `_place` flips V.
     """
-    if surface.uvs is None or not any("<UDIM>" in path for path in material.textures.values()):
+    if not any("<UDIM>" in path for path in material.textures.values()):
         yield surface, material
+        return
+    if surface.uvs is None:
+        # Nothing to sample a texture by, and a `<UDIM>` path names no file.
+        yield surface, replace(material, textures={s: p for s, p in material.textures.items() if "<UDIM>" not in p})
         return
     tiles = np.floor(surface.uvs[surface.triangles].mean(axis=1)).astype(np.int64)
     numbers = 1001 + tiles[:, 0] + 10 * tiles[:, 1]
