@@ -13,6 +13,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   reference to its top, the node things stand on, not the room around it. Hovering outlines what a
   click would pick, a double click brings the camera round to it, and a click on the backdrop drops
   the pick.
+- A right click on an object in the 3D view opens a menu for it: the relations naming it, each drawn
+  in the view while hovered and opening its card when clicked; `+ relation`, which adds one with the
+  object as its subject, its kind and then its reference picked from submenus; and `remove`, for an
+  object, an object set or an object reference.
 - `check_spec`, and every edit, refuse a spec that Arena only refused minutes into a build, once
   Isaac Sim had started: a task param naming a node of another class than the task needs, such as an
   `OpenDoorTask` on a banana, a `PlaceUprightTask` on a bottle that is not `Placeable`, or an

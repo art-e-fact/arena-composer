@@ -1,7 +1,8 @@
 //! A click in the 3D view picks what it lands on, as a click on its node in
 //! the graph does: the panel opens its card, and the graph outlines its node.
-//! Hovering outlines what a click would pick, and a double click brings the
-//! camera round to it.
+//! Hovering outlines what a click would pick, a double click brings the
+//! camera round to it, and a right click opens a menu of what it takes part
+//! in and what can be done to it ([`super::menu`]).
 //!
 //! What a hit stands for is [`picked`]: the asset whose mesh the ray hit, or
 //! one of that asset's object references, where the reference's box holds the
@@ -24,6 +25,7 @@ use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::drop::target;
 use super::graph::Item;
+use super::menu;
 use super::relations::{self, RelationGizmos};
 use super::{Form, PointerOverPanel, pointer_in_the_view};
 use crate::layout::{AssetId, Placed, fitting_distance, world_aabb};
@@ -56,23 +58,26 @@ pub fn pick_in_the_view(
     mut clicked: MessageWriter<Clicked>,
     // What the pointer is over, by id, found when it last moved.
     mut under: Local<Option<String>>,
+    // What the menu was opened on, by id.
+    mut menu_on: Local<Option<String>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    if !pointer_in_the_view(&over_panel, &egui_input) || egui::DragAndDrop::has_any_payload(ctx) {
-        *under = None;
-        return Ok(());
-    }
-    let (settled, click, double) = ctx.input(|input| {
+    let in_view = pointer_in_the_view(&over_panel, &egui_input) && !egui::DragAndDrop::has_any_payload(ctx);
+    let (settled, click, double, right) = ctx.input(|input| {
         let pointer = &input.pointer;
         // Moved with nothing held, let go of a button, or turned the wheel:
         // whatever is under the pointer may have changed.
         let settled = (pointer.delta() != egui::Vec2::ZERO && !pointer.any_down())
             || pointer.any_released()
             || input.smooth_scroll_delta != egui::Vec2::ZERO;
-        (settled, pointer.primary_clicked(), pointer.button_double_clicked(egui::PointerButton::Primary))
+        let double = pointer.button_double_clicked(egui::PointerButton::Primary);
+        // A click, as a press let go where it went down: a right drag pans.
+        (settled, pointer.primary_clicked(), double, pointer.secondary_clicked())
     });
     let (camera, transform, mut orbit) = camera.into_inner();
-    if settled || placed.is_changed() {
+    if !in_view {
+        *under = None;
+    } else if settled || placed.is_changed() {
         *under = window
             .cursor_position()
             .and_then(|cursor| camera.viewport_to_world(transform, cursor).ok())
@@ -84,17 +89,38 @@ pub fn pick_in_the_view(
             .map(|asset| asset.id.clone());
     }
     let asset = under.as_deref().and_then(|id| relations::find(&placed, id));
-    if click {
+    if in_view && click {
         clicked.write(Clicked(asset.map(|asset| Item::Node(asset.id.clone()))));
     }
-    let Some(asset) = asset else {
+    if in_view && right {
+        *menu_on = asset.map(|asset| asset.id.clone());
+    }
+    if let Some(asset) = asset {
+        relations::outline(asset, &mut gizmos);
+        if double {
+            let (min, max) = world_aabb(asset);
+            orbit.target_focus = arena_to_bevy() * ((min + max) / 2.0);
+            orbit.target_radius = fitting_distance(max - min);
+        }
+    }
+
+    // Wherever the pointer is: once the menu is in use, it is over the menu.
+    let Some(id) = menu_on.clone() else {
         return Ok(());
     };
-    relations::outline(asset, &mut gizmos);
-    if double {
-        let (min, max) = world_aabb(asset);
-        orbit.target_focus = arena_to_bevy() * ((min + max) / 2.0);
-        orbit.target_radius = fitting_distance(max - min);
+    let Some(used) = menu::show(ctx, &id, in_view && right, &form) else {
+        *menu_on = None;
+        return Ok(());
+    };
+    // What the menu is about stays outlined while the pointer is off it.
+    if let Some(asset) = relations::find(&placed, &id) {
+        relations::outline(asset, &mut gizmos);
+    }
+    if let Some(relation) = used.hovered.and_then(|index| form.spec.relations.get(index)) {
+        relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut gizmos);
+    }
+    if let Some(item) = used.picked {
+        clicked.write(Clicked(Some(item)));
     }
     Ok(())
 }

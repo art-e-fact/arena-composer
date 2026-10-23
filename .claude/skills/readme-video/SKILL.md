@@ -56,7 +56,7 @@ The storyboard is the window (`size` in physical pixels, and `scale`, which enla
 `fps`, `warmup`, and `steps`, played one after the other. The format is documented on `Tour`,
 `Step` and `Target` in [src/tour.rs](../../../src/tour.rs); read those first. In short:
 
-- **A step is one action and a pause**: `move`, `click` or `double_click` a target; `drag` one `to`
+- **A step is one action and a pause**: `move`, `click`, `double_click` or `right_click` a target; `drag` one `to`
   another, or `by` `[x, y]` logical pixels; `scroll` one by `lines` (positive scrolls up, or zooms
   the view in, a notch a frame); `type` text into whatever has the keyboard; press a `key`; or wait `until` the
   edit before is `solved`. `secs` is how long the action takes, `pause` (0.4 by default) how long
