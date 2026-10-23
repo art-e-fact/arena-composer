@@ -19,6 +19,7 @@ spec, every add picked from the vocabulary.
 | [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's tiles, the objects' cards and their nodes |
 | [drop.rs](../src/editor/drop.rs) | dragging an asset onto the layout |
 | [pick.rs](../src/editor/pick.rs) | a click in the view: what it picks, and the double click that focuses the camera |
+| [menu.rs](../src/editor/menu.rs) | the right-click menu in the view: an entry's relations, a relation to add, its removal |
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
 **Rust never writes YAML.** [spec_edit.py](../python/arena_composer/spec_edit.py) is the only writer:
@@ -235,6 +236,25 @@ frame, and never while a button is held: a drag is turning the view, not pointin
 pointer is the view's at all is the camera gate's own answer, `pointer_in_the_view`
 ([mod.rs](../src/editor/mod.rs)), so whatever press the camera would take, the pick takes too, and
 neither takes one on the panels or on an asset being carried.
+
+## The menu in the view
+
+A right click on something in the view opens a menu on what a click there would pick
+([menu.rs](../src/editor/menu.rs)): its id, every relation naming it as subject or reference,
+`+ relation`, and `remove` where it is an entry of a list. A row picks its entry through the same
+`Clicked` a click in the view sends, and a relation's row, hovered, is drawn over the layout as
+hovering its card draws it. `+ relation` writes a whole entry, so the solve after it is not spent on
+a placeholder: the kind, then the reference where the kind takes one, each from a submenu, with the
+required parameters filled as the panel's `+ relation` fills them (`form::relation_entry`), and an
+`on` onto an object overlapping as a drop's does (`browser::on_params`).
+
+It is egui's own menu, a `Popup` opened by hand at the pointer. `Response::context_menu` needs a
+widget to hang off, and a widget sensing clicks over the view would take every press from the
+camera. `secondary_clicked` is a press let go where it went down, so a right drag still pans. While
+the menu is open, egui reports a popup open, `EguiWantsInput::wants_any_pointer_input` holds, and
+the camera gate and the pick both leave the view alone: the layout keeps still behind the menu, and
+the click that closes it does nothing else. `remove` is offered only for an entry of a list; the
+robot and the background are swapped, as on their cards.
 
 ## Adding an object
 

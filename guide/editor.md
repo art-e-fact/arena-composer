@@ -20,7 +20,10 @@ arena-view environments/tasks/banana_in_bowl.yaml
 
 - **The view.** Drag to orbit, right-drag to pan, scroll to zoom. Click something to pick it: its
   card opens and its node in the graph is outlined. Hovering outlines what a click would pick, a
-  double-click turns the camera to it, and a click on the backdrop lets go.
+  double-click turns the camera to it, and a click on the backdrop lets go. Right-click it for a
+  menu: the relations naming it (hover one to draw it, click it to open its card), *+ relation* to
+  add one with it as the subject, its kind and then what it is placed against picked from the
+  submenus, and *remove*.
 - **The panel's header** pages through the layouts the last solve drew, five by default
   (`--samples N`), one for each environment Arena would start, and says whether the one on screen
   passes the checks, or which it fails. ⟳ draws new ones from a fresh seed, shown beside it to pass

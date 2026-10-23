@@ -24,7 +24,7 @@ use super::thumbnails::{Files, Images, Pictures, Thumbnails};
 use super::{Form, PointerOverPanel, in_the_view, send};
 use crate::layout::Placed;
 use crate::scene::Layout;
-use crate::spec::{Kind, Relation, Request, Step, Value};
+use crate::spec::{Kind, Params, Relation, Request, Step, Value};
 
 /// How wide the panel opens. Draggable from there.
 const WIDTH: f32 = 360.0;
@@ -787,15 +787,19 @@ fn relation_options(form: &Form, subject: &str, reference: &str, ids: &[&str]) -
     form.vocabulary
         .relations
         .iter()
-        .map(|kind| {
-            let mut pairs = vec![("kind", Value::text(&kind.name)), ("subject", Value::text(subject))];
-            if kind.unary == Some(false) {
-                pairs.push(("reference", Value::text(reference)));
-            }
-            pairs.push(("params", required_params(kind, ids)));
-            (kind.name.clone(), Value::map(pairs))
-        })
+        .map(|kind| (kind.name.clone(), relation_entry(kind, subject, reference, required_params(kind, ids))))
         .collect()
+}
+
+/// A relation entry of `kind` carrying `params`, with a `reference` only where
+/// the kind takes one.
+pub(super) fn relation_entry(kind: &Kind, subject: &str, reference: &str, params: Params) -> Value {
+    let mut pairs = vec![("kind", Value::text(&kind.name)), ("subject", Value::text(subject))];
+    if kind.unary == Some(false) {
+        pairs.push(("reference", Value::text(reference)));
+    }
+    pairs.push(("params", Value::Map(params)));
+    Value::map(pairs)
 }
 
 /// One whole subtask entry per registered task kind, its required parameters
@@ -805,8 +809,8 @@ fn subtask_options(form: &Form, ids: &[&str]) -> Vec<(String, Value)> {
         .tasks
         .iter()
         .map(|kind| {
-            let entry = Value::map([("kind", Value::text(&kind.name)), ("params", required_params(kind, ids))]);
-            (kind.name.clone(), entry)
+            let params = Value::Map(required_params(kind, ids));
+            (kind.name.clone(), Value::map([("kind", Value::text(&kind.name)), ("params", params)]))
         })
         .collect()
 }
@@ -814,17 +818,21 @@ fn subtask_options(form: &Form, ids: &[&str]) -> Vec<(String, Value)> {
 /// The parameters the kind has no default for. Arena refuses an entry without
 /// them, so an added relation or subtask carries a placeholder the form then
 /// shows.
-fn required_params(kind: &Kind, ids: &[&str]) -> Value {
-    Value::map(kind.fields.iter().filter(|field| field.required).map(|field| {
-        let value = match field.kind.as_str() {
-            "enum" => field.options.first().map_or(Value::Null, Value::text),
-            "node_ref" => ids.first().map_or(Value::Null, |id| Value::text(*id)),
-            "number" | "int" => Value::Number(0.0),
-            "bool" => Value::Bool(false),
-            _ => Value::text(""),
-        };
-        (field.name.as_str(), value)
-    }))
+pub(super) fn required_params(kind: &Kind, ids: &[&str]) -> Params {
+    kind.fields
+        .iter()
+        .filter(|field| field.required)
+        .map(|field| {
+            let value = match field.kind.as_str() {
+                "enum" => field.options.first().map_or(Value::Null, Value::text),
+                "node_ref" => ids.first().map_or(Value::Null, |id| Value::text(*id)),
+                "number" | "int" => Value::Number(0.0),
+                "bool" => Value::Bool(false),
+                _ => Value::text(""),
+            };
+            (field.name.clone(), value)
+        })
+        .collect()
 }
 
 /// What a new relation is about, before the user says otherwise: the object

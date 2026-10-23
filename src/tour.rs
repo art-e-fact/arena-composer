@@ -146,6 +146,8 @@ pub struct Step {
     /// Move there and click.
     pub click: Option<Target>,
     pub double_click: Option<Target>,
+    /// Move there and click the right button: the view's menu.
+    pub right_click: Option<Target>,
     /// Press here, and carry it to `to`, or `by` so far, before letting go:
     /// an asset onto the layout, a number sideways, the camera round.
     pub drag: Option<Target>,
@@ -181,6 +183,7 @@ impl Default for Step {
             glide: None,
             click: None,
             double_click: None,
+            right_click: None,
             drag: None,
             to: None,
             by: None,
@@ -312,8 +315,8 @@ enum Beat {
     Glide(Target, Option<f32>),
     /// The pointer moving this far from where it is.
     Nudge(Vec2, Option<f32>),
-    /// The left button going down, or up.
-    Button(bool),
+    /// A button going down, or up.
+    Button(MouseButton, bool),
     Wheel(f32),
     Key(Press),
     Wait(f32),
@@ -355,6 +358,7 @@ impl Step {
             self.glide.is_some(),
             self.click.is_some(),
             self.double_click.is_some(),
+            self.right_click.is_some(),
             self.drag.is_some(),
             self.scroll.is_some(),
             self.typed.is_some(),
@@ -367,34 +371,39 @@ impl Step {
             "`to` or `by` goes with `drag`, and `drag` needs one of them",
         );
         anyhow::ensure!((self.lines != 0.0) == self.scroll.is_some(), "`lines` goes with `scroll`, and `scroll` needs some");
-        for target in [&self.glide, &self.click, &self.double_click, &self.drag, &self.to, &self.scroll].into_iter().flatten() {
+        let clicks = [&self.click, &self.double_click, &self.right_click];
+        for target in [&self.glide, &self.drag, &self.to, &self.scroll].into_iter().chain(clicks).flatten() {
             target.check()?;
         }
 
         let to = |target: &Target| Beat::Glide(target.clone(), self.secs);
-        let click = [Beat::Button(true), Beat::Wait(CLICK), Beat::Button(false)];
+        let click = |button| [Beat::Button(button, true), Beat::Wait(CLICK), Beat::Button(button, false)];
         let mut beats = Vec::new();
         if let Some(target) = &self.glide {
             beats.push(to(target));
         }
         if let Some(target) = &self.click {
             beats.push(to(target));
-            beats.extend(click.clone());
+            beats.extend(click(MouseButton::Left));
         }
         if let Some(target) = &self.double_click {
             beats.push(to(target));
-            beats.extend(click.clone());
+            beats.extend(click(MouseButton::Left));
             beats.push(Beat::Wait(CLICK));
-            beats.extend(click);
+            beats.extend(click(MouseButton::Left));
+        }
+        if let Some(target) = &self.right_click {
+            beats.push(to(target));
+            beats.extend(click(MouseButton::Right));
         }
         if let Some(from) = &self.drag {
-            beats.extend([Beat::Glide(from.clone(), None), Beat::Button(true), Beat::Wait(GRAB)]);
+            beats.extend([Beat::Glide(from.clone(), None), Beat::Button(MouseButton::Left, true), Beat::Wait(GRAB)]);
             match (&self.to, self.by) {
                 (Some(drop), _) => beats.push(to(drop)),
                 (None, Some([x, y])) => beats.push(Beat::Nudge(Vec2::new(x, y), self.secs)),
                 (None, None) => unreachable!("checked above"),
             }
-            beats.extend([Beat::Wait(SETTLE), Beat::Button(false)]);
+            beats.extend([Beat::Wait(SETTLE), Beat::Button(MouseButton::Left, false)]);
         }
         if let Some(target) = &self.scroll {
             beats.push(Beat::Glide(target.clone(), self.secs));
@@ -774,8 +783,8 @@ fn beat_once(world: &mut World, at: &mut Playhead, beat: &Beat, screen: &Screen)
             let from = at.began.map_or(world.resource::<Pointer>().at, |began| began.from);
             at.glide(world, from + egui::vec2(by.x, by.y), *secs)
         }
-        Beat::Button(down) => {
-            press(world, *down);
+        Beat::Button(button, down) => {
+            press(world, *button, *down);
             if !*down {
                 at.acted(world);
             }
@@ -888,11 +897,11 @@ fn point(world: &mut World, to: Pos2) {
     window.bypass_change_detection().set_physical_cursor_position(Some((position * scale).as_dvec2()));
 }
 
-/// Presses the left button, or lets it go.
-fn press(world: &mut World, down: bool) {
+/// Presses a button, or lets it go.
+fn press(world: &mut World, button: MouseButton, down: bool) {
     let (window, _) = window(world);
     let state = if down { ButtonState::Pressed } else { ButtonState::Released };
-    let input = MouseButtonInput { button: MouseButton::Left, state, window };
+    let input = MouseButtonInput { button, state, window };
     world.write_message(input);
     world.write_message(WindowEvent::MouseButtonInput(input));
     world.resource_mut::<Pointer>().down = down;

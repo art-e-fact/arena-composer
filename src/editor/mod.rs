@@ -39,7 +39,8 @@
 //! Hovering a relation draws what it asks for over the layout, and a toggle on
 //! each keeps it drawn; see [`relations`]. The [`graph`] draws the spec's
 //! nodes and relations as a graph, and a click on one opens its card; so does
-//! a click on the object itself in the view ([`pick`]).
+//! a click on the object itself in the view ([`pick`]), and a right click
+//! there opens a menu of its relations ([`menu`]).
 
 mod browser;
 mod card;
@@ -48,6 +49,7 @@ mod dock;
 mod drop;
 mod form;
 mod graph;
+mod menu;
 mod pick;
 mod relations;
 mod thumbnails;
