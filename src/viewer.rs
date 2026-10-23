@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::layout::{ArenaRoot, AssetId, Placed, View, ambient, framing, spawn_lighting, spawn_scene};
+use crate::layout::{ArenaRoot, AssetId, Placed, View, framing, sky, spawn_lighting, spawn_scene};
 use crate::scene::{Asset, Scene};
 
 /// The scene the app was launched with, kept so `setup` can read it.
@@ -301,6 +301,7 @@ fn same_pieces(from: &[Asset], to: &[Asset]) -> bool {
 
 fn spawn_camera(world: &mut World, scene: &Scene) {
     let framed = framing(View::Default, scene);
+    let sky = sky(world);
     world.spawn((
         Camera3d::default(),
         framed.transform,
@@ -311,7 +312,7 @@ fn spawn_camera(world: &mut World, scene: &Scene) {
             focus: framed.focus,
             ..default()
         },
-        ambient(),
+        sky,
     ));
 }
 

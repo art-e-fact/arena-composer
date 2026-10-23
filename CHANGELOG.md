@@ -97,6 +97,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   is drawn as Isaac Sim draws it, as if the map were black: robolab's fruit are glossy.
 - SimReady props' metal is drawn as metal. Their UsdPreviewSurface takes metallic and roughness from
   a map, which was multiplied by 0 and 0.5.
+- A robot's metal, and the sides of things the light does not face, are drawn brighter, closer to
+  Isaac Sim: the window, `arena-render` and `render_views` light a scene with a sky that metal
+  reflects, in place of a flat fill that lit shaded sides at half their colour and metal dimly.
 - `check_spec` says where a misspelt object or background param shows: it passes the check, and
   `describe_scene`, `arena-render` and the window stop on it seconds in, with
   `TypeError: object.__init__() takes exactly one argument`, which names neither the param nor the
