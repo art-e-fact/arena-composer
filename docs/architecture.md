@@ -1,41 +1,17 @@
 # Architecture
 
-arena-composer draws an [IsaacLab-Arena](https://github.com/isaac-sim/IsaacLab-Arena) environment
-spec, the YAML that says which objects a scene holds and how they relate, without starting Isaac
-Sim: in a window you edit it in, or as PNGs. What it does is in the [README](../README.md); this
-page is how it is put together.
+How arena-composer is put together. What it does, and the path from an edit to a picture, are in
+the guide's [How it works](../guide/how-it-works.md).
 
 One package, two languages. Python owns everything that needs [OpenUSD](https://openusd.org), the
 format Arena's assets are in: Arena's registries, its placement solver, and reading the assets'
 geometry and materials. Rust owns [Bevy](https://bevy.org), the game engine that draws them, and
-opens no USD. They meet in one [MessagePack](https://msgpack.org) payload:
-
-```mermaid
-flowchart TB
-    accTitle: From a spec to a picture
-    accDescr: Python reads the spec, places its objects with Arena's solver, reads their geometry from USD and packs it all into one MessagePack payload. Rust unpacks the payload and draws it with Bevy, in a window you edit in or as PNGs.
-
-    spec[/"<b>spec.yaml</b><br>objects, how they relate,<br>a robot, a task"/]
-
-    subgraph python ["Python: everything that needs OpenUSD"]
-        direction LR
-        solve["<b>Place the objects</b><br>with Arena's solver<br><code>resolve_layout.py</code>"]
-        pack["<b>Read their geometry</b><br>and pack it<br><code>usd/</code>, <code>payload.py</code>"]
-        solve --> pack
-    end
-
-    subgraph rust ["Rust: draws with Bevy, opens no USD"]
-        direction LR
-        unpack["<b>Unpack</b><br><code>scene.rs</code>, <code>spec.rs</code>"]
-        window["<b>A window to edit in</b><br>arena-view<br><code>viewer.rs</code>, <code>editor/</code>"]
-        pngs["<b>PNGs</b><br>arena-render, render_views<br><code>render.rs</code>"]
-        unpack --> window
-        unpack --> pngs
-    end
-
-    spec --> python
-    python -- "one MessagePack payload" --> rust
-```
+opens no USD. They meet in one [MessagePack](https://msgpack.org) payload. Python places the objects
+([resolve_layout.py](../python/arena_composer/resolve_layout.py)), reads their geometry and packs it
+([usd/](../python/arena_composer/usd/), [payload.py](../python/arena_composer/payload.py)); Rust
+unpacks it ([scene.rs](../src/scene.rs), [spec.rs](../src/spec.rs)) and draws it, in a window to
+edit in ([viewer.rs](../src/viewer.rs), [editor/](../src/editor/)) or as PNGs
+([render.rs](../src/render.rs)).
 
 The same payload runs through the dev `arena-viewer` straight off disk, in the window or drawn
 headless, which is how the Rust side is iterated on without Arena

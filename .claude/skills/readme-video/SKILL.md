@@ -34,8 +34,8 @@ Lightwheel's SDK asks its server for the kitchen — and cargo, Xephyr, lavapipe
 3. Run `docs/publish.sh target/video/arena-composer.mp4`, on the branch whose pull request changes
    the video. GitHub plays only video it hosts, so it uploads the mp4 in a comment on that pull
    request — where reviewers see it too — and puts the URL GitHub gives it on the README line under
-   `<!-- arena-composer.mp4 -->`, a URL alone, which GitHub draws as a player. Commit README.md with
-   the change. It needs gh 2.102 or later, for `--attach`, and push access; it posts, so run it
+   `<!-- arena-composer.mp4 -->`, a URL alone, which GitHub draws as a player. Commit the pages it
+   edited with the change. It needs gh 2.102 or later, for `--attach`, and push access; it posts, so run it
    once the video is right.
 
 A video is right when:

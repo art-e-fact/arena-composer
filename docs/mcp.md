@@ -5,7 +5,10 @@ Its module docstring explains which tools exist and why. What each tool does liv
 docstring and in `INSTRUCTIONS`, because that is what the client shows the model. **Document the
 tools there and nowhere else.** The `author-arena-spec` skill, under
 [skills/](../python/arena_composer/skills/), names tools and their result fields but defines none.
-It is the procedure for writing a spec with them, and a test fails when it misses a tool.
+It is the procedure for writing a spec with them, and a test fails when it misses a tool. The
+guide's [Working with an agent](../guide/agents.md) is the same server from the side of someone
+using it, and its table of tools is drawn from the first paragraph of each docstring as the site is
+built ([site/stage.py](site/stage.py)), so write that paragraph for a person too.
 
 Rules for changing it:
 

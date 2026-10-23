@@ -1,6 +1,6 @@
-# The docs site, built from the pages where they live in the repository:
-# docs/site/stage.py copies them to `docs_dir` first. docs/development.md says
-# how to build and preview it.
+# The guide: the site for people using arena-composer, built from the pages
+# where they live in the repository. docs/site/stage.py copies them to
+# `docs_dir` first. docs/development.md says how to build and preview it.
 [project]
 site_name = "arena-composer"
 site_url = "https://art-e-fact.github.io/arena-composer/"
@@ -15,16 +15,14 @@ edit_uri = "edit/main/"
 extra_css = ["docs/site/artefacts.css"]
 
 # Every page on the site, by its path in the repository: docs/site/stage.py
-# stages these and points a link to anything else at GitHub.
+# stages these and points a link to anything else at GitHub, where the
+# internals under docs/ are read.
 nav = [
   { "Overview" = "README.md" },
-  { "Internals" = [
-    "docs/architecture.md",
-    "docs/editor.md",
-    "docs/errors.md",
-    "docs/mcp.md",
-    "docs/assets.md",
-    "docs/development.md",
+  { "Guide" = [
+    "guide/how-it-works.md",
+    "guide/editor.md",
+    "guide/agents.md",
   ] },
   "CHANGELOG.md",
 ]

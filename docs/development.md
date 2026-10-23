@@ -53,7 +53,8 @@ To see the window without a person at the keyboard:
 | `ARENA_VIEWER_TOUR=tour.json` | play a storyboard with a pointer of the tour's own, and close the window after it | [tour.rs](../src/tour.rs) |
 | `ARENA_VIEWER_RECORD=raw.mp4` | record the tour, a video frame per update, with `ffmpeg` | [record.rs](../src/record.rs) |
 
-The README's screenshots are taken this way, by [docs/screenshots/shoot.sh](screenshots/shoot.sh):
+The screenshots the README and the guide show are taken this way, by
+[docs/screenshots/shoot.sh](screenshots/shoot.sh):
 run it after changing what they show. The
 [readme-screenshots](../.claude/skills/readme-screenshots/SKILL.md) skill says how to change a shot.
 
@@ -61,7 +62,7 @@ Its video is a tour played in a real `arena-view`, so the edits it makes are sol
 [docs/video/record.sh](video/record.sh) records it, and the
 [readme-video](../.claude/skills/readme-video/SKILL.md) skill says how to change it. Neither the
 shots nor the video are committed: [docs/publish.sh](publish.sh) uploads them to the pull request
-and points the README at them.
+and points the README and the guide at them.
 
 ## Tests
 
@@ -153,16 +154,19 @@ and the next run holds it.
 `artefacts run parity` runs it as an Artefacts job, a scenario per spec: see the
 [README](../README.md#the-isaac-sim-comparison-on-artefacts).
 
-## The docs site
+## The guide's site
 
-[art-e-fact.github.io/arena-composer](https://art-e-fact.github.io/arena-composer/) is built with
-[Zensical](https://zensical.org) from the pages where they live in the repository. The nav in
-[zensical.toml](../zensical.toml) lists every page on the site by its path, and
+[art-e-fact.github.io/arena-composer](https://art-e-fact.github.io/arena-composer/) is the guide: the
+README, the pages in [guide/](../guide/) and the changelog, built with [Zensical](https://zensical.org)
+from where they live in the repository. The internals under `docs/` stay off it, and are read on
+GitHub. The nav in [zensical.toml](../zensical.toml) lists every page on the site by its path, and
 [site/stage.py](site/stage.py) copies those pages to `target/docs` under the same paths: a link
 between two pages works as written, and every other link, to source or to a page left off the site,
-is pointed at GitHub at the commit being built. The README's video line becomes a `<video>` tag in
-the staged copy. A page under `docs/` missing from the nav fails
-[test_docs_site.py](../tests/test_docs_site.py).
+is pointed at GitHub at the commit being built. In the staged copy, the README's video line becomes
+a `<video>` tag, and the lines between the `mcp-tools` markers in [guide/agents.md](../guide/agents.md)
+become a table of the MCP tools, drawn from their docstrings. A page under `guide/` missing from the
+nav fails [test_docs_site.py](../tests/test_docs_site.py), and so does one that names a private
+symbol.
 
 ```bash
 python3 docs/site/stage.py
@@ -178,11 +182,11 @@ script again after editing a page. `zensical build` writes the site to `target/s
 a link to a page or a heading that does not exist, and deploys it to GitHub Pages from `main`.
 [site/artefacts.css](site/artefacts.css) gives it Artefacts' colours and type.
 
-Indent a nested list four spaces. GitHub nests one at two, but the site does not, and draws it as
-part of the list above, so [test_docs_site.py](../tests/test_docs_site.py) fails one that is not a
-multiple of four.
+On the site's pages, indent a nested list four spaces. GitHub nests one at two, but the site does
+not, and draws it as part of the list above, so [test_docs_site.py](../tests/test_docs_site.py)
+fails one that is not a multiple of four.
 
-A diagram is a `mermaid` code block, which GitHub and the site both draw, each in its own colours.
+A diagram on them is a `mermaid` code block, which GitHub and the site both draw, each in its own colours.
 Its `accTitle` and `accDescr` are what a screen reader says for it, so
 [test_docs_site.py](../tests/test_docs_site.py) fails a diagram without them. It is drawn in the
 reader's browser, so one that does not parse fails no build: look at it on the pull request. Keep
