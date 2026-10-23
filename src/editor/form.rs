@@ -18,6 +18,7 @@ use super::card::{Card, FAILED, Icon, Role, cross};
 use super::controls::{id_options, insert, menu, params, row, set, text_field, toggle, with};
 use super::dock::{self, Dock};
 use super::graph::{Item, Pick};
+use super::pick::Clicked;
 use super::relations::{self, RelationGizmos};
 use super::thumbnails::{Files, Images, Pictures, Thumbnails};
 use super::{Form, PointerOverPanel, in_the_view, send};
@@ -136,10 +137,16 @@ pub fn draw(
     mut thumbnails: Local<Thumbnails>,
     mut over_panel: ResMut<PointerOverPanel>,
     camera: Option<Single<(&mut Camera, &mut PanOrbitCamera)>>,
+    mut clicks: MessageReader<Clicked>,
 ) -> Result {
     // Cloned, so `contexts` is free to be handed on to the pictures — which
     // need it for egui's texture table. An `egui::Context` is a handle.
     let ctx = contexts.ctx_mut()?.clone();
+    // A click in the view is a click in the graph. It lands a frame late, as
+    // the graph's own does: the view is read after the panel.
+    if let Some(Clicked(item)) = clicks.read().last() {
+        state.dock.graph.picked = item.clone().map(|item| Pick { item, at: ctx.input(|input| input.time) });
+    }
     // A panel needs a `Ui` to dock into, and the context's own root one is not
     // handed out — so this is the whole window, as a `Ui`.
     let mut window = egui::Ui::new(

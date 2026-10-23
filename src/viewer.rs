@@ -341,7 +341,7 @@ fn hud_line(scene: &Scene) -> String {
         .filter(|asset| !scene.geometry_of(asset).is_empty())
         .count();
     format!(
-        "{}  |  {drawn}/{} assets drawn  |  drag orbit, right-drag pan, wheel zoom",
+        "{}  |  {drawn}/{} assets drawn  |  drag orbit, right-drag pan, wheel zoom, click pick, double-click focus",
         scene.env_name,
         scene.assets().len(),
     )

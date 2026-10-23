@@ -8,6 +8,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Added
 
+- A click on an object in `arena-view`'s 3D view picks it, as a click on its node in the graph does:
+  its card opens in the panel and its node is outlined in the graph. A click on a counter picks the
+  reference to its top, the node things stand on, not the room around it. Hovering outlines what a
+  click would pick, a double click brings the camera round to it, and a click on the backdrop drops
+  the pick.
 - `check_spec`, and every edit, refuse a spec that Arena only refused minutes into a build, once
   Isaac Sim had started: a task param naming a node of another class than the task needs, such as an
   `OpenDoorTask` on a banana, a `PlaceUprightTask` on a bottle that is not `Placeable`, or an

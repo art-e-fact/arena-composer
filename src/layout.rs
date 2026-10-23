@@ -212,15 +212,19 @@ fn perspective(scene: &Scene, focus: Vec3, size: Vec3) -> Framing {
             focus: lookat,
         };
     }
-    // 1.6x the diagonal keeps the whole layout inside a default 45° FOV with
-    // room to spare, and never collapses onto a single-point scene.
-    let distance = size.length().max(MIN_EXTENT) * 1.6;
-    let eye = focus + Vec3::new(0.7, 0.55, 1.0).normalize() * distance;
+    let eye = focus + Vec3::new(0.7, 0.55, 1.0).normalize() * fitting_distance(size);
     Framing {
         transform: Transform::from_translation(eye).looking_at(focus, Vec3::Y),
         projection: Projection::default(),
         focus,
     }
+}
+
+/// How far off something `size` across the perspective camera stands to take
+/// it all in: 1.6× the diagonal keeps the whole of it inside the default 45°
+/// field of view with room to spare, and never collapses onto a point.
+pub fn fitting_distance(size: Vec3) -> f32 {
+    size.length().max(MIN_EXTENT) * 1.6
 }
 
 /// The background's pieces an axis view leaves out, by index into its
