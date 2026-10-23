@@ -43,3 +43,8 @@
   font-family: "Fira Sans Condensed", var(--md-text-font-family);
   font-weight: 600;
 }
+
+/* A command or a tool's name leads a table row whole, rather than broken across lines. */
+.md-typeset td:first-child code {
+  white-space: nowrap;
+}

@@ -10,25 +10,12 @@ is judged, and where the lines come out. The checks are in
 
 ## Where a wrong spec fails
 
-```mermaid
-flowchart TB
-    accTitle: Where a wrong spec fails, and how soon it shows
-    accDescr: A spec passes five gates in turn. It is read and merged with the scene it includes, Arena's validator checks its fields and then its asserts, the build constructs each entry, and the resolve constructs the assets and places the objects by them. spec_edit.check, and every edit before it writes, run the first four in milliseconds, foreseeing the build from the signatures of the classes Arena will construct. The resolve needs the assets, so it comes seconds in, and stops on a param an asset does not take, which no signature showed. Isaac Sim's own build comes minutes in, and finds what no signature shows.
-
-    subgraph instant ["Milliseconds: every check and edit"]
-        read["<b>1. Read and merge</b><br>a task and its scene<br><code>SpecFiles.merged</code>"]
-        fields["<b>2. The validator's fields</b><br>names known, types right<br><code>ArenaEnvGraphSpec</code>"]
-        asserts["<b>3. The validator's asserts</b><br>ids declared, none twice<br><code>_assert_problems</code>"]
-        build["<b>4. The build, foreseen</b><br>params fit the classes<br><code>_build_problems</code>"]
-        read --> fields --> asserts --> build
-    end
-
-    resolve["<b>5. The resolve</b><br>assets built, placeable<br><code>resolve_layout.py</code>"]
-    built["<b>The build itself</b><br>what no signature shows<br><code>to_arena_env</code>"]
-
-    build -- "seconds in,<br>with the assets" --> resolve
-    build -- "minutes in,<br>in Isaac Sim" --> built
-```
+A spec passes five gates in turn, drawn for someone writing one in the guide
+([When a spec is wrong](../guide/how-it-works.md#when-a-spec-is-wrong)): read and merge
+(`SpecFiles.merged`), the validator's fields (`ArenaEnvGraphSpec`), its asserts
+(`_assert_problems`), the build, foreseen (`_build_problems`), and the resolve
+([resolve_layout.py](../python/arena_composer/resolve_layout.py)). Isaac Sim's own build
+(`to_arena_env`) comes after them all, minutes in.
 
 | Gate | When Arena finds it | What fails there |
 | --- | --- | --- |

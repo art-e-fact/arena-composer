@@ -25,8 +25,9 @@ PNG. A few seconds a shot. Arena's venv has to be active only when a scene has t
 3. Run `docs/publish.sh docs/screenshots/*.png` on the branch whose pull request changes the
    window. The PNGs stay out of git, so that a retake does not grow the clone: it uploads them in a
    comment on the pull request, where reviewers see them, and puts the URL GitHub gives each on the
-   README line under its marker, `<!-- graph.png -->`. Commit README.md with the change. It needs
-   gh 2.102 or later, for `--attach`, and push access; it posts, so run it once the shots are right.
+   line under its marker, `<!-- graph.png -->`, in the README and in any guide page showing the
+   same shot. Commit the pages it edited with the change. It needs gh 2.102 or later, for
+   `--attach`, and push access; it posts, so run it once the shots are right.
 
 A shot is right when:
 

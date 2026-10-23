@@ -1,6 +1,6 @@
 name: Docs
 
-# The docs site: built on every pull request, where `--strict` fails a link to a page or a heading
+# The guide's site: built on every pull request, where `--strict` fails a link to a page or a heading
 # that does not exist, and deployed to GitHub Pages from main. docs/development.md says how it is
 # put together.
 on:

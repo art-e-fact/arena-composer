@@ -1,14 +1,16 @@
-"""Stages the docs site: copies every page in zensical.toml's nav, and its `extra_css`, to its
+"""Stages the guide's site: copies every page in zensical.toml's nav, and its `extra_css`, to its
 `docs_dir`, each under its path in the repository.
 
 Keeping the paths keeps every link between two pages working as written. A link to anything
 else, source, a directory or a page left off the site, is rewritten to point at it on GitHub, at
 the commit being built. A line that is only a GitHub attachment URL, which GitHub plays as a
-video, becomes a `<video>` tag.
+video, becomes a `<video>` tag, and the lines between a page's `mcp-tools` markers become a table
+of the MCP tools, drawn from their docstrings.
 """
 
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import subprocess
@@ -30,6 +32,25 @@ TOKEN = re.compile(
 """Code, which is copied as it is, an inline link, or a bare attachment URL on a line of its own:
 docs/publish.sh writes the README's video that way, and GitHub plays it."""
 URL = re.compile(r"[a-z][a-z0-9+.-]*:")
+TOOLS = re.compile(r"^<!-- mcp-tools -->\n.*?^<!-- /mcp-tools -->$", re.DOTALL | re.MULTILINE)
+"""Where the guide lists the MCP tools. What stands between the markers is for GitHub, which
+draws the page as written."""
+SERVER = ROOT / "python" / "arena_composer" / "mcp_server.py"
+
+
+def tools() -> str:
+    """The MCP tools as a table, each by its docstring's first paragraph: what the client shows the
+    model, and so the only description of a tool there is. Read with `ast`, since importing the
+    server imports Arena."""
+    rows = ["| Tool | What it is for | Read-only |", "| --- | --- | --- |"]
+    for node in ast.parse(SERVER.read_text(encoding="utf-8")).body:
+        decorators = [ast.unparse(decorator) for decorator in getattr(node, "decorator_list", [])]
+        if not any(decorator.startswith("mcp.tool") for decorator in decorators):
+            continue
+        what = ast.get_docstring(node).split("\n\n")[0].replace("\n", " ").replace("|", r"\|")
+        read_only = "yes" if any("_READ_ONLY" in decorator for decorator in decorators) else "no"
+        rows.append(f"| `{node.name}` | {what} | {read_only} |")
+    return "\n".join(rows)
 
 
 def pages(nav: object = CONFIG["nav"]) -> Iterator[str]:
@@ -78,6 +99,7 @@ def stage(out: Path = OUT) -> list[Path]:
     for name in site:
         page = ROOT / name
         text = TOKEN.sub(lambda match: link(match, page), page.read_text(encoding="utf-8"))
+        text = TOOLS.sub(lambda _: tools(), text)
         dest = out / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")

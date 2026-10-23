@@ -5,8 +5,9 @@ maturin project: **Python owns everything that needs OpenUSD** — Arena's regis
 solver, reading the assets — and **Rust owns Bevy** and opens no USD. They meet in one MessagePack
 payload, and both ends change together.
 
-[README.md](README.md) is the user-facing side: what the commands do and how to install a release.
-This file is the map for working on the repo itself.
+[README.md](README.md) and the [guide](guide/) are the user-facing side: what the commands do, how
+to install a release, and how to use the editor and the agent tools. This file is the map for
+working on the repo itself.
 
 ## Commands
 
@@ -24,7 +25,7 @@ To change the Rust side without paying for Arena on every run, pack a payload on
 `arena-viewer` on it, in its window or headless. That loop, the screenshot variables, the opt-in
 tests, the wheel and releasing are in [docs/development.md](docs/development.md).
 
-A change to what the window looks like retakes the README's screenshots:
+A change to what the window looks like retakes the screenshots the README and the guide show:
 `docs/screenshots/shoot.sh`, and the [readme-screenshots](.claude/skills/readme-screenshots/SKILL.md)
 skill for changing what they show. One to how it is used re-records its video:
 `docs/video/record.sh`, and the [readme-video](.claude/skills/readme-video/SKILL.md) skill. One to
@@ -76,17 +77,26 @@ renders with Isaac Sim's, the one place here that starts Isaac Sim, in a process
 
 ## Docs
 
+Two kinds, each for its own reader and in its own style.
+
+**The guide** is for people using the commands, the panel and the MCP tools: the README, the pages
+in [guide/](guide/) and the changelog, which make up the site. Write it to the reader: what to type
+or click and what comes back, the idea before the detail, and never a private name or how the code
+does it. Its nav in [zensical.toml](zensical.toml) lists every page, and `pytest` fails a page in
+`guide/` left off it, or one that names a private symbol.
+
+**The internals** are for whoever changes the code, agents included: the pages below and the nested
+AGENTS.md. Rules, the reasons for them and pointers into the code, as dense as they need to be. They
+are read on GitHub, not on the site.
+
 - [docs/architecture.md](docs/architecture.md) — the split, the payload, the processes, the pipe, and why an edit is answered twice
 - [docs/editor.md](docs/editor.md) — the panel; read before touching the camera gate, framing, backdrop, gizmos or drag-and-drop
 - [docs/assets.md](docs/assets.md) — SimReady props, the index, pictures, reindexing
 - [docs/mcp.md](docs/mcp.md) — rules for the MCP server, and `arena-composer init`
 - [docs/errors.md](docs/errors.md) — how a wrong spec is found, how an edit on one is judged, where
   the lines come out; read before adding a check
-- [docs/development.md](docs/development.md) — setup, iterating on a packed payload, tests, the docs site, the wheel, releasing
+- [docs/development.md](docs/development.md) — setup, iterating on a packed payload, tests, the guide's site, the wheel, releasing
 - [python/arena_composer/usd/AGENTS.md](python/arena_composer/usd/AGENTS.md) — how assets are read, and what does not render yet
-
-The README, the pages under `docs/` and the changelog are also a site, whose nav in
-[zensical.toml](zensical.toml) lists them: a new page under `docs/` goes in it too, or `pytest` fails.
 
 ## Rules that bite
 
@@ -106,7 +116,8 @@ The README, the pages under `docs/` and the changelog are also a site, whose nav
   `on` is `true`.
 - **MCP tools are documented in their docstrings and `INSTRUCTIONS`, nowhere else.** That is what
   the client shows the model. The [author-arena-spec](python/arena_composer/skills/author-arena-spec/SKILL.md)
-  skill is procedure: it names tools and result fields but defines none.
+  skill is procedure: it names tools and result fields but defines none. The guide's table of tools
+  is drawn from each docstring's first paragraph, so a person reads that paragraph too.
 - **Bevy's default features stay off.** Its audio and gamepad support link libasound and libudev,
   which a manylinux wheel may not. Name each feature you need in [Cargo.toml](Cargo.toml).
 - **The `python` feature is off by default**, so plain `cargo check`/`clippy`/`test` never compile
@@ -121,4 +132,5 @@ The README, the pages under `docs/` and the changelog are also a site, whose nav
   the code. CI fails a pull request that changes `src/`, `python/`, `Cargo.toml` or
   `pyproject.toml` without one. Where nothing they can see changed — a refactor, a test — label
   the pull request `no changelog` instead (`gh pr edit <n> --add-label "no changelog"`). A released
-  version's section is never edited.
+  version's section is never edited. A change that earns a line also updates the guide page that
+  shows what changed.

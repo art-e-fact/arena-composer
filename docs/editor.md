@@ -1,6 +1,7 @@
 # The editor panel
 
-The window's right-hand panel draws the authored spec as a form and edits it over the pipe
+What the panel does for someone using it is the guide's [visual editor](../guide/editor.md); this
+page is how it is built. The window's right-hand panel draws the authored spec as a form and edits it over the pipe
 ([architecture.md](architecture.md#the-pipe)). A dock under the 3D view beside it holds the asset
 browser and the spatial graph, a tab each, the way Isaac Sim docks its content browser. Start with
 the module docs of [src/editor/mod.rs](../src/editor/mod.rs): immediate mode, no local copy of the
