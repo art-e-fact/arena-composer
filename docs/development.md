@@ -122,6 +122,37 @@ rather than from the views it checks. `python showcase/collage.py` draws it besi
 `showcase.png`, and [docs/publish.sh](publish.sh) puts it on the README as it does the screenshots.
 Its `TILES` name the cases and their cameras.
 
+### The Isaac Sim comparison
+
+[parity/](../parity/) checks the composer's drawing against Isaac Sim's, which is what the sim's
+cameras see. Each spec in [parity/specs/](../parity/specs/) is solved once, and both draw it from the
+same cameras. Isaac Sim builds the spec in a process of its own and reports where physics left
+everything, and the composer draws the scene moved to those poses. Four of the specs stand robolab's,
+Arena's and SimReady's props in rows on a table at fixed poses, so that each gets a close-up and
+nothing moves them; the other two are a Lightwheel kitchen and a GR1 humanoid in one. It needs Isaac
+Sim in Arena's venv, its EULA accepted, and a GPU that RTX renders on; nothing else here starts Isaac
+Sim.
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES python parity/compare.py parity/specs/*.yaml --out /tmp/arena-parity
+```
+
+Each spec takes about a minute, half of it Isaac Sim starting, once its assets are downloaded.
+`/tmp/arena-parity` gets a `<spec>-<camera>.png` per camera, Isaac Sim's picture left of the
+composer's, the pictures themselves and Isaac Sim's log under `<spec>/`, a `tests_junit.xml` and a
+`metrics.json`.
+
+A camera is scored by how far the composer's colours are from Isaac Sim's once exposure is matched:
+one gain per pair, then the mean difference in sRGB, 0–255, over 8×8-pixel blocks, leaving out the
+composer's backdrop, where Isaac Sim shows its sky. A camera Isaac Sim renders dark, which stands
+inside something, is skipped. A camera fails when its error rises more than 3 above the one
+[parity/baseline.json](../parity/baseline.json) records, so a change that draws further from Isaac
+Sim fails a test. A change that draws closer lowers the error; record it with `--write-baseline`,
+and the next run holds it.
+
+`artefacts run parity` runs it as an Artefacts job, a scenario per spec: see the
+[README](../README.md#the-isaac-sim-comparison-on-artefacts).
+
 ## The docs site
 
 [art-e-fact.github.io/arena-composer](https://art-e-fact.github.io/arena-composer/) is built with

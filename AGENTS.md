@@ -70,7 +70,9 @@ how a scene is drawn redraws its picture of the showcase: `python showcase/colla
 
 [tests/](tests/) is Python only. Rust tests are inline `#[cfg(test)]` modules beside the code.
 [showcase/](showcase/) is a gallery of renders for a person to look over, outside `pytest`'s run:
-see [docs/development.md](docs/development.md#the-showcase).
+see [docs/development.md](docs/development.md#the-showcase). [parity/](parity/) compares the composer's
+renders with Isaac Sim's, the one place here that starts Isaac Sim, in a process of its own: see
+[docs/development.md](docs/development.md#the-isaac-sim-comparison).
 
 ## Docs
 
@@ -96,7 +98,9 @@ The README, the pages under `docs/` and the changelog are also a site, whose nav
 - **Nothing imports Isaac Sim.** Importing `isaacsim` runs Kit's EULA check, which asks on stdout
   and exits where there is no terminal to answer, and nothing here accepts the EULA for the user.
   Arena's registries, its solver and `pxr` need none of it. [tests/conftest.py](tests/conftest.py)
-  fails the run when something pulls it in.
+  fails the run when something pulls it in. The one exception is
+  [parity/isaac_capture.py](parity/isaac_capture.py), which renders Isaac Sim's side of the
+  comparison: `compare.py` runs it in a process of its own, and the person running it accepts the EULA.
 - **Rust never writes YAML.** [spec_edit.py](python/arena_composer/spec_edit.py) is the only writer.
   It validates by reading the text back with PyYAML, the YAML 1.1 reader Arena uses, where a bare
   `on` is `true`.

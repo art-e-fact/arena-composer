@@ -16,6 +16,8 @@ dependencies = [
     "isaaclab_arena>=0.3,<0.4",
     "msgpack>=1.1",
     "numpy",
+    # Packs OmniPBR's separate metallic and roughness maps into the one image Bevy reads.
+    "pillow",
     # The YAML reader Arena validates specs with.
     "pyyaml",
     # The MCP server (arena_composer.mcp_server).

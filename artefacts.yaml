@@ -40,3 +40,47 @@ jobs:
             || echo '<testsuite name="showcase" tests="1" errors="1"><testcase name="pytest"><error
             message="pytest wrote no tests_junit.xml, is the Arena venv active? See test_process_log.txt"/></testcase></testsuite>'
             > "$ARTEFACTS_SCENARIO_UPLOAD_DIR/tests_junit.xml"
+
+  # The Isaac Sim comparison (docs/development.md#the-isaac-sim-comparison), a scenario per spec in
+  # parity/specs/. Also needs Isaac Sim in Arena's venv, a GPU RTX renders on, and its EULA accepted,
+  # which nothing here does for you:
+  #
+  #   OMNI_KIT_ACCEPT_EULA=YES artefacts run parity
+  #
+  # Each scenario's upload gets an Isaac Sim | composer picture per camera, tests_junit.xml with a
+  # test case per camera, and metrics.json; a camera fails when it draws further from Isaac Sim than
+  # parity/baseline.json says it did. compare.py writes tests_junit.xml however it ends, and the
+  # fallback below covers a python that cannot start it.
+  parity:
+    type: test
+    timeout: 30 # minutes; about one once the assets are downloaded
+    package:
+      docker:
+        build:
+          dockerfile: empty
+    runtime:
+      framework: other
+      simulator: isaac_sim
+    scenarios:
+      defaults:
+        metrics: target/parity-metrics.json
+        run: >-
+          python parity/compare.py "$SPEC" --out "$ARTEFACTS_SCENARIO_UPLOAD_DIR" --timeout 20
+          --metrics target/parity-metrics.json 2>&1
+          || [ -e "$ARTEFACTS_SCENARIO_UPLOAD_DIR/tests_junit.xml" ]
+          || echo '<testsuite name="parity" tests="1" errors="1"><testcase name="compare"><error
+          message="compare.py wrote no tests_junit.xml, is the Arena venv active? See test_process_log.txt"/></testcase></testsuite>'
+          > "$ARTEFACTS_SCENARIO_UPLOAD_DIR/tests_junit.xml"
+      settings:
+        - name: robolab_props
+          params: {SPEC: parity/specs/robolab_props.yaml}
+        - name: arena_appliances
+          params: {SPEC: parity/specs/arena_appliances.yaml}
+        - name: arena_props
+          params: {SPEC: parity/specs/arena_props.yaml}
+        - name: simready_props
+          params: {SPEC: parity/specs/simready_props.yaml}
+        - name: lightwheel_kitchen
+          params: {SPEC: parity/specs/lightwheel_kitchen.yaml}
+        - name: gr1_kitchen
+          params: {SPEC: parity/specs/gr1_kitchen.yaml}

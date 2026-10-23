@@ -28,9 +28,12 @@ spawns it and as Arena bounds it to place it:
   solved layout. Isaac Lab's spawner replaces the rotation too, with the
   asset's initial pose, so on an asset whose root authors one, Arena's box and
   the sim disagree; this follows the box the layout was solved by.
-* An **unauthored** ``upAxis`` or ``metersPerUnit`` means Z-up metres, not USD's
-  Y-up centimetres. Arena composes robot USDs on the fly and authors neither;
-  under USD's own fallbacks the robot would lie on its side at 1/100 scale.
+* ``upAxis`` and ``metersPerUnit`` are **ignored**, authored or not: a stage is
+  read as Z-up metres. Isaac Lab references a USD without converting it and
+  Arena bounds it as authored, so honouring them draws what neither does — the
+  factory peg and hole author Y-up over Z-up geometry and would lie on their
+  side, and Arena's robots, composed on the fly, author neither, so USD's
+  fallbacks would lay them down at 1/100 scale.
 * A robot is **posed** at the joint positions it is reset to, which Arena
   bounds it by, rather than drawn at the pose its file authors.
 """
@@ -38,8 +41,9 @@ spawns it and as Arena bounds it to place it:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
@@ -81,7 +85,8 @@ def extract(stage: Usd.Stage, joint_pos: Mapping[str, float] | None = None) -> l
                 continue
             matrix = to_asset(prim)
             for piece, material in _split(prim, surface):
-                nodes.append(Node(str(prim.GetPath()), _place(piece, matrix), material))
+                for tile, tile_material in _tiles(piece, material):
+                    nodes.append(Node(str(prim.GetPath()), _place(tile, matrix), tile_material))
     return nodes
 
 
@@ -148,17 +153,41 @@ def _split(prim: Usd.Prim, surface: Surface) -> Iterator[tuple[Surface, Material
             yield piece, read_material(prim)
 
 
+def _tiles(surface: Surface, material: Material) -> Iterator[tuple[Surface, Material]]:
+    """One piece per UDIM tile the material's textures are split into, each with its own tile's images.
+
+    A UDIM texture is an image per unit square of UV space, numbered from 1001 at the origin, on by one
+    along U and by ten up V: Fourier's GR1T2 has nine along U. A material samples one image, so the
+    mesh is split by the tile each triangle falls in, and each piece's UVs are moved into the unit
+    square. A tile with no image of a slot draws without it. USD's `st`, before `_place` flips V.
+    """
+    if not any("<UDIM>" in path for path in material.textures.values()):
+        yield surface, material
+        return
+    if surface.uvs is None:
+        # Nothing to sample a texture by, and a `<UDIM>` path names no file.
+        yield surface, replace(material, textures={s: p for s, p in material.textures.items() if "<UDIM>" not in p})
+        return
+    tiles = np.floor(surface.uvs[surface.triangles].mean(axis=1)).astype(np.int64)
+    numbers = 1001 + tiles[:, 0] + 10 * tiles[:, 1]
+    for number in np.unique(numbers):
+        keep = numbers == number
+        piece = surface.select_triangles(keep)
+        piece.uvs = piece.uvs - tiles[keep][0].astype(np.float32)
+        textures = {slot: path.replace("<UDIM>", str(number)) for slot, path in material.textures.items()}
+        yield piece, replace(material, textures={slot: path for slot, path in textures.items() if os.path.isfile(path)})
+
+
 def _asset_frame(
     stage: Usd.Stage, root: Usd.Prim | None, joint_pos: Mapping[str, float] | None
 ) -> Callable[[Usd.Prim], np.ndarray]:
     """Build ``prim -> 4x4`` taking prim-local points into the asset's frame.
 
     USD's row-vector convention means the chain reads left to right:
-    ``p · localToWorld · pose · unbake · convention``, where ``pose`` is the
-    identity for a prim no joint moves.
+    ``p · localToWorld · pose · unbake``, where ``pose`` is the identity for a
+    prim no joint moves.
     """
     cache = UsdGeom.XformCache()
-    convention = _convention(stage)
     unbake = Gf.Matrix4d(1)
     if root:
         world = cache.GetLocalToWorldTransform(root)
@@ -166,7 +195,7 @@ def _asset_frame(
         # rotation. Doing it as a matrix pair sidesteps having to know the
         # order its xform ops were authored in.
         unbake = world.GetInverse() * Gf.Matrix4d().SetRotate(Gf.Transform(world).GetRotation())
-    tail = np.array(unbake * convention)
+    tail = np.array(unbake)
     pose = _posing(stage, root, joint_pos) if root and joint_pos else lambda path: None
 
     def to_asset(prim: Usd.Prim) -> np.ndarray:
@@ -204,18 +233,6 @@ def _posing(
     joints = resolve_joint_pos_patterns(articulation_joint_prims(root), joint_pos)
     deltas = compute_posed_prim_world_deltas(stage, str(root.GetPath()), joints)
     return lambda path: resolve_prim_world_delta(path, deltas)
-
-
-def _convention(stage: Usd.Stage) -> Gf.Matrix4d:
-    """The stage's axis and unit convention, expressed in Arena's frame."""
-    matrix = Gf.Matrix4d(1)
-    if stage.HasAuthoredMetadata("upAxis") and stage.GetMetadata("upAxis") == "Y":
-        matrix = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0), 90))
-    if stage.HasAuthoredMetadata("metersPerUnit"):
-        meters = float(stage.GetMetadata("metersPerUnit"))
-        if meters > 0:
-            matrix = matrix * Gf.Matrix4d().SetScale(meters)
-    return matrix
 
 
 def _place(surface: Surface, matrix: np.ndarray) -> Surface:

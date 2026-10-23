@@ -1,0 +1,68 @@
+env_name: lineup_simready_b
+embodiment:
+  id: robot
+  registry_name: franka_ik
+  params:
+    initial_pose:
+      position_xyz:
+      - -1.6
+      - 0.0
+      - 0.0
+background:
+  id: table
+  registry_name: office_table_background
+objects:
+- id: plywood_crate_b01_01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Industrial/Warehouse/Containers/Plywood_Crate_B01_01/sm_crate_plywood_b01_01.usd
+    initial_pose:
+      position_xyz:
+      - -0.3489151358604431
+      - 0.13433176755905152
+      - 0.533
+- id: boc_choy_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Vegetables/Boc_Choy_A01/sm_food_produce_bocChoy_a01_01.usd
+    initial_pose:
+      position_xyz:
+      - 0.362173097729683
+      - -0.26318808168172836
+      - 0.5326761418879032
+- id: eggplant_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Kitchen/Food/Vegetables/Eggplant_A01/sm_food_produce_eggplant_a01_01.usd
+    initial_pose:
+      position_xyz:
+      - 0.6687951046228409
+      - -0.3441899650543928
+      - 0.5329683499336243
+- id: printer_paper_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Residential/Office/Supplies/Printer_Paper_A01/sm_misc_printerPaper_a01_01.usd
+    initial_pose:
+      position_xyz:
+      - -0.6984858870506286
+      - 0.7845838275551796
+      - 0.5327854009270668
+- id: wide_pry_bar_a01
+  registry_name: simready_usd_object
+  params:
+    usd_path: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0/Isaac/SimReady/Industrial/Tools/Hand/Wide_Pry_Bar_A01/sm_handTool_pry_bar_wide_a01_01.usd
+    initial_pose:
+      position_xyz:
+      - -0.4434927380084992
+      - 0.686136079095304
+      - 0.533181790906936
+relations:
+- kind: is_anchor
+  subject: table
+task:
+  composition: atomic
+  description: No task.
+  subtasks:
+  - kind: NoTask
+    params: {}

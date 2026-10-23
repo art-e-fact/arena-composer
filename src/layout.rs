@@ -4,9 +4,13 @@
 //! build the same scene the same way, and differ only in what they do with the
 //! frames that come out.
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::render::render_resource::{
+    Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+};
 
 use crate::scene::{Asset, Scene, arena_to_bevy};
 use crate::spawn::spawn_geometry;
@@ -85,17 +89,23 @@ pub fn view_layers(i: usize) -> RenderLayers {
     RenderLayers::from_layers(&[0, i + 1])
 }
 
+/// Both lights are scaled to draw a scene as bright as Isaac Sim's RTX draws it
+/// under Arena's dome light, measured on object close-ups from matched cameras:
+/// unscaled, the composer drew them 1.6 times brighter. The scale is below 1/1.6
+/// because the tonemapper compresses what it takes away from the highlights.
+const MATCH_ISAAC: f32 = 0.44;
+
 /// Stand in for the dome light Arena injects at build time when neither the
 /// spec nor the background USD supplies one, for a light the spec lists as an
 /// object, and for the lights a background's USD carries: none of them is
-/// drawn, and a room under the ambient fill alone is one flat grey.
+/// drawn, and a room under the [`Sky`] alone is one flat grey.
 /// `payload.build_payload` sets the flag for all three. It lights whatever is
 /// drawn, so a reload leaves it alone.
 pub fn spawn_lighting(world: &mut World, scene: &Scene) {
     if scene.lighting.auto_injected_dome_light {
         world.spawn((
             DirectionalLight {
-                illuminance: 6_000.0,
+                illuminance: 6_000.0 * MATCH_ISAAC,
                 ..default()
             },
             Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.6), Vec3::Y),
@@ -103,14 +113,58 @@ pub fn spawn_lighting(world: &mut World, scene: &Scene) {
     }
 }
 
-/// Fill light, lifting the shadowed side of an asset enough to read its
-/// silhouette. Per-camera in Bevy 0.19, not a resource, so every camera that
-/// wants it has to carry its own.
-pub fn ambient() -> AmbientLight {
-    AmbientLight {
-        brightness: 400.0,
-        ..default()
+/// The sky every camera sits under, standing in for the light of Arena's dome
+/// that the sun does not bring: a cubemap of one white texel a face. It replaced
+/// Bevy's ambient fill, a cheap approximation that lights a matte surface at
+/// about half its colour and a metal by one bounce of light. An environment map
+/// lights both in full, as Isaac Sim's path tracer does, which draws a robot's
+/// metal and the sides the sun misses closer to its renders.
+///
+/// More of the light could come from the sky and less from the sun, as all of
+/// the dome's does: a spoon then draws the matte grey Isaac Sim draws it, but
+/// everything else goes flat, since Bevy has no ambient occlusion to shade a
+/// uniform sky the way RTX does. Against Isaac Sim's renders this split scores best.
+#[derive(Resource)]
+pub struct Sky(Handle<Image>);
+
+impl FromWorld for Sky {
+    fn from_world(world: &mut World) -> Self {
+        let mut image = Image::new_fill(
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            TextureDimension::D2,
+            &[255; 4],
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.texture_view_descriptor = Some(TextureViewDescriptor {
+            dimension: Some(TextureViewDimension::Cube),
+            ..default()
+        });
+        Self(world.get_resource_or_init::<Assets<Image>>().add(image))
     }
+}
+
+/// The light a camera carries: the [`Sky`], and none of the ambient fill Bevy
+/// would otherwise add. Per camera in Bevy 0.19, not a resource, so every camera
+/// that draws the layout has to carry its own.
+pub fn sky(world: &mut World) -> (EnvironmentMapLight, AmbientLight) {
+    let map = world.get_resource_or_init::<Sky>().0.clone();
+    (
+        EnvironmentMapLight {
+            diffuse_map: map.clone(),
+            specular_map: map,
+            intensity: 400.0 * MATCH_ISAAC,
+            ..default()
+        },
+        AmbientLight {
+            brightness: 0.0,
+            ..default()
+        },
+    )
 }
 
 /// A named camera placement.
@@ -546,6 +600,24 @@ mod tests {
         assert!(
             fitted.abs_diff_eq(Vec2::new(2.0 * MARGIN, MIN_EXTENT), 1e-5),
             "fitted to {fitted}"
+        );
+    }
+
+    /// Every camera carries the one sky: a cubemap of six faces, and no ambient
+    /// fill on top of it, which Bevy would otherwise add at its default brightness.
+    #[test]
+    fn cameras_share_one_sky_and_no_fill() {
+        let mut world = World::new();
+        let (first, fill) = sky(&mut world);
+        let (second, _) = sky(&mut world);
+        assert_eq!(first.specular_map, second.specular_map);
+        assert_eq!(first.diffuse_map, first.specular_map);
+        assert_eq!(fill.brightness, 0.0);
+        let image = world.resource::<Assets<Image>>().get(&first.specular_map).unwrap();
+        assert_eq!(image.texture_descriptor.size.depth_or_array_layers, 6);
+        assert_eq!(
+            image.texture_view_descriptor.as_ref().and_then(|view| view.dimension),
+            Some(TextureViewDimension::Cube)
         );
     }
 

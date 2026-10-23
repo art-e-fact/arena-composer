@@ -22,7 +22,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_dis
 use bevy::window::ExitCondition;
 use bevy::winit::WinitPlugin;
 
-use crate::layout::{View, ambient, framing, spawn_lighting, spawn_scene, view_layers};
+use crate::layout::{View, framing, sky, spawn_lighting, spawn_scene, view_layers};
 use crate::scene::Scene;
 
 /// Frames to render after the textures have settled, before capturing. Gives
@@ -137,13 +137,14 @@ fn setup(world: &mut World) {
             ),
         );
         let framed = framing(*view, &request.scene);
+        let sky = sky(world);
         world.spawn((
             Camera3d::default(),
             RenderTarget::Image(target.into()),
             framed.transform,
             framed.projection,
             view_layers(i),
-            ambient(),
+            sky,
             Shot {
                 view: *view,
                 path: path.clone(),

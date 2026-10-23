@@ -70,6 +70,36 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- Assets are drawn in the colours Isaac Sim draws them in, in the window, `arena-render` and
+  `render_views`. Colours were read as sRGB where USD authors them linear, so every flat colour drew
+  too dark. OmniPBR materials draw their texture alone rather than tinted by the colour beside it,
+  which turned `dex_cube`'s yellow faces dark green and `grey_bin_robolab` dark red, and an
+  untextured one starts from OmniPBR's dark grey where it drew white, as the milk jug did. A glow
+  is drawn only where the material turns emission on: the office table's frame and some Lightwheel
+  faucets drew salmon pink. A roughness past 1 is clamped, as Isaac Sim does, where agibot drew
+  white all over.
+- An asset whose USD says it is Y-up is drawn as Isaac Sim spawns it, as authored: the factory
+  `peg` and `hole` lay on their side.
+- Metal in Lightwheel's kitchens and other OmniPBR assets is drawn as metal, as Isaac Sim draws it:
+  an ORM map's metallic and roughness count by the material's own influences, and only where it
+  turns the map on. They were multiplied by its constants, usually 0 and 0.5, so stoves, sinks and
+  fridges drew as grey plastic. The map's occlusion no longer darkens the colour, which drew every
+  kitchen cabinet near-black, and a restyled kitchen's cabinets keep their colour, which its colour
+  map, read as a normal map too, turned grey.
+- The window, `arena-render` and `render_views` draw a scene about as bright as Isaac Sim draws it
+  under Arena's dome light, where an object close-up came out 1.6 times brighter.
+- Colour textures stored as 16-bit PNGs are drawn in the colour space their material names, where
+  they drew washed out: robolab's fruit, and Lightwheel's microwaves, coffee machines and toasters.
+  One that names none is read as Isaac Sim reads it, by its bit depth.
+- UDIM textures, one image per tile of the UV map, are drawn: Fourier's GR1T2 and SimReady's
+  eggplant, bok choy and plywood crate drew untextured.
+- OmniPBR's separate metallic and roughness maps are read. A material that turns on a map it lacks
+  is drawn as Isaac Sim draws it, as if the map were black: robolab's fruit are glossy.
+- SimReady props' metal is drawn as metal. Their UsdPreviewSurface takes metallic and roughness from
+  a map, which was multiplied by 0 and 0.5.
+- A robot's metal, and the sides of things the light does not face, are drawn brighter, closer to
+  Isaac Sim: the window, `arena-render` and `render_views` light a scene with a sky that metal
+  reflects, in place of a flat fill that lit shaded sides at half their colour and metal dimly.
 - `check_spec` says where a misspelt object or background param shows: it passes the check, and
   `describe_scene`, `arena-render` and the window stop on it seconds in, with
   `TypeError: object.__init__() takes exactly one argument`, which names neither the param nor the

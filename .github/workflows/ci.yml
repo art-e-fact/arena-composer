@@ -53,7 +53,7 @@ jobs:
       - run: |
           uv venv --python 3.12
           uv pip install --no-deps dist/*.whl
-          uv pip install msgpack numpy "mcp>=2" "ruamel.yaml>=0.18" pyyaml pytest usd-core
+          uv pip install msgpack numpy pillow "mcp>=2" "ruamel.yaml>=0.18" pyyaml pytest usd-core
           .venv/bin/pytest
 
   release:

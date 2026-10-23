@@ -20,9 +20,9 @@
 <table>
   <tr>
     <!-- assets.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/1cb38053-b2f1-40a1-b0f7-82fd06c4a1ea"><img src="https://github.com/user-attachments/assets/1cb38053-b2f1-40a1-b0f7-82fd06c4a1ea" alt="The visual editor with the asset browser searched"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/400a1839-d059-4580-a59d-1bfa5339b4bd"><img src="https://github.com/user-attachments/assets/400a1839-d059-4580-a59d-1bfa5339b4bd" alt="The visual editor with the asset browser searched"></a></td>
     <!-- graph.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/13b3c05f-7442-4d8a-b87c-1fa8495f72b8"><img src="https://github.com/user-attachments/assets/13b3c05f-7442-4d8a-b87c-1fa8495f72b8" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/4ff5b088-8cdc-4287-a3dc-703ce46225f8"><img src="https://github.com/user-attachments/assets/4ff5b088-8cdc-4287-a3dc-703ce46225f8" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
@@ -42,6 +42,7 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - [Install](#install)
 - [Developing](#developing)
     - [The showcase on Artefacts](#the-showcase-on-artefacts)
+    - [The Isaac Sim comparison on Artefacts](#the-isaac-sim-comparison-on-artefacts)
 - [License](#license)
 
 ## Highlights
@@ -169,7 +170,7 @@ See [AGENTS.md](AGENTS.md) and [docs/](docs/).
 ### The showcase on Artefacts
 
 <!-- showcase.png -->
-<a href="https://github.com/user-attachments/assets/ce24be22-ab64-42d4-aa0f-c4a848f6ec0a"><img src="https://github.com/user-attachments/assets/ce24be22-ab64-42d4-aa0f-c4a848f6ec0a" alt="Six showcase environments, drawn by arena-render: an AgiBot, a Galbot and a DROID in Lightwheel kitchens, a KUKA arm over a bench of hand tools, a DROID in a Replicator kitchen, and a GR1's kitchen from above"></a>
+<a href="https://github.com/user-attachments/assets/e207c135-e58e-4470-98af-83058cd17a9f"><img src="https://github.com/user-attachments/assets/e207c135-e58e-4470-98af-83058cd17a9f" alt="Six showcase environments, drawn by arena-render: an AgiBot, a Galbot and a DROID in Lightwheel kitchens, a KUKA arm over a bench of hand tools, a DROID in a Replicator kitchen, and a GR1's kitchen from above"></a>
 
 The [showcase](docs/development.md#the-showcase) builds about twenty environments and draws each
 from four views. [artefacts.yaml](artefacts.yaml) runs it as an
@@ -186,6 +187,24 @@ artefacts run showcase
 
 The dashboard gets a test per environment and a PNG per environment and view. More in the
 [Artefacts docs](https://docs.artefacts.com/).
+
+### The Isaac Sim comparison on Artefacts
+
+The composer draws a scene without Isaac Sim, so [parity/](parity/) checks it against Isaac Sim's own
+renders. A second job in [artefacts.yaml](artefacts.yaml) builds a handful of specs in Isaac Sim and
+draws each from the same cameras in both, after moving the composer's scene to where physics left
+everything. Each camera is a test, which fails when the composer draws further from Isaac Sim than
+it did before. The dashboard shows the two pictures side by side.
+
+It also needs Isaac Sim in Arena's venv and a GPU that RTX renders on, and its EULA accepted, which
+nothing here does for you:
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES artefacts run parity
+```
+
+How the pictures are scored, and how to record a closer baseline, is in
+[docs/development.md](docs/development.md#the-isaac-sim-comparison).
 
 ## License
 
