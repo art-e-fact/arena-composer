@@ -47,7 +47,7 @@ from isaaclab_arena.relations.object_placer import ObjectPlacer
 from isaaclab_arena.relations.passive_collision_objects import get_placement_collision_objects
 from isaaclab_arena.relations.placement_poses import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
-from isaaclab_arena.relations.relations import ClutterOn, FaceTo, NextTo, NotNextTo, On
+from isaaclab_arena.relations.relations import AlignWith, ClutterOn, FaceTo, NextTo, NotNextTo, On
 from isaaclab_arena.relations.validation.types import PlacementCheck
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
@@ -446,6 +446,7 @@ _CHECKED_KIND = {
     PlacementCheck.NEXT_TO: NextTo.name,
     PlacementCheck.NOT_NEXT_TO: NotNextTo.name,
     PlacementCheck.FACE_TO: FaceTo.name,
+    PlacementCheck.ALIGN_WITH: AlignWith.name,
 }
 
 
