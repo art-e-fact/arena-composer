@@ -6,6 +6,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
 ### Added
 
 - arena-composer is on [PyPI](https://pypi.org/project/arena-composer/), and goes into Arena's venv
@@ -397,7 +399,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - The first release on its own: `arena-view`, `arena-resolve-layout`, `arena-mcp` and
   `arena-composer init`, as a manylinux wheel attached to the GitHub Release.
 
-[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/art-e-fact/arena-composer/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/art-e-fact/arena-composer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/art-e-fact/arena-composer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/art-e-fact/arena-composer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/art-e-fact/arena-composer/compare/v0.1.0...v0.2.0
