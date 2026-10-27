@@ -56,7 +56,7 @@ nothing. A new one gets a sweep too, for warnings on specs that work.
   — and bind the entry's params to it (`_binding`, `catalog.missing_params`,
   `catalog.unexpected_params`). What Arena passes itself counts as given, and given twice is
   refused: a binary relation's reference, an atomic task's `task_description`, a reference's `name`,
-  `prim_path`, `parent_asset` and `object_type`; an object's `instance_name` only where the params
+  `prim_path`, `parent_asset` and `object_type`; an object's `name` only where the params
   lack it, since Arena fills that by `setdefault`. The rest is what the build asserts without a
   signature: the ids in a list param, which Arena's validator skips and its builder looks up; a
   reference's `prim_path` and its one affordance; and `env_cfg_override` through Arena's own two

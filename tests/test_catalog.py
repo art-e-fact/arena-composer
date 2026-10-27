@@ -56,10 +56,10 @@ def test_only_the_generic_simready_object_needs_a_param():
 
     simready = AssetRegistry().get_asset_by_name("simready_usd_object")
     banana = AssetRegistry().get_asset_by_name("banana_ycb_robolab")
-    # Arena fills `instance_name` from the entry's id.
-    assert catalog.missing_params(simready, {}, given=("instance_name",)) == ["usd_path"]
-    assert catalog.missing_params(simready, {"usd_path": "x.usd"}, given=("instance_name",)) == []
-    assert catalog.missing_params(banana, {}, given=("instance_name",)) == []
+    # Arena fills `name` from the entry's id.
+    assert catalog.missing_params(simready, {}, given=("name",)) == ["usd_path"]
+    assert catalog.missing_params(simready, {"usd_path": "x.usd"}, given=("name",)) == []
+    assert catalog.missing_params(banana, {}, given=("name",)) == []
 
 
 def test_a_kind_lists_the_params_no_control_edits_and_whether_arena_vetted_it():

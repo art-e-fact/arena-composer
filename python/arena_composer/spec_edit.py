@@ -561,10 +561,10 @@ def _asset_problems(spec: Any) -> list[str]:
     from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
 
     registry = AssetRegistry()
-    # Arena fills an object's `instance_name` from its id, and nobody else's —
+    # Arena fills an object's `name` from its id, and nobody else's —
     # by `setdefault`, so one the params give is no clash.
     slots = [(role, spec.get(role) if isinstance(spec, dict) else None, ()) for role in ("embodiment", "background")]
-    slots += [(f"objects.{index}", entry, ("instance_name",)) for index, entry in _indexed(spec, "objects")]
+    slots += [(f"objects.{index}", entry, ("name",)) for index, entry in _indexed(spec, "objects")]
     errors = []
     for where, entry, given in slots:
         name = entry.get("registry_name") if isinstance(entry, dict) else None

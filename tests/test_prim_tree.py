@@ -90,7 +90,7 @@ def test_under_an_object_the_path_is_relative_too_and_arena_builds_a_reference_f
     (prim,) = _tree(spec, node_id="cab", object_type="articulation")["prims"]
     assert prim == CABINET
 
-    parent = AssetRegistry().get_asset_by_name("simready_usd_object")(usd_path=str(usd), instance_name="cab")
+    parent = AssetRegistry().get_asset_by_name("simready_usd_object")(usd_path=str(usd), name="cab")
     ref = ObjectReferenceSpec(id="door", parent_id="cab", prim_path=prim["prim_path"], object_type=prim["object_type"])
     # Arena expands it under the object's prim path, {ENV_REGEX_NS}/cab.
     assert _instantiate_object_reference(ref, parent_asset=parent).prim_path_in_parent_usd == "/World/cabinet"

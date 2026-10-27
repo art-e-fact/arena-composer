@@ -886,9 +886,9 @@ def test_a_relation_param_is_checked_against_its_kind(spec: Path):
 def test_a_param_arena_passes_itself_is_refused(spec: Path):
     """Arena passes a relation its reference and an atomic task its
     description whatever the params hold, so one there too is a TypeError at
-    build. An object's `instance_name` it only defaults, so that one is fine."""
+    build. An object's `name` it only defaults, so that one is fine."""
     broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}",
-           "registry_name: bowl_ycb_robolab\n  params: {instance_name: my_bowl}")
+           "registry_name: bowl_ycb_robolab\n  params: {name: my_bowl}")
     broken(spec, "  subject: banana\n  reference: maple_table_robolab\n  params: {}",
            "  subject: banana\n  reference: maple_table_robolab\n  params: {parent: bowl}")
     errors = broken(spec, "      background_scene:", "      task_description: grab it\n      background_scene:", file=spec)
