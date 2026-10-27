@@ -32,3 +32,8 @@ def test_a_spec_that_includes_nothing_watches_itself(tmp_path: Path):
 def test_an_unparsable_spec_still_watches_itself(tmp_path: Path):
     # Caught mid-write: the poll must keep running until the file parses again.
     assert set(_watched(_spec(tmp_path, "external_yaml: [\n"))) == {tmp_path / "tasks" / "task.yaml"}
+
+
+def test_every_file_a_list_include_names_is_watched(tmp_path: Path):
+    spec = _spec(tmp_path, "external_yaml: [../scenes/kitchen.yaml, ../defaults.yaml]\n")
+    assert set(_watched(spec)) == {spec, tmp_path / "scenes" / "kitchen.yaml", tmp_path / "defaults.yaml"}

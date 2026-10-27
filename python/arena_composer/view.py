@@ -440,15 +440,14 @@ async def _reload_on_change(
 
 
 def _watched(spec: Path) -> dict[Path, int | None]:
-    """`spec` and the file its top-level `external_yaml` includes, each with its
+    """`spec` and the files its top-level `external_yaml` includes, each with its
     modification time. Re-read every poll, so pointing the include at another
     scene is itself a change — and so is that scene's own arrival."""
     paths = [spec]
     # Missing, half-written or not a mapping: watch the spec alone until it parses again.
     with contextlib.suppress(Exception):
         include = yaml.safe_load(spec.read_text()).get("external_yaml")
-        if include:
-            paths.append((spec.parent / include).resolve())
+        paths += [(spec.parent / path).resolve() for path in ([include] if isinstance(include, str) else include or [])]
     return {path: _mtime(path) for path in paths}
 
 

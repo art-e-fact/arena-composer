@@ -256,15 +256,17 @@ def test_a_rename_onto_an_id_in_use_is_refused_on_a_broken_spec_too(spec: Path):
 
 
 def test_an_edit_that_makes_the_pair_read_lands_with_the_rest_remaining(spec: Path):
-    """A key in both files is Arena's to refuse, so there was no before to
-    compare with, and every edit was refused for what was wrong already — the
-    fix for the other problem first too. The edit that makes the pair read
-    lands, with all that is wrong as what remains; and `add_object` answers
-    such a pair with a refusal, not a crash."""
+    """A value in both files is Arena's to refuse — relations have no id, so
+    two lists of them do not join — so there was no before to compare with,
+    and every edit was refused for what was wrong already — the fix for the
+    other problem first too. The edit that makes the pair read lands, with
+    all that is wrong as what remains; and `add_object` answers such a pair
+    with a refusal, not a crash."""
     broken(spec, "pick_up_object: banana", "pick_up_object: plantain", file=spec)
     spec.write_text(spec.read_text() + "relations: []\n")
-    assert "Duplicate env graph spec key" in spec_edit.check(spec).errors[0]
-    assert "Duplicate env graph spec key" in spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab").errors[0]
+    assert "Conflicting env graph spec value at 'relations'" in spec_edit.check(spec).errors[0]
+    refused = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab").errors[0]
+    assert "Conflicting env graph spec value at 'relations'" in refused
 
     result = spec_edit.apply(spec, "remove", ["relations"])
     assert result.ok and result.wrote == [str(spec)], result
@@ -316,6 +318,52 @@ def test_a_spec_without_an_include_edits_itself(tmp_path: Path):
     assert result.ok, result.errors
     assert result.wrote == [str(path)]
     assert "apple" in [obj["id"] for obj in yaml.safe_load(path.read_text())["objects"]]
+
+
+def split(spec: Path) -> Path:
+    """`spec` including a second file beside its scene, which holds the
+    placer's settings and the last of the scene's objects, as Arena merges a
+    list include: the objects joined in file order, after the scene's."""
+    defaults = spec.parent.parent / "defaults.yaml"
+    defaults.write_text("placer_params:\n  max_placement_attempts: 4\nobjects:\n- id: distractor\n"
+                        "  registry_name: apple_02_objaverse_robolab\n  params: {}\n")
+    scene_of(spec).write_text(SCENE.replace(
+        "- id: distractor\n  registry_name: apple_02_objaverse_robolab\n  params: {}\n", ""))
+    spec.write_text(TASK.replace("external_yaml: ../scenes/scene.yaml", "external_yaml:\n- ../scenes/scene.yaml\n- ../defaults.yaml"))
+    assert spec_edit.check(spec).ok, spec_edit.check(spec).errors
+    return defaults
+
+
+def test_an_edit_lands_in_whichever_included_file_holds_it(spec: Path):
+    """An index into objects joined across files names one entry, renumbered
+    within the file holding it; a removal and a rename reach every file."""
+    defaults = split(spec)
+    from arena_composer.payload import _owners
+
+    owners = _owners(str(spec))
+    assert (owners["objects"], owners["placer_params"], owners["task"]) == ("scene.yaml + defaults.yaml", "defaults.yaml", "task")
+
+    result = spec_edit.apply(spec, "set", ["objects", 2, "params", "scale"], [2.0, 2.0, 2.0])
+    assert result.ok and result.wrote == [str(defaults)], result
+    assert yaml.safe_load(defaults.read_text())["objects"][0]["params"] == {"scale": [2.0, 2.0, 2.0]}
+
+    assert spec_edit.apply(spec, "set", ["placer_params", "max_placement_attempts"], 6).wrote == [str(defaults)]
+
+    result = spec_edit.apply(spec, "set", ["objects", 2, "id"], "apple")
+    assert result.ok and set(result.wrote) == {str(defaults), str(scene_of(spec))}, result
+    assert "subject: apple" in scene_of(spec).read_text()
+
+    result = spec_edit.remove_object(spec, "apple")
+    assert result.ok and set(result.wrote) == {str(defaults), str(scene_of(spec))}, result
+    assert yaml.safe_load(defaults.read_text())["objects"] == []
+    assert "apple" not in scene_of(spec).read_text()
+
+
+def test_a_line_names_the_included_file_holding_what_it_is_about(spec: Path):
+    defaults = split(spec)
+    assert broken(spec, "apple_02_objaverse_robolab", "apple_02_objaverse", file=defaults)[0].startswith(
+        "../defaults.yaml: objects.2.registry_name: Unknown asset registry_name 'apple_02_objaverse'"
+    )
 
 
 def test_check_judges_the_bytes_on_disk_and_writes_nothing(spec: Path):

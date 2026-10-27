@@ -5,9 +5,10 @@ those are better than anything here — the YAML is short and exact. What it doe
 not have is the two things this module adds:
 
 * **Where an edit belongs.** A task spec includes a scene through
-  ``external_yaml``, and the two are a disjoint union: ``objects`` and
-  ``relations`` live in exactly one of the files. An edit goes to whichever file
-  owns the key.
+  ``external_yaml`` — one file, or a list of them — and Arena merges them
+  without overrides: a value lives in exactly one file, mappings merge key by
+  key, and lists of entries with an ``id`` join in file order. An edit goes to
+  the file that holds the value it names, see :meth:`SpecFiles.locate`.
 * **What an edit drags with it.** Removing an object also has to remove the
   relations that name it and the object references inside it, and renaming one
   — an object's, the embodiment's, or the background's — has to carry every
@@ -179,7 +180,7 @@ def check_entry(path: Path) -> None:
 
 
 class SpecFiles:
-    """A spec and the scene it includes, held as round-trip YAML documents.
+    """A spec and the scenes it includes, held as round-trip YAML documents.
 
     Loaded together because that is the unit validation applies to: a change to
     the scene can only be judged against the task that includes it.
@@ -202,9 +203,22 @@ class SpecFiles:
         self.documents: dict[Path, Any] = {self.path: self._read(self.path)}
 
         include = self.documents[self.path].get(INCLUDE)
-        self.include_path = (self.path.parent / include).resolve() if include else None
-        if self.include_path:
-            self.documents[self.include_path] = self._read(self.include_path)
+        spellings = [include] if isinstance(include, str) else include
+        if include is not None and not (
+            isinstance(spellings, list) and spellings and all(isinstance(spelling, str) for spelling in spellings)
+        ):
+            raise ValueError(f"'{INCLUDE}' must be a file path or a non-empty list of them, got {include!r}")
+        #: Each included file, as the include spells it, in the order Arena merges them.
+        self.spellings: dict[Path, str] = {}
+        for spelling in spellings or []:
+            included = (self.path.parent / spelling).resolve()
+            self.spellings[included] = spelling
+            self.documents[included] = self._read(included)
+
+    @property
+    def merge_order(self) -> list[Path]:
+        """The files in the order Arena merges them: the includes, then the spec."""
+        return [*self.spellings, self.path]
 
     def _read(self, path: Path) -> Any:
         with path.open(encoding="utf-8") as handle:
@@ -216,21 +230,66 @@ class SpecFiles:
     def owner(self, key: str) -> Path:
         """The file that holds `key`, or the one an edit should add it to.
 
-        The include is a disjoint union — Arena refuses a key present in both —
-        so at most one file can own it. A key nobody has goes with its kin:
-        the scene's keys together, the task's with the run's settings — so a
-        missing ``task`` is the task file's to fix, and a first
-        ``cli_override_specs`` lands beside the task, where the template keeps
-        it. Arena's gear specs, before 0.3.1, put the scene in the entry file
-        and `env_cfg_override` in the include, and this follows that layout too.
+        A key in more than one file — a mapping or a list of entries Arena
+        merges across them — is the last one's in merge order, the spec before
+        any include. A key nobody has goes with its kin: the scene's keys
+        together, the task's with the run's settings — so a missing ``task`` is
+        the task file's to fix, and a first ``cli_override_specs`` lands beside
+        the task, where the template keeps it. Arena's gear specs, before 0.3.1,
+        put the scene in the entry file and `env_cfg_override` in the include,
+        and this follows that layout too.
         """
-        for path, document in self.documents.items():
-            if key in document:
-                return path
+        holders = [path for path in self.merge_order if key in self.documents[path]]
+        if holders:
+            return holders[-1]
         for path, document in self.documents.items():
             if any((other in _SCENE_KEYS) == (key in _SCENE_KEYS) for other in document if other != INCLUDE):
                 return path
         return self.path
+
+    def locate(self, steps: list[Any]) -> tuple[Path, list[Any]]:
+        """The file an edit at `steps`, a path into the merged spec, lands in,
+        and the path within that file.
+
+        Walked as Arena merges: a key goes to the files holding it, and an
+        index into a list of entries joined across files to the one entry it
+        names, renumbered within its file. Where the walk runs out — a key or
+        an entry no file has yet — the edit lands in the last file holding
+        what it got to, as :meth:`owner` places a whole key.
+        """
+        if not any(steps[0] in document for document in self.documents.values()):
+            return self.owner(str(steps[0])), list(steps)
+        holders = [(path, self.documents[path]) for path in self.merge_order]
+        local: list[Any] = []
+        for step in steps:
+            if isinstance(step, int) and not isinstance(step, bool):
+                deeper, index = [], step
+                for path, node in holders:
+                    if isinstance(node, list):
+                        if 0 <= index < len(node):
+                            deeper = [(path, node[index])]
+                            break
+                        index -= len(node)
+                step = index
+            else:
+                deeper = [(path, node[step]) for path, node in holders if isinstance(node, dict) and step in node]
+            if not deeper:
+                break
+            holders = deeper
+            local.append(step)
+        return holders[-1][0], local + list(steps[len(local) :])
+
+    def value(self, steps: list[Any]) -> Any:
+        """What the merged spec holds at `steps`, or None where nothing is."""
+        path, local = self.locate(steps)
+        try:
+            return _walk(self.documents[path], local)
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    def entries(self, key: str) -> list[dict[str, Any]]:
+        """The entries of the list under `key`, joined across the files as Arena joins them."""
+        return [entry for path in self.merge_order for entry in _entries(self.documents[path], key)]
 
     def section(self, key: str) -> list[Any]:
         """The list stored under `key`, created in its owning file if absent.
@@ -249,10 +308,11 @@ class SpecFiles:
         from isaaclab_arena.environment_spec.arena_env_graph_yaml_loader import _merge_env_graph_dicts
 
         documents = self.documents if documents is None else documents
+        for path in self.spellings:
+            if isinstance(documents[path], dict) and INCLUDE in documents[path]:
+                raise ValueError(f"Nested '{INCLUDE}' is not allowed; only the entry spec may declare one: {path}")
         entry = {key: value for key, value in documents[self.path].items() if key != INCLUDE}
-        if not self.include_path:
-            return entry
-        return _merge_env_graph_dicts(dict(documents[self.include_path]), entry)
+        return _merge_env_graph_dicts([(str(path), documents[path]) for path in self.spellings] + [(str(self.path), entry)])
 
     def validate(self, texts: dict[Path, str]) -> list[str]:
         """Problems with the spec `texts` would produce, empty when it is good.
@@ -355,18 +415,20 @@ class SpecFiles:
 
     def _file_of(self, line: str) -> str:
         """The prefix naming the file that owns what `line` is about, or none."""
-        if not self.include_path:
+        if not self.spellings:
             return ""
         from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 
-        key = next((key for pattern, key in _SECTIONS if pattern.match(line)), None)
-        if key is None and (match := re.match(r"(\w+)[.:]", line)):
-            key = match[1]
+        steps = next(([key] for pattern, key in _SECTIONS if pattern.match(line)), None)
+        if steps is None and (match := re.match(r"\w+(\.\w+)*(?=[.:])", line)):
+            steps = [int(step) if step.isdigit() else step for step in match[0].split(".")]
         # A key Arena has no field for is named only where a file holds it.
-        if key not in ArenaEnvGraphSpec.model_fields and not any(key in doc for doc in self.documents.values()):
+        if not steps or (
+            steps[0] not in ArenaEnvGraphSpec.model_fields and not any(steps[0] in doc for doc in self.documents.values())
+        ):
             return ""
-        owner = self.owner(key)
-        return f"{self.path.name if owner == self.path else self.documents[self.path][INCLUDE]}: "
+        owner = self.locate(steps)[0]
+        return f"{self.path.name if owner == self.path else self.spellings[owner]}: "
 
     def _dump(self, document: Any) -> str:
         buffer = io.StringIO()
@@ -376,13 +438,11 @@ class SpecFiles:
     def asset_ids(self) -> list[str]:
         """Every id an edit can refer to, in the order the spec declares them.
         Off the documents as they are, not merged: a pair a hand edit left
-        with a key in both files still has ids, and the write says what is
+        with a value in two files still has ids, and the write says what is
         wrong with the pair."""
-        spec = {key: value for document in self.documents.values() for key, value in document.items()}
-        entries = [spec.get("embodiment"), spec.get("background")]
-        for key in ("objects", "object_sets", "object_references"):
-            entries += _entries(spec, key)
-        return [entry["id"] for entry in entries if isinstance(entry, dict) and entry.get("id")]
+        ids = [self.value(["embodiment", "id"]), self.value(["background", "id"])]
+        ids += [entry.get("id") for key in _ID_SECTIONS for entry in self.entries(key)]
+        return [node_id for node_id in ids if node_id]
 
 
 def _replace(path: Path, text: str) -> None:
@@ -1143,12 +1203,12 @@ def add_object(
     try:
         objects = files.section("objects")
         objects.append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
-        changed, touched = [f"added object {node_id!r} ({registry_name})"], [f"objects.{len(objects) - 1}"]
+        changed, touched = [f"added object {node_id!r} ({registry_name})"], [f"objects.{_count(files, 'objects') - 1}"]
         if on is not None:
             relations = files.section("relations")
             relations.append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
             changed.append(f"added relation {node_id!r} on {on!r}")
-            touched.append(f"relations.{len(relations) - 1}")
+            touched.append(f"relations.{_count(files, 'relations') - 1}")
     except TypeError as error:
         return Result.failed(str(error))
     return files.write(changed, tuple(touched))
@@ -1194,23 +1254,26 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     if isinstance(files, Result):
         return files
     key = str(steps[0])
-    document = files.documents[files.owner(key)]
+    holder, local = files.locate(steps)
+    document = files.documents[holder]
 
     value = _ordered(value)
 
     try:
         if op == "insert":
-            # A single step names a top-level list, which may not exist yet.
-            target = files.section(key) if len(steps) == 1 else _walk(document, steps)
+            # A single step names a top-level list, which may not exist yet,
+            # and may be joined across files: the entry goes on the end.
+            target = files.section(key) if len(steps) == 1 else _walk(document, local)
             target.append(value)
+            index = _count(files, key) - 1 if len(steps) == 1 else len(target) - 1
             changed = [f"added an entry to {_label(steps)}"]
             if steps == ["task", "subtasks"]:
-                changed += _fit_node_params(files, f"task.subtasks.{len(target) - 1}", target[-1])
+                changed += _fit_node_params(files, f"task.subtasks.{index}", target[-1])
             if steps == ["task", "subtasks"] and (bumped := _keep_composition_valid(files)):
                 changed.append(bumped)
-            return files.write(changed, (f"{_label(steps)}.{len(target) - 1}",))
+            return files.write(changed, (f"{_label(steps)}.{index}",))
 
-        parent, last = _walk(document, steps[:-1]), steps[-1]
+        parent, last = _walk(document, local[:-1]), local[-1]
         if op == "set":
             previous = parent.get(last) if isinstance(parent, dict) else None
             # An id is a name other entries hold, so renaming it has to carry
@@ -1251,12 +1314,12 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
             # ruamel writes a mapping emptied of a commented key at column 0,
             # which does not parse. A fresh one writes as `{}`; a list has its
             # own trap, see `_emptied`.
-            if not parent and len(steps) > 1:
-                grandparent = _walk(document, steps[:-2])
+            if not parent and len(local) > 1:
+                grandparent = _walk(document, local[:-2])
                 if isinstance(parent, dict):
-                    grandparent[steps[-2]] = {}
+                    grandparent[local[-2]] = {}
                 else:
-                    _emptied(grandparent, steps[-2])
+                    _emptied(grandparent, local[-2])
             if node_id:
                 changed += _drop_dependents(files, node_id)
             if steps[:2] == ["task", "subtasks"] and len(steps) == 3 and (bumped := _keep_composition_valid(files)):
@@ -1465,14 +1528,20 @@ def _introduced(
     return introduced, remaining
 
 
+def _count(files: SpecFiles, key: str) -> int:
+    """How many entries the list under `key` holds, joined across the files."""
+    return sum(len(document[key]) for document in files.documents.values() if isinstance(document.get(key), list))
+
+
 def _remove(files: SpecFiles, key: str, entries: list[Any]) -> None:
-    """Take `entries` out of the list under `key`, leaving a fresh ``[]`` when
-    that empties it."""
-    document = files.documents[files.owner(key)]
-    for entry in entries:
-        document[key].remove(entry)
-    if not document[key]:
-        _emptied(document, key)
+    """Take `entries` out of the list under `key`, in whichever file holds
+    each, leaving a fresh ``[]`` where that empties one."""
+    for document in files.documents.values():
+        held = [entry for entry in _entries(document, key) if any(entry is gone for gone in entries)]
+        for entry in held:
+            document[key].remove(entry)
+        if held and not document[key]:
+            _emptied(document, key)
 
 
 def _emptied(mapping: Any, key: Any) -> None:
@@ -1501,12 +1570,12 @@ def _drop_dependents(files: SpecFiles, node_id: str) -> list[str]:
     a cascade and not a refusal.
     """
     gone, changed = [node_id], []
-    references = _entries(files.documents[files.owner("object_references")], "object_references")
+    references = files.entries("object_references")
     if inside := [reference for reference in references if reference.get("parent_id") == node_id]:
         _remove(files, "object_references", inside)
         gone += [reference["id"] for reference in inside if isinstance(reference.get("id"), str)]
         changed.append(f"removed object reference(s) {gone[1:]} inside {node_id!r}")
-    relations = _entries(files.documents[files.owner("relations")], "relations")
+    relations = files.entries("relations")
     if naming := [r for r in relations if r.get("subject") in gone or r.get("reference") in gone]:
         _remove(files, "relations", naming)
         changed.append(f"removed {len(naming)} relation(s) naming {' or '.join(repr(name) for name in gone)}")
@@ -1534,9 +1603,9 @@ def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
             if container[key] == previous:
                 container[key] = node_id
                 renamed += 1
-    object_ids = {entry.get("id") for entry in _entries(files.documents[files.owner("objects")], "objects")}
+    object_ids = {entry.get("id") for entry in files.entries("objects")}
     prefix = f"{{ENV_REGEX_NS}}/{previous}/"
-    for reference in _entries(files.documents[files.owner("object_references")], "object_references"):
+    for reference in files.entries("object_references"):
         # `parent_id` already carries the new id by now.
         prim_path = reference.get("prim_path")
         if reference.get("parent_id") == node_id and node_id in object_ids and str(prim_path).startswith(prefix):
@@ -1556,15 +1625,17 @@ def _keep_composition_valid(files: SpecFiles) -> str | None:
     first is refused while there is only one. Bumping the count and the
     composition together in the same edit keeps every step on its own valid.
     """
-    task = files.documents[files.owner("task")].get("task") or {}
-    subtasks = task.get("subtasks") or []
-    if task.get("composition") == "atomic" and len(subtasks) >= 2:
-        task["composition"] = "sequential"
-        return "set task.composition to 'sequential': 'atomic' holds exactly one subtask"
-    if task.get("composition") != "atomic" and len(subtasks) == 1:
-        task["composition"] = "atomic"
-        return "set task.composition to 'atomic': one subtask cannot be sequential or parallel"
-    return None
+    subtasks = files.value(["task", "subtasks"]) or []
+    composition = files.value(["task", "composition"])
+    if composition == "atomic" and len(subtasks) >= 2:
+        fitted, line = "sequential", "set task.composition to 'sequential': 'atomic' holds exactly one subtask"
+    elif composition != "atomic" and len(subtasks) == 1:
+        fitted, line = "atomic", "set task.composition to 'atomic': one subtask cannot be sequential or parallel"
+    else:
+        return None
+    holder, local = files.locate(["task", "composition"])
+    _walk(files.documents[holder], local[:-1])[local[-1]] = fitted
+    return line
 
 
 def _fit_node_params(files: SpecFiles, where: str, subtask: Any) -> list[str]:
@@ -1651,7 +1722,7 @@ def remove_object(path: Path, node_id: str) -> Result:
     files = _files(path)
     if isinstance(files, Result):
         return files
-    matched = [entry for entry in _entries(files.documents[files.owner("objects")], "objects") if entry.get("id") == node_id]
+    matched = [entry for entry in files.entries("objects") if entry.get("id") == node_id]
     if not matched:
         return Result.failed(f"no object {node_id!r} in this spec; it has {files.asset_ids()}")
 
