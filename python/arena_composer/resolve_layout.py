@@ -141,9 +141,18 @@ def check_usd_params(objects: Iterable[Any]) -> None:
     from inside the solver, or not until the sim. The download this costs is
     the one the resolve was about to make anyway.
 
+    A SimReady Central URL — a Hugging Face dataset — is checked by Arena's
+    own loader, which downloads the package into the Hugging Face cache and
+    asserts it is pinned and one rigid body: the one copy, which Arena's build
+    reads too, and a failure named here rather than from inside it.
+
     `objects` are the spec's object entries — anything with an `id`, a
     `registry_name` and `params`.
     """
+    from isaaclab_arena.assets.simready_central_asset_loader import (
+        download_and_wrap_central_asset,
+        is_central_asset_url,
+    )
     from isaaclab_arena.assets.simready_constants import SIMREADY_PHYSICS_VARIANTS, SIMREADY_USD_OBJECT_REGISTRY_NAME
     from isaaclab_arena.utils.usd.rigid_bodies import read_asset_rigid_body_paths
 
@@ -151,6 +160,12 @@ def check_usd_params(objects: Iterable[Any]) -> None:
     for obj in objects:
         usd_path = obj.params.get("usd_path")
         if not usd_path:
+            continue
+        if obj.registry_name == SIMREADY_USD_OBJECT_REGISTRY_NAME and is_central_asset_url(usd_path):
+            try:
+                download_and_wrap_central_asset(usd_path)
+            except Exception as error:
+                errors.append(f"{obj.id}: {type(error).__name__}: {error}")
             continue
         if "://" not in usd_path and not Path(usd_path).is_file():
             errors.append(f"{obj.id}: no file at {usd_path}")
