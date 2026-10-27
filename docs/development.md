@@ -222,8 +222,10 @@ changes behaviour bumps the minor version and one that only fixes bumps the patc
    fresh `## [Unreleased]` above it, and point the compare links at its foot at the new tag.
 2. Set the version in `Cargo.toml`.
 3. Run the whole suite locally, opt-in tests included: CI has no Arena.
-4. Merge, then push a tag `v<version>` on `main`.
-5. Approve the tag's run deploying to `pypi`: Review deployments, on the run's page.
+4. In the README's [Arena section](../README.md#which-arena-it-runs-on), record the Arena `main`
+   commit the release is synced with, in a table with a row per release.
+5. Merge, then push a tag `v<version>` on `main`.
+6. Approve the tag's run deploying to `pypi`: Review deployments, on the run's page.
 
 CI builds the wheel from the tag and attaches it to the tag's GitHub Release. The release notes are
 the version's section of the changelog, with GitHub's list of the merged pull requests under it,

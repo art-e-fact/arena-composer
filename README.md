@@ -41,6 +41,7 @@ https://github.com/user-attachments/assets/fe77916a-6a83-4348-b8b7-55a05d9676da
 - [How it works](#how-it-works)
 - [Compared with Arena's Agentic Environment Generation](#compared-with-arenas-agentic-environment-generation)
 - [Install](#install)
+    - [Which Arena it runs on](#which-arena-it-runs-on)
 - [Developing](#developing)
     - [The showcase on Artefacts](#the-showcase-on-artefacts)
     - [The Isaac Sim comparison on Artefacts](#the-isaac-sim-comparison-on-artefacts)
@@ -132,6 +133,13 @@ An MCP client starts the server with almost no environment, so `init --import MO
 `init` also links the `author-arena-spec` skill into `.agents/skills/` and `.claude/skills/`. The
 skill is the procedure an agent follows to write a spec with the MCP tools, through to every
 sampled layout passing.
+
+### Which Arena it runs on
+
+arena-composer's `main` is synced with IsaacLab-Arena's `main` at
+[dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362) (2026-10-20), the commit
+the template pins. Arena's `main` changes with no new version number, so the install cannot check
+which one you have.
 
 ## Developing
 
