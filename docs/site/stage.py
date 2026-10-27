@@ -6,6 +6,9 @@ else, source, a directory or a page left off the site, is rewritten to point at 
 the commit being built. A line that is only a GitHub attachment URL, which GitHub plays as a
 video, becomes a `<video>` tag, and the lines between a page's `mcp-tools` markers become a table
 of the MCP tools, drawn from their docstrings.
+
+With `--readme`, it rewrites README.md in place instead, as PyPI shows it from the wheel: every
+relative link pointed at GitHub. CI runs that before building the wheel.
 """
 
 from __future__ import annotations
@@ -14,8 +17,9 @@ import ast
 import re
 import shutil
 import subprocess
+import sys
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,25 +69,44 @@ def pages(nav: object = CONFIG["nav"]) -> Iterator[str]:
             yield from pages(entry)
 
 
+def head() -> str:
+    """The commit being built, where a link pointed at GitHub points."""
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def relink(match: re.Match[str], page: Path, commit: str, site: Collection[str] = ()) -> str:
+    """A `TOKEN` match in `page` with a relative link pointed at GitHub, unless it goes to a page in
+    `site`. Code, an anchor, a URL and a video line stay as they are."""
+    target = match["target"]
+    if match["code"] or not target or URL.match(target):
+        return match[0]
+    path = (page.parent / target).resolve()
+    name = path.relative_to(ROOT).as_posix()
+    if name in site:
+        return match[0]
+    kind = "tree" if path.is_dir() else "blob"
+    return f"]({CONFIG['repo_url']}/{kind}/{commit}/{name}{match['anchor'] or ''})"
+
+
+def readme() -> str:
+    """README.md as PyPI shows it, with no repository to resolve a relative link against. The video
+    line stays a URL: PyPI draws no `<video>`."""
+    page = ROOT / "README.md"
+    commit = head()
+    return TOKEN.sub(lambda match: relink(match, page, commit), page.read_text(encoding="utf-8"))
+
+
 def stage(out: Path = OUT) -> list[Path]:
     """Writes the site's pages under `out`, emptied first, and returns them."""
     site = set(pages())
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout.strip()
+    commit = head()
 
     def link(match: re.Match[str], page: Path) -> str:
         if match["video"]:
             return f'<video src="{match["video"]}" controls muted playsinline></video>'
-        target = match["target"]
-        if match["code"] or not target or URL.match(target):
-            return match[0]
-        path = (page.parent / target).resolve()
-        name = path.relative_to(ROOT).as_posix()
-        if name in site:
-            return match[0]
-        kind = "tree" if path.is_dir() else "blob"
-        return f"]({CONFIG['repo_url']}/{kind}/{commit}/{name}{match['anchor'] or ''})"
+        return relink(match, page, commit, site)
 
     # Emptied rather than removed: `zensical serve` stops watching a docs_dir that is deleted.
     out.mkdir(parents=True, exist_ok=True)
@@ -108,4 +131,7 @@ def stage(out: Path = OUT) -> list[Path]:
 
 
 if __name__ == "__main__":
-    stage()
+    if sys.argv[1:] == ["--readme"]:
+        (ROOT / "README.md").write_text(readme(), encoding="utf-8")
+    else:
+        stage()

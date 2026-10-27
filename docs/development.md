@@ -208,6 +208,11 @@ keep it installable:
 - **It is stripped** (`[profile.release]`). Stripped, the extension is about 105 MB installed and
   the wheel about 35 MB, against PyPI's 100 MB limit per file.
 
+PyPI's page for the package is the README the wheel carries, where a relative link resolves against
+pypi.org. CI runs `python3 docs/site/stage.py --readme` before building, which points each one at
+GitHub at the commit being built. It leaves HTML alone, so a `src` or `href` in the README has to be
+a full URL already; [test_docs_site.py](../tests/test_docs_site.py) fails one that is not.
+
 ## Releasing
 
 The version lives in `Cargo.toml` and is the wheel's version too. Before 1.0, a release that adds or
@@ -215,13 +220,21 @@ changes behaviour bumps the minor version and one that only fixes bumps the patc
 
 1. In [CHANGELOG.md](../CHANGELOG.md), rename `## [Unreleased]` to `## [<version>] - <date>`, put a
    fresh `## [Unreleased]` above it, and point the compare links at its foot at the new tag.
-2. Set the version in `Cargo.toml`, and in the README's install example.
+2. Set the version in `Cargo.toml`.
 3. Run the whole suite locally, opt-in tests included: CI has no Arena.
 4. Merge, then push a tag `v<version>` on `main`.
+5. Approve the tag's run deploying to `pypi`: Review deployments, on the run's page.
 
 CI builds the wheel from the tag and attaches it to the tag's GitHub Release. The release notes are
 the version's section of the changelog, with GitHub's list of the merged pull requests under it,
-and a tag whose version has no section there is refused.
+and a tag whose version has no section there is refused. Then the `pypi` job waits for that
+approval and uploads the same wheel to [PyPI](https://pypi.org/project/arena-composer/). PyPI takes
+a version once, even after it is deleted, so a broken release is fixed by the next patch, and
+yanked.
+
+The upload needs no token: PyPI trusts `ci.yml` in this repository, run in the `pypi` environment
+(trusted publishing, set in the project's settings on PyPI). That environment, in the repository's
+settings, deploys only tags matching `v*`, and only once a required reviewer approves.
 
 Between releases, [changelog.yml](../.github/workflows/changelog.yml) keeps `## [Unreleased]`
 filled: a pull request that changes the package and not the changelog fails it, unless it is

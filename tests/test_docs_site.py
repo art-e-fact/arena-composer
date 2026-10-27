@@ -32,6 +32,14 @@ def test_the_guide_lists_the_mcp_tools(tmp_path):
     assert re.search(r"^\| `check_spec` \| \w", page, re.MULTILINE), "the staged table has no check_spec row"
 
 
+def test_the_readme_on_pypi_links_nothing_relative():
+    """PyPI shows the wheel's README, which CI rewrites first, where a relative link resolves
+    against pypi.org. An HTML `src` or `href` is not rewritten, so it has to be a URL already."""
+    prose = re.sub(r"^ *```.*?^ *```", "", SITE["readme"](), flags=re.DOTALL | re.MULTILINE)
+    relative = re.findall(r'\]\((?![a-z][a-z0-9+.-]*:|#)[^)]*\)|(?:src|href)="(?![a-z][a-z0-9+.-]*:|#)[^"]*"', prose)
+    assert not relative, f"relative on PyPI: {relative}"
+
+
 def test_every_diagram_is_described():
     """Mermaid makes a diagram's accTitle and accDescr its SVG's title and description: what a
     screen reader says for it, on GitHub and on the site alike."""

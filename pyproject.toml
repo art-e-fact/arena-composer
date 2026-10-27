@@ -5,6 +5,7 @@ build-backend = "maturin"
 [project]
 name = "arena-composer"
 description = "A live editor, headless renderer and MCP server for IsaacLab-Arena environment specs"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 license-files = ["LICENSE-*"]
 # abi3-py312: the extension module is built against the 3.12 stable ABI.
@@ -33,6 +34,11 @@ arena-view = "arena_composer.view:main"
 arena-render = "arena_composer.render:main"
 arena-mcp = "arena_composer.mcp_server:main"
 arena-composer = "arena_composer.cli:main"
+
+[project.urls]
+Documentation = "https://art-e-fact.github.io/arena-composer/"
+Repository = "https://github.com/art-e-fact/arena-composer"
+Changelog = "https://art-e-fact.github.io/arena-composer/CHANGELOG/"
 
 [tool.maturin]
 features = ["extension-module"]

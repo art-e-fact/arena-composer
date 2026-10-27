@@ -108,18 +108,15 @@ Arena's [Agentic Environment Generation](https://isaac-sim.github.io/IsaacLab-Ar
 
 ## Install
 
-> TODO: publish on PyPi and update the install steps
-
 A project made from the [template](https://github.com/art-e-fact/artefacts-arena-template) needs
 none of this: its `source setup.sh` installs a pinned release and runs `init`. The steps below add
 arena-composer to an Arena install of your own.
 
-Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/quickstart/installation.html) in, from a release's wheel. `isaaclab_arena` is not on PyPI, so
+Into the venv [Arena is installed](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/quickstart/installation.html) in, from [PyPI](https://pypi.org/project/arena-composer/). `isaaclab_arena` is not on PyPI, so
 the package goes where Arena already is. Linux x86_64, Python 3.12 or newer.
 
 ```bash
-gh release download v0.4.0 -R art-e-fact/arena-composer -p '*.whl' -D /tmp/arena-composer
-uv pip install --python <Arena's venv>/bin/python /tmp/arena-composer/*.whl
+uv pip install --python <Arena's venv>/bin/python arena-composer
 ```
 
 Then point the project's agent clients at the MCP server. `init` writes `bin/arena-mcp` and the

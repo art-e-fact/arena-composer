@@ -8,6 +8,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Added
 
+- arena-composer is on [PyPI](https://pypi.org/project/arena-composer/), and goes into Arena's venv
+  with `uv pip install --python <Arena's venv>/bin/python arena-composer`, where it took downloading
+  a release's wheel from GitHub.
 - A click on an object in `arena-view`'s 3D view picks it, as a click on its node in the graph does:
   its card opens in the panel and its node is outlined in the graph. A click on a counter picks the
   reference to its top, the node things stand on, not the room around it. Hovering outlines what a
