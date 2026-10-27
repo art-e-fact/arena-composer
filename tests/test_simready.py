@@ -135,3 +135,23 @@ def test_a_layer_isaac_lab_copied_to_localize_goes_when_the_process_does(tmp_pat
 
     usd_assets._drop_copies()
     assert not copy.parent.parent.exists() and tmp_path.exists()
+
+
+def test_a_udim_texture_left_on_the_server_has_its_tiles_fetched(tmp_path: Path, monkeypatch):
+    """Isaac Lab 3.0 leaves a UDIM texture's reference a URL and its tiles on the server; they are
+    fetched from 1001 up to the first missing one, and the reference names the local pattern."""
+    from arena_composer import usd_assets
+
+    asked = []
+
+    def retrieve(url: str, download_dir: str) -> str:
+        asked.append(url.rsplit(".", 2)[1])
+        if url.endswith(".1003.png"):
+            raise FileNotFoundError(url)
+        return url
+
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", retrieve)
+    local = usd_assets._udim("https://host/robot/textures/albedo.<UDIM>.png")
+    assert asked == ["1001", "1002", "1003"]
+    assert local == str(tmp_path / "https" / "host" / "robot" / "textures" / "albedo.<UDIM>.png")

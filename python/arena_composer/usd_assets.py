@@ -94,7 +94,9 @@ def _relink_url_references(local_root: str) -> None:
     The mirror keeps the remote directory structure, so *relative* references resolve on their
     own. An absolute ``https://…`` reference does not: USD would try to open it remotely and
     drop the subtree. Rewriting those to mirror-relative paths (once, in the cache) is what
-    makes a composed scene like a Replicator kitchen load completely.
+    makes a composed scene like a Replicator kitchen load completely. Isaac Lab 3.0 leaves a
+    UDIM texture, one image per tile, as a URL with its tiles on the server: those are fetched
+    here (:func:`_udim`).
     """
     from pxr import Sdf, UsdUtils
 
@@ -113,7 +115,7 @@ def _relink_url_references(local_root: str) -> None:
         def repoint(asset_path: str, layer_dir: str = layer_dir) -> str:
             nonlocal rewritten
             if "://" in asset_path:
-                local_path = mirrored(asset_path)
+                local_path = _udim(asset_path) if "<UDIM>" in asset_path else mirrored(asset_path)
             else:
                 local_path = os.path.join(layer_dir, asset_path)
             if local_path is None:
@@ -127,6 +129,22 @@ def _relink_url_references(local_root: str) -> None:
         UsdUtils.ModifyAssetPaths(layer, repoint)
         if rewritten:
             layer.Save()
+
+
+def _udim(url: str) -> str | None:
+    """Mirror a UDIM texture's tiles and return the local path with its ``<UDIM>``, or None when it
+    has none. Tiles are numbered from 1001 without a gap, so the first missing one ends them, as
+    Isaac Lab fetched them before 3.0."""
+    from isaaclab.utils.assets import _mirror_path, retrieve_file_path
+
+    found = False
+    for tile in range(1001, 1101):
+        try:
+            retrieve_file_path(url.replace("<UDIM>", str(tile)), download_dir=str(_cache_dir))
+        except FileNotFoundError:
+            break
+        found = True
+    return _mirror_path(url, str(_cache_dir)) if found else None
 
 
 def mirrored(url: str) -> str | None:
