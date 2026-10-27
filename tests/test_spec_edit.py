@@ -401,10 +401,19 @@ def test_a_file_included_twice_is_refused_as_arena_refuses_it(spec: Path):
 
 
 def test_an_object_naming_itself_as_arena_did_is_told_of_the_rename(spec: Path):
+    """An object's `instance_name` is now `name`; a library background is passed its `name` by
+    Arena, so neither spelling belongs in its params."""
     assert broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}", "registry_name: bowl_ycb_robolab\n"
                   "  params: {instance_name: bowl}") == [
         "../scenes/scene.yaml: objects.1.params.instance_name: Arena renamed it to 'name'"
     ]
+    scene_of(spec).write_text(SCENE)
+    for key in ("name", "instance_name"):
+        assert broken(spec, f"registry_name: {TABLE}\n  params: {{}}", f"registry_name: {TABLE}\n"
+                      f"  params: {{{key}: top}}") == [
+            f"../scenes/scene.yaml: background.params.{key}: Arena passes {TABLE} its 'name' itself; remove it"
+        ]
+        scene_of(spec).write_text(SCENE)
 
 
 def test_check_judges_the_bytes_on_disk_and_writes_nothing(spec: Path):

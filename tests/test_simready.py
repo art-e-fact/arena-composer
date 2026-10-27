@@ -202,10 +202,10 @@ def test_a_robot_on_a_stand_keeps_its_copy_and_reuses_it_while_the_server_has_no
 ):
     """Arena writes a robot on a stand to a file other processes read, which references the copy
     `retrieve_file_path` returned: that copy is never removed, and a later process reuses it until
-    the server's file changes."""
+    the server reports another revision of the file; when it reports none, the last is reused."""
     from arena_composer import usd_assets
 
-    revision = {"hash": "a"}
+    revision: dict = {"hash": "a"}
     made = []
 
     def retrieve(url: str, download_dir: str) -> str:
@@ -218,11 +218,15 @@ def test_a_robot_on_a_stand_keeps_its_copy_and_reuses_it_while_the_server_has_no
     monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
     monkeypatch.setattr(usd_assets, "_copies", set())
     monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", retrieve)
-    monkeypatch.setattr("isaaclab.utils.assets._remote_fingerprint", lambda url: dict(revision))
+    monkeypatch.setattr("isaaclab.utils.assets._remote_fingerprint", lambda url: dict(revision) if revision else None)
 
     first = usd_assets._kept_copy("https://host/robot.usd")
     assert usd_assets._kept_copy("https://host/robot.usd") == first and made == [first]
     revision["hash"] = "b"
-    assert usd_assets._kept_copy("https://host/robot.usd") != first
+    second = usd_assets._kept_copy("https://host/robot.usd")
+    assert second != first
+    revision.clear()
+    assert usd_assets._kept_copy("https://host/robot.usd") == second and len(made) == 2
     usd_assets._drop_copies()
     assert all(Path(copy).exists() for copy in made)
+    assert not list((tmp_path / "kept").glob("*.tmp"))

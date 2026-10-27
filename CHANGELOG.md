@@ -25,7 +25,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   dc77564: install it into an Arena venv at that commit. Assets draw as they did: the tiles of a
   UDIM texture, which Isaac Lab 3.0 leaves on the server, are fetched, so the GR1T2 and SimReady's
   eggplant keep their textures; and the copies of rewritten layers Isaac Lab 3.0 writes on every
-  download, in the asset cache and the system's temporary folder, no longer pile up there.
+  download, which piled up in the asset cache and the system's temporary folder, are made once a
+  run and removed when it ends. A robot on a stand's are kept and shared between runs, a new pair
+  when the server's robot or stand changes.
 - A SimReady Central prop, a `usd_path` on huggingface.co, is checked by Arena's own loader and
   downloaded once, into the Hugging Face cache Arena builds it from, where it was downloaded into
   the composer's asset cache as well. A URL that loader refuses, such as one not pinned to a

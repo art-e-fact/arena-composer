@@ -627,24 +627,29 @@ def _build_problems(spec: Any) -> list[str]:
 def _asset_problems(spec: Any) -> list[str]:
     """The embodiment's, the background's and each object's params against the
     constructor they are passed to, and the embodiment an embodiment."""
+    from isaaclab_arena.assets.background_library import LibraryBackground
     from isaaclab_arena.assets.registries import AssetRegistry
     from isaaclab_arena.embodiments.embodiment_base import EmbodimentBase
 
     registry = AssetRegistry()
-    # Arena fills an object's `name` from its id, and nobody else's —
-    # by `setdefault`, so one the params give is no clash.
-    slots = [(role, spec.get(role) if isinstance(spec, dict) else None, ()) for role in ("embodiment", "background")]
-    slots += [(f"objects.{index}", entry, ("name",)) for index, entry in _indexed(spec, "objects")]
+    slots = [(role, spec.get(role) if isinstance(spec, dict) else None) for role in ("embodiment", "background")]
+    slots += [(f"objects.{index}", entry) for index, entry in _indexed(spec, "objects")]
     errors = []
-    for where, entry, given in slots:
+    for where, entry in slots:
         name = entry.get("registry_name") if isinstance(entry, dict) else None
         if not isinstance(name, str) or not registry.is_registered(name):
             continue
         cls, params = registry.get_asset_by_name(name), entry.get("params")
         params = params if isinstance(params, dict) else {}
-        errors += _binding(f"{where}.params", name, cls, params, tuple(arg for arg in given if arg not in params))
+        # Arena fills an object's `name` from its id by `setdefault`, so one the params give is no
+        # clash; a library background passes its own whatever the params hold. Nobody else is given one.
+        passes_name = where == "background" and issubclass(cls, LibraryBackground)
+        given = ("name",) if passes_name or (where.startswith("objects.") and "name" not in params) else ()
+        errors += _binding(f"{where}.params", name, cls, params, given)
         if "instance_name" in params and where != "embodiment":
-            errors.append(f"{where}.params.instance_name: Arena renamed it to 'name'")
+            # The old spelling of `name`.
+            fix = f"Arena passes {name} its 'name' itself; remove it" if passes_name else "Arena renamed it to 'name'"
+            errors.append(f"{where}.params.instance_name: {fix}")
         if where == "embodiment" and not issubclass(cls, EmbodimentBase):
             errors.append(f"embodiment.registry_name: {name} is not an embodiment")
     return errors

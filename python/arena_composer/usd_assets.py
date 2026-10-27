@@ -127,20 +127,31 @@ def _kept_copy(path: str) -> str:
     Arena writes that USD to ``~/.cache/isaaclab_arena/usd/robot_on_stand/``, one file for each
     robot, height and footprint, which every process rewrites and any running beside it reads, an
     Isaac Sim run among them. The robot's and the stand's copies are therefore never removed, and a
-    later process reuses them while the server's file is unchanged, so they do not pile up: a
-    DROID's are 32 MB. ``kept/`` in the cache lists them.
+    later process reuses them, so they do not pile up: a DROID's are 32 MB. A marker in ``kept/``
+    names each with the revision of the server's file it was made from, and a new one is made when
+    the server reports another; one the server does not answer for reuses the last. The revision is
+    the root layer's: a change on the server to a layer it references alone, such as the stand's
+    ``franka_table.usd``, is not picked up.
     """
+    from filelock import FileLock
     from isaaclab.utils.assets import _remote_fingerprint, retrieve_file_path
 
     revision = _remote_fingerprint(path) if "://" in path else os.path.getmtime(path)
-    marker = _cache_dir / "kept" / hashlib.sha256(json.dumps([path, revision]).encode()).hexdigest()[:16]
-    with contextlib.suppress(OSError):
-        if os.path.isfile(kept := marker.read_text(encoding="utf-8")):
-            return kept
-    kept = retrieve_file_path(path, str(_cache_dir))
-    _relink_url_references(kept)
+    marker = _cache_dir / "kept" / hashlib.sha256(path.encode()).hexdigest()[:16]
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(kept, encoding="utf-8")
+    # One process makes a copy at a time, so two starting together share one.
+    with FileLock(f"{marker}.lock"):
+        with contextlib.suppress(OSError, ValueError, TypeError):
+            kept_revision, kept = json.loads(marker.read_text(encoding="utf-8"))
+            if revision in (None, kept_revision) and os.path.isfile(kept):
+                return kept
+        # ponytail: the copy of an older revision stays, since a robot-on-stand USD another process
+        # wrote may still name it; nothing collects them.
+        kept = retrieve_file_path(path, str(_cache_dir))
+        _relink_url_references(kept)
+        temporary = f"{marker}.{os.getpid()}.tmp"
+        Path(temporary).write_text(json.dumps([revision, kept]), encoding="utf-8")
+        os.replace(temporary, marker)
     return kept
 
 
@@ -177,7 +188,8 @@ def _note_copy(local_path: str) -> None:
 
 
 def _drop_copies() -> None:
-    for folder in _copies:
+    # A copy: a tool still running in a thread may add to the set (`arena-mcp`'s SIGTERM).
+    for folder in list(_copies):
         shutil.rmtree(folder, ignore_errors=True)
     _copies.clear()
 

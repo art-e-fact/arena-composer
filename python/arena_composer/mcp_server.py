@@ -693,8 +693,10 @@ def main() -> int:
     # handler removing its copies of asset layers runs (`usd_assets`). An exception would not end
     # it: shutting down waits for the thread reading stdin, until the client closes it.
     def stop(*_: Any) -> None:
-        usd_assets._drop_copies()
-        os._exit(0)
+        try:
+            usd_assets._drop_copies()
+        finally:
+            os._exit(0)
 
     signal.signal(signal.SIGTERM, stop)
     mcp.run()
