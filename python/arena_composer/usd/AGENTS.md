@@ -33,7 +33,8 @@ g1_wbc_joint and gr1_joint that agrees to under a millimetre.
 and drops paths that do not exist — otherwise the viewer's asset server logs a miss per texture. A
 UDIM path (`<UDIM>`, an image per tile of UV space) is the exception: USD resolves it to nothing, so
 it is anchored with `UsdShade.UdimUtils` and kept while a tile exists, and `extract` splits the mesh
-into a piece per tile, each with its own tile's images and its UVs moved into the unit square. Every
+into a piece per tile, each with its own tile's images and its UVs moved into the unit square. The
+tiles are on disk because `usd_assets._udim` fetched them: Isaac Lab 3.0 leaves them on the server. Every
 field is a list of input names tried in order, because these assets mix `UsdPreviewSurface`,
 OmniPBR/OmniSurface MDL, per-material bespoke MDL modules (PascalCase names such as `AlbedoTexture` and
 `MainNormalInput`) and bare `displayColor`. Colours are linear, as all of them author them. A colour

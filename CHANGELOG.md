@@ -6,6 +6,43 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Added
+
+- Arena's new `align_with` relation, which lines an object's centre up with another's along one
+  axis, at an offset: the panel and the view's right-click menu add and edit it, the graph draws its
+  edge, and hovering it draws the plane the object's centre belongs on. `arena-resolve-layout` and
+  `describe_scene` report its check where the spec uses one.
+- A spec whose `external_yaml` lists several files, such as its scene and a file of settings several
+  tasks share, as Arena now takes it. Arena merges them without overrides: a value is set in one
+  file only, and lists of entries with an `id`, such as `objects`, join across files. An edit from
+  the panel or the MCP tools goes to the file holding what it changes, each section of the panel
+  names the files it is in, and `arena-view` reloads when any of them changes.
+
+### Changed
+
+- arena-composer runs on IsaacLab-Arena's `main` at f8c3e789b2, on Isaac Lab 3.0, and no longer on
+  dc77564: install it into an Arena venv at that commit. Assets draw as they did: the tiles of a
+  UDIM texture, which Isaac Lab 3.0 leaves on the server, are fetched, so the GR1T2 and SimReady's
+  eggplant keep their textures; and the copies of rewritten layers Isaac Lab 3.0 writes on every
+  download, in the asset cache and the system's temporary folder, no longer pile up there.
+- A SimReady Central prop, a `usd_path` on huggingface.co, is checked by Arena's own loader and
+  downloaded once, into the Hugging Face cache Arena builds it from, where it was downloaded into
+  the composer's asset cache as well. A URL that loader refuses, such as one not pinned to a
+  revision (`/resolve/main/`), is refused naming the object, where Arena stopped on an assert
+  naming none; a `/blob/` or `hf://` URL, which Arena takes, is no longer refused as having 0
+  rigid bodies.
+- Layouts can differ from the ones dc77564 solved, from the same seed: Arena's overlap check turns
+  each box with its object rather than enclosing it in a larger upright one, and its solver changed.
+  `describe_scene`'s `bbox_min` and `bbox_max` stay the enclosing box, which the `on` and `next_to`
+  checks use.
+- A `next_to` with no `cross_position_ratio` may stand anywhere along its side, as Arena now reads
+  it, and hovering one draws its gap where the object stands rather than at the side's middle.
+
+### Removed
+
+- `random_around_solution`, which Arena removed: a spec naming it no longer validates, and the panel
+  no longer draws its shape.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added

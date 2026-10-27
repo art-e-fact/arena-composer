@@ -62,6 +62,11 @@ key lives in one file or the other:
 Point the commands, the editor and your agent at the task: they send each edit to the file that
 holds its key.
 
+`external_yaml` can also list several files, such as the scene and a file of settings several tasks
+share. Arena merges them without overrides: a value is set in one file only, except that lists of
+entries with an `id`, such as `objects`, join across files. An edit goes to the file holding what
+it changes, and the editor names, beside each section, the files it is in.
+
 `arena-composer new environments/tasks/banana_in_bowl.yaml` starts a spec: the task, and a scene of
 the same name, holding a pick-and-place that validates, solves and builds. Its scene, without the
 empty fields:
@@ -100,7 +105,8 @@ relation holds:
 - **One anchor stays where it is.** `is_anchor` marks what everything else is placed against: the
   background, or a surface of it. It takes no other relation.
 - **Every other object gets a relation that places it:** `'on'` a support, `next_to` another object,
-  `at_position`, or within `position_limits`. One without gets a warning (below).
+  `at_position`, or within `position_limits`. One without gets a warning (below). `align_with`
+  lines it up with another object along one axis, beside the relation that places it.
 - **Object references name part of an asset**, such as a tabletop or a drawer, so that things can
   stand on it, or the task can open it.
 - **An object set is one id for several assets**, standing for whichever member Arena picks.
@@ -133,7 +139,7 @@ arena-resolve-layout environments/tasks/banana_in_bowl.yaml --samples 8 --format
 ```
 
 ```text
-banana_in_bowl  (seed 42, valid layout; 8/8 samples passed, 8 distinct; not run: clutter_on_relation, next_to, not_next_to, face_to, physics_settled, ik_reachable)
+banana_in_bowl  (seed 42, valid layout; 8/8 samples passed, 8 distinct; not run: clutter_on_relation, align_with, next_to, not_next_to, face_to, physics_settled, ik_reachable)
 ```
 
 Under *not run* are the checks for relation kinds the spec does not use, and the two only the

@@ -68,7 +68,7 @@ flowchart LR
 | render child | [render_process.py](../python/arena_composer/render_process.py) → [render.rs](../src/render.rs) | one Bevy app per process; exits when the PNGs are written |
 | `arena-mcp` | [mcp_server.py](../python/arena_composer/mcp_server.py) | stdio MCP server; see [mcp.md](mcp.md) |
 
-The module docstrings above give the reasoning. The parent polls the spec and the scene its
+The module docstrings above give the reasoning. The parent polls the spec and the files its
 `external_yaml` includes, re-resolves on change, and sends the result down the child's stdin; the
 viewer swaps the layout without dropping the window or moving the camera. A change that will not
 build is answered as an edit from the panel that will not solve: the layout stays, and the reason

@@ -19,7 +19,7 @@ A spec passes five gates in turn, drawn for someone writing one in the guide
 
 | Gate | When Arena finds it | What fails there |
 | --- | --- | --- |
-| read and merge | at once | YAML that does not parse; a file that is not a mapping; a key in both files of a pair |
+| read and merge | at once | YAML that does not parse; a file that is not a mapping; a value in two files, which Arena's merge refuses: it merges mappings key by key and joins lists of entries with an `id`, and nothing else |
 | the validator's fields | at once, all of them | a `registry_name` nothing registers; a wrong type; a missing key; a bare `on` read as `true`. And without a word: a key no field reads, which pydantic drops; a placement check nothing registers, which the placer leaves out |
 | the validator's asserts | once the fields they cover are right; the first to fail stops the rest | an id nothing declares; a duplicate id or `cli_override_specs` arg; a composition that does not fit its subtask count |
 | the build | minutes in, after Isaac Sim starts | a param the constructor lacks or does not take — `TypeError: object.__init__() takes exactly one argument`, naming no key; what a task's constructor asserts of the nodes it names — an Openable, a rigid body to sense contact with, an initial pose to lift from — and a `NoTask` among a composite's subtasks; an object reference that cannot be built; an `env_cfg_override` field nothing has |
@@ -103,7 +103,7 @@ edit that landed. `_introduced` decides what is the same problem:
   and `add_object` pass the paths they wrote — and failing that, the later of two dangling slots
   and the earlier of two lines.
 
-A pair on disk that does not read at all — a hand edit left a key in both files — has nothing to
+A pair on disk that does not read at all — a hand edit left a value in two files — has nothing to
 compare with, so an edit that makes it read lands, with everything wrong as `remaining_errors`. Two
 things are refused by name before any compare, because the compare would blame the other entry: a
 rename or an `add_object` onto an id in use. And `_keep_composition_valid` moves `task.composition`
@@ -120,12 +120,13 @@ leaves — `objects: null`, `relations: 'on'` — since it runs on specs the val
 
 `SpecFiles.explain` turns each line into one an agent can act on:
 
-- **The file to fix** comes first where the spec is a pair, spelled as the include spells it:
-  `../scenes/scene.yaml: objects.2.registry_name: ...`. `SpecFiles.owner` says which file holds a
-  key, and for one neither has — a missing `task`, a first `cli_override_specs` — the file holding
-  its kin: the scene's six keys together, the rest with the task. That covers the template's layout
-  and the one Arena's gear specs had before 0.3.1, the scene in the entry file and only
-  `env_cfg_override` in the include.
+- **The file to fix** comes first where the spec includes others, spelled as the include spells
+  it: `../scenes/scene.yaml: objects.2.registry_name: ...`. `SpecFiles.locate` says which file holds
+  the path a line starts with, an index into a list joined across files renumbered within it, and
+  `SpecFiles.owner`, for a key none has — a missing `task`, a first `cli_override_specs` — the file
+  holding its kin: the scene's six keys together, the rest with the task. That covers the
+  template's layout and the one Arena's gear specs had before 0.3.1, the scene in the entry file
+  and only `env_cfg_override` in the include.
 - **The closest that exist** follow a name or id nothing declares (`_hint`, `_UNKNOWN`): from the
   registries for an asset, relation or task kind, from the spec's own ids for a slot, narrowed to
   the ids Arena allows there. Up to three within 0.1 of the best are offered, because a shared

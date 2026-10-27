@@ -10,8 +10,8 @@ Two conventions worth matching in a viewer:
 * Bounding boxes are local and Arena's: measured from the USD default prim's origin with its
   authored rotation kept, and only the reported ``scale`` applied, the frame
   :mod:`arena_composer.usd.extract` draws in. ``world_bbox_min``/``world_bbox_max`` are the box
-  Arena checks the layout with: the local one turned by the asset's rotation and moved to its
-  position.
+  Arena checks a relation with: the local one turned by the asset's rotation, enclosed axis-aligned,
+  and moved to its position. Its overlap check keeps the turned box instead.
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
   ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first

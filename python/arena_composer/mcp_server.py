@@ -45,8 +45,8 @@ scene's robot, background and objects, and the spatial relations a solver turns
 into a layout.
 
 A spec is usually two files — a task YAML including a scene YAML through
-`external_yaml` — which validate as one document. Address the tools at the task;
-the edit tools work out which of the two an edit belongs in.
+`external_yaml`, which may list more — which validate as one document. Address
+the tools at the task; the edit tools work out which file an edit belongs in.
 
 How the tools fit together:
 
@@ -310,7 +310,9 @@ async def describe_scene(
     Each asset's `position_xyz` is its origin, not its centre: a table's
     origin can sit far from its top. `bbox_min` and `bbox_max` are its box in
     the world, axis-aligned and enclosing it as it is turned, the box the
-    checks use, so `bbox_max[2]` is its top. `size_xyz` is its own size,
+    `on` and `next_to` checks use, so `bbox_max[2]` is its top. The overlap
+    check turns the box with the asset instead, so two turned assets whose
+    boxes here overlap may still pass it. `size_xyz` is its own size,
     unturned, and `yaw_rad` its heading.
 
     `placement` is the solver's verdict. `success` is the first sample's
@@ -478,9 +480,10 @@ def add_object(
 ) -> dict[str, Any]:
     """Add an object to a scene, resting on another asset.
 
-    Writes to whichever of the spec and its included scene owns `objects` —
-    they are a disjoint union, so only one of them can. The edit is validated
-    against the merged pair and both files are left untouched if it fails. A
+    Writes to whichever of the spec and the files it includes holds
+    `objects`, the last of them where the includes split it. The edit is
+    validated against the merged spec and every file is left untouched if it
+    fails. A
     spec already broken is refused only for what this edit introduces, with
     the rest as `remaining_errors` — so an object a task already names can be
     added even while the task names another that is still missing.
