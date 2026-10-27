@@ -101,6 +101,19 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
                 draw.line(Vec3::new(min.x, max.y, min.z), Vec3::new(max.x, min.y, min.z), FORBIDDEN);
             }
         }
+        "align_with" => {
+            // The plane the subject's centre belongs on, that centre, and the
+            // offset from the reference's centre to the plane.
+            let plane = reference.and_then(|parent| alignment(&args, bounds, world_aabb(parent)));
+            if let Some((span, axis, at, offset)) = plane {
+                draw.face(span, axis, at, REGION);
+                draw.cross(center(bounds), 0.02, SUBJECT);
+                draw.cross(offset[0], 0.02, REGION);
+                if offset[0] != offset[1] {
+                    draw.arrow(offset[0], offset[1], REGION);
+                }
+            }
+        }
         "face_to" => {
             heading(&mut draw, subject, bounds);
             if let Some(target) = reference {
@@ -110,7 +123,6 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
         "at_position" => at_position(&mut draw, &args, origin, reach(bounds)),
         "position_limits_box" => limits_box(&mut draw, &args, extent(placed)),
         "position_limits_cylindrical" => limits_cylinder(&mut draw, &args, origin),
-        "random_around_solution" => random_around(&mut draw, &args, subject, bounds),
         "rotate_around_solution" => {
             heading(&mut draw, subject, bounds);
             rotate_around(&mut draw, &args, origin, reach(bounds));
@@ -239,7 +251,9 @@ fn release_region(args: &Args, bounds: Aabb) -> Aabb {
 /// Where `next_to` wants the subject: the line its near face should touch,
 /// along the parent's whole side, and the gap from the parent's edge to that
 /// line at the target position across — `[line from, line to, gap from, gap
-/// to]`, at the subject's own height.
+/// to]`, at the subject's own height. With no `cross_position_ratio` any
+/// position across will do whose footprint stays on the parent's side, so the
+/// gap is drawn where the subject is, held to that range.
 fn next_to_target(args: &Args, origin: Vec3, (s_min, s_max): Aabb, (p_min, p_max): Aabb) -> Option<[Vec3; 4]> {
     let (a, dir, c) = side(args.text("side")?)?;
     let edge = if dir > 0.0 { p_max[a] } else { p_min[a] };
@@ -247,9 +261,13 @@ fn next_to_target(args: &Args, origin: Vec3, (s_min, s_max): Aabb, (p_min, p_max
     // The loss places the origin across the side between the two positions
     // that keep the footprint inside the parent's, -1 for one end and 1 for
     // the other; the arrow sits at the footprint's centre for that origin.
-    let t = (args.number("cross_position_ratio").unwrap_or(0.0) + 1.0) / 2.0;
     let (lo, hi) = (p_min[c] - (s_min[c] - origin[c]), p_max[c] - (s_max[c] - origin[c]));
-    let across = lo + t * (hi - lo) + ((s_min[c] + s_max[c]) / 2.0 - origin[c]);
+    let target = match args.number("cross_position_ratio") {
+        Some(ratio) => lo + (ratio + 1.0) / 2.0 * (hi - lo),
+        // A subject wider than the side has no range, and the loss holds it centred.
+        None => origin[c].clamp(lo.min((lo + hi) / 2.0), hi.max((lo + hi) / 2.0)),
+    };
+    let across = target + ((s_min[c] + s_max[c]) / 2.0 - origin[c]);
     let z = (s_min.z + s_max.z) / 2.0;
     Some([
         at(a, face, c, p_min[c], z),
@@ -257,6 +275,19 @@ fn next_to_target(args: &Args, origin: Vec3, (s_min, s_max): Aabb, (p_min, p_max
         at(a, edge, c, across, z),
         at(a, face, c, across, z),
     ])
+}
+
+/// Where `align_with` wants the subject's centre: on the plane across `axis` at
+/// the parent's centre plus the offset, drawn over both boxes — `(span, axis,
+/// at, [the parent's centre, its foot on the plane])`. Within `tolerance_m` of
+/// it passes, a band too thin to draw apart from the plane at its default.
+fn alignment(args: &Args, subject: Aabb, parent: Aabb) -> Option<(Aabb, usize, f32, [Vec3; 2])> {
+    let axis = ["x", "y", "z"].into_iter().position(|name| args.text("axis") == Some(name))?;
+    let from = center(parent);
+    let at = from[axis] + args.number("offset_m").unwrap_or(0.0);
+    let mut to = from;
+    to[axis] = at;
+    Some(((subject.0.min(parent.0), subject.1.max(parent.1)), axis, at, [from, to]))
 }
 
 /// The zone `not_next_to` keeps the subject's origin out of, at the origin's
@@ -332,31 +363,6 @@ fn limits_cylinder(draw: &mut Draw, args: &Args, origin: Vec3) {
     for name in ["radius_min", "radius_max"] {
         if let Some(radius) = args.number(name) {
             draw.circle(center, radius, REGION);
-        }
-    }
-}
-
-/// The range a reset samples from: a box around the solved origin, and an arc
-/// per randomised rotation, swung ± its half-angle about the world axis it
-/// turns on — roll and pitch hung from above the object, yaw from where it
-/// faces — at the reach of the object's farthest corner.
-fn random_around(draw: &mut Draw, args: &Args, subject: &Asset, bounds: Aabb) {
-    let origin = Vec3::from(subject.position_xyz);
-    let half = Vec3::new(
-        args.number("x_half_m").unwrap_or(0.0),
-        args.number("y_half_m").unwrap_or(0.0),
-        args.number("z_half_m").unwrap_or(0.0),
-    );
-    if half != Vec3::ZERO {
-        draw.cuboid((origin - half, origin + half), REGION);
-    }
-    let radius = corners(bounds).map(|corner| corner.distance(origin)).fold(0.0, f32::max);
-    let forward = facing(subject).with_z(0.0).try_normalize().unwrap_or(Vec3::X);
-    let turns = [(Vec3::X, Vec3::Z, "roll_half_rad"), (Vec3::Y, Vec3::Z, "pitch_half_rad"), (Vec3::Z, forward, "yaw_half_rad")];
-    for (axis, (about, from, name)) in turns.into_iter().enumerate() {
-        let half = args.number(name).unwrap_or(0.0);
-        if half > 0.0 {
-            draw.arc(origin, about, Quat::from_axis_angle(about, -half) * from, 2.0 * half, radius, AXES[axis]);
         }
     }
 }
@@ -566,6 +572,29 @@ mod tests {
         assert!(line_to.abs_diff_eq(Vec3::new(1.08, 1.0, 0.5), 1e-6), "{line_to}");
         assert!(gap_from.abs_diff_eq(Vec3::new(1.0, 0.9, 0.5), 1e-6), "{gap_from}");
         assert!(gap_to.abs_diff_eq(Vec3::new(1.08, 0.9, 0.5), 1e-6), "{gap_to}");
+
+        // Unset, the gap is drawn where the subject stands, held to the side.
+        let params = Params::from([("side".to_owned(), Value::text("positive_x"))]);
+        let [.., gap_from, _] = next_to_target(&args(&params, None), origin, subject, parent).expect("a target");
+        assert!(gap_from.abs_diff_eq(Vec3::new(1.0, 0.9, 0.5), 1e-6), "{gap_from}");
+        let inside = Vec3::new(5.0, 0.4, 0.5);
+        let subject = (inside - Vec3::splat(0.1), inside + Vec3::splat(0.1));
+        let [.., gap_from, _] = next_to_target(&args(&params, None), inside, subject, parent).expect("a target");
+        assert!(gap_from.abs_diff_eq(Vec3::new(1.0, 0.4, 0.5), 1e-6), "{gap_from}");
+    }
+
+    /// `align_with` along Y: the plane across Y at the parent's centre plus the
+    /// offset, spanning both boxes, and the offset from the parent's centre.
+    #[test]
+    fn align_with_targets_the_plane_through_the_parents_centre_plus_the_offset() {
+        let parent = (Vec3::ZERO, Vec3::new(1.0, 2.0, 0.5));
+        let subject = (Vec3::new(3.0, 0.5, 0.0), Vec3::new(3.2, 0.7, 0.3));
+        let params = Params::from([("axis".to_owned(), Value::text("y")), ("offset_m".to_owned(), Value::Number(0.1))]);
+        let (span, axis, at, [from, to]) = alignment(&args(&params, None), subject, parent).expect("a plane");
+        assert_eq!((axis, at), (1, 1.1));
+        assert!(span.0.abs_diff_eq(Vec3::ZERO, 1e-6) && span.1.abs_diff_eq(Vec3::new(3.2, 2.0, 0.5), 1e-6), "{span:?}");
+        assert!(from.abs_diff_eq(Vec3::new(0.5, 1.0, 0.25), 1e-6) && to.abs_diff_eq(Vec3::new(0.5, 1.1, 0.25), 1e-6));
+        assert!(alignment(&args(&Params::new(), None), subject, parent).is_none(), "no axis, no plane");
     }
 
     /// `not_next_to` on -X keeps the origin out of a slab from just inside the
