@@ -172,7 +172,8 @@ def check_entry(path: Path) -> None:
     except yaml.YAMLError:
         return
     if isinstance(document, dict) and "task" not in document and INCLUDE not in document:
-        pattern = rf"""{INCLUDE}:\s*['"]?(.*/)?{re.escape(Path(path).name)}"""
+        # The include's own line, or an item of a list of them, block or flow.
+        pattern = rf"""({INCLUDE}:|(^|\s)-|[\[,])\s*['"]?(\S*/)?{re.escape(Path(path).name)}"""
         raise ValueError(
             f"{path} has no `task`, so it is a scene: pass the task YAML that includes it through `{INCLUDE}`."
             f" To find one, search the specs for the regex {pattern}"
@@ -212,6 +213,11 @@ class SpecFiles:
         self.spellings: dict[Path, str] = {}
         for spelling in spellings or []:
             included = (self.path.parent / spelling).resolve()
+            if included in self.spellings:
+                raise ValueError(
+                    f"'{INCLUDE}' lists {included} twice, as {self.spellings[included]!r} and {spelling!r}:"
+                    " Arena merges it twice, and every value in it conflicts with itself"
+                )
             self.spellings[included] = spelling
             self.documents[included] = self._read(included)
 
@@ -419,7 +425,11 @@ class SpecFiles:
             return ""
         from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 
-        steps = next(([key] for pattern, key in _SECTIONS if pattern.match(line)), None)
+        steps = next((list(steps) for pattern, steps in _SECTIONS if (match := pattern.match(line))), None)
+        if steps == ["object_references"]:
+            # Joined across the files: the entry the line names is the one to fix.
+            ids = [entry.get("id") for entry in self.entries("object_references")]
+            steps += [ids.index(match[1])] if match[1] in ids else []
         if steps is None and (match := re.match(r"\w+(\.\w+)*(?=[.:])", line)):
             steps = [int(step) if step.isdigit() else step for step in match[0].split(".")]
         # A key Arena has no field for is named only where a file holds it.
@@ -460,12 +470,12 @@ def _replace(path: Path, text: str) -> None:
         raise
 
 
-#: Arena's lines that name no path, and the key each is about.
+#: Arena's lines that name no path, and the path into the spec each is about.
 _SECTIONS = (
-    (re.compile(r"Relation\["), "relations"),
-    (re.compile(r"Object reference '"), "object_references"),
-    (re.compile(r"Task '"), "task"),
-    (re.compile(r"CLI override '"), "cli_override_specs"),
+    (re.compile(r"Relation\["), ("relations",)),
+    (re.compile(r"Object reference '([^']*)'"), ("object_references",)),
+    (re.compile(r"Task '"), ("task", "subtasks")),
+    (re.compile(r"CLI override '"), ("cli_override_specs",)),
 )
 
 #: A name or id an error line says nothing declares, and where to look for the
@@ -633,6 +643,8 @@ def _asset_problems(spec: Any) -> list[str]:
         cls, params = registry.get_asset_by_name(name), entry.get("params")
         params = params if isinstance(params, dict) else {}
         errors += _binding(f"{where}.params", name, cls, params, tuple(arg for arg in given if arg not in params))
+        if "instance_name" in params and where != "embodiment":
+            errors.append(f"{where}.params.instance_name: Arena renamed it to 'name'")
         if where == "embodiment" and not issubclass(cls, EmbodimentBase):
             errors.append(f"embodiment.registry_name: {name} is not an embodiment")
     return errors

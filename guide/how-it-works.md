@@ -64,8 +64,9 @@ holds its key.
 
 `external_yaml` can also list several files, such as the scene and a file of settings several tasks
 share. Arena merges them without overrides: a value is set in one file only, except that lists of
-entries with an `id`, such as `objects`, join across files. An edit goes to the file holding what
-it changes, and the editor names, beside each section, the files it is in.
+entries with an `id`, such as `objects`, join across files, and a file is listed once. An edit
+goes to the file holding what it changes, and the editor names, beside each section, the files it
+is in.
 
 `arena-composer new environments/tasks/banana_in_bowl.yaml` starts a spec: the task, and a scene of
 the same name, holding a pick-and-place that validates, solves and builds. Its scene, without the

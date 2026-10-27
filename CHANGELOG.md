@@ -16,7 +16,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   tasks share, as Arena now takes it. Arena merges them without overrides: a value is set in one
   file only, and lists of entries with an `id`, such as `objects`, join across files. An edit from
   the panel or the MCP tools goes to the file holding what it changes, each section of the panel
-  names the files it is in, and `arena-view` reloads when any of them changes.
+  names the files it is in, and `arena-view` reloads when any of them changes. A file listed twice
+  is refused, as Arena refuses it.
 
 ### Changed
 
@@ -35,6 +36,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   each box with its object rather than enclosing it in a larger upright one, and its solver changed.
   `describe_scene`'s `bbox_min` and `bbox_max` stay the enclosing box, which the `on` and `next_to`
   checks use.
+- An object whose params set `instance_name`, which Arena renamed `name`, is refused naming the
+  object, and its card in the panel is marked, where Arena stopped on an assert naming none.
 - A `next_to` with no `cross_position_ratio` may stand anywhere along its side, as Arena now reads
   it, and hovering one draws its gap where the object stands rather than at the side's middle.
 

@@ -366,6 +366,47 @@ def test_a_line_names_the_included_file_holding_what_it_is_about(spec: Path):
     )
 
 
+def test_a_line_about_what_files_join_names_the_file_holding_it(spec: Path):
+    """An object reference names its entry, in whichever file holds it, and a task's line its
+    subtasks, which a task merged key by key can hold apart from the rest of it."""
+    defaults = split(spec)
+    scene_of(spec).write_text(scene_of(spec).read_text() + REFERENCES.split("- id: distractor_top")[0])
+    defaults.write_text(defaults.read_text() + "object_references:\n- id" + REFERENCES.split("- id")[2])
+    assert broken(spec, "parent_id: maple_table_robolab", "parent_id: nothing")[0].startswith(
+        "../scenes/scene.yaml: Object reference 'table_top' references invalid parent 'nothing'"
+    )
+    broken(spec, "parent_id: nothing", "parent_id: maple_table_robolab")
+
+    subtasks = TASK[TASK.index("  subtasks:") :]
+    spec.write_text(TASK.replace(subtasks, "").replace(
+        "external_yaml: ../scenes/scene.yaml", "external_yaml:\n- ../scenes/scene.yaml\n- ../defaults.yaml"))
+    defaults.write_text(defaults.read_text() + "task:\n" + subtasks)
+    assert spec_edit.check(spec).ok, spec_edit.check(spec).errors
+    assert broken(spec, "pick_up_object: banana", "pick_up_object: banan", file=defaults)[0].startswith(
+        "../defaults.yaml: Task 'PickAndPlaceTask' param 'pick_up_object' references unknown node 'banan'"
+    )
+
+
+def test_a_file_included_twice_is_refused_as_arena_refuses_it(spec: Path):
+    """Arena merges each file the include lists, so one listed twice, however spelled, conflicts
+    with itself."""
+    from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
+
+    twice = "external_yaml:\n- ../scenes/scene.yaml\n- ../tasks/../scenes/scene.yaml"
+    spec.write_text(TASK.replace("external_yaml: ../scenes/scene.yaml", twice))
+    with pytest.raises(ValueError, match="Conflicting"):
+        ArenaEnvGraphSpec.from_yaml(spec)
+    result = spec_edit.check(spec)
+    assert not result.ok and "twice" in result.errors[0], result.errors
+
+
+def test_an_object_naming_itself_as_arena_did_is_told_of_the_rename(spec: Path):
+    assert broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}", "registry_name: bowl_ycb_robolab\n"
+                  "  params: {instance_name: bowl}") == [
+        "../scenes/scene.yaml: objects.1.params.instance_name: Arena renamed it to 'name'"
+    ]
+
+
 def test_check_judges_the_bytes_on_disk_and_writes_nothing(spec: Path):
     """The check an edit passes before it lands, on the files as they are: a
     bare `on` left by a hand edit is the boolean true under YAML 1.1, which
@@ -403,6 +444,10 @@ def test_a_scene_is_refused_with_a_regex_that_finds_its_task(spec: Path):
 
     assert re.search(pattern, spec.read_text())
     assert not re.search(pattern, spec.read_text().replace("scene.yaml", "other_scene.yaml"))
+    # An item of a list of includes, block or flow.
+    assert re.search(pattern, "external_yaml:\n- ../defaults.yaml\n- ../scenes/scene.yaml\n")
+    assert re.search(pattern, "external_yaml: [defaults.yaml, scene.yaml]")
+    assert not re.search(pattern, "external_yaml: [defaults.yaml, other_scene.yaml]")
     spec_edit.check_entry(spec)
 
 
