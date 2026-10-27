@@ -21,6 +21,8 @@ import asyncio
 import contextlib
 import hashlib
 import math
+import os
+import signal
 import sys
 import tempfile
 import threading
@@ -687,6 +689,14 @@ def _pack(path: Path, seed: int | None) -> bytes:
 
 def main() -> int:
     """Run the server on stdio, the transport a local client starts it with."""
+    # A client stopping the server may send SIGTERM, whose default ends the process before the exit
+    # handler removing its copies of asset layers runs (`usd_assets`). An exception would not end
+    # it: shutting down waits for the thread reading stdin, until the client closes it.
+    def stop(*_: Any) -> None:
+        usd_assets._drop_copies()
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
     mcp.run()
     return 0
 
