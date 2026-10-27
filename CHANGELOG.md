@@ -23,7 +23,8 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   under *SimReady › Central*, and `search_assets` finds them. Each is pinned to the dataset's commit
   of the day it was listed. A prop SimReady Central knows to be more than the one rigid body Arena
   spawns is left out. The ⟳ now downloads about 830 MB of pictures where it took 170 MB, and keeps
-  about 40 MB of them.
+  about 210 MB of them. Where SimReady Central cannot be listed, the ⟳ and `reindex_assets` still
+  list Isaac Sim's props, keep the Central ones they had, and say so.
 - A SimReady Central prop's details in the browser, and its `search_assets` hit, give the CC BY 4.0
   credit its license asks for.
 

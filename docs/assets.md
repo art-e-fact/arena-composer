@@ -48,21 +48,36 @@ under the same layer name, and ~1,100 more.
   exactly one rigid body. The count is in each entry layer's metadata, which only opening it reads,
   so the build asks SimReady Central's search (`nvidia-simready-central.hf.space`), which has it
   indexed. That search is in development, covers other datasets (filtered out) and lags the dataset
-  by days, so it is a hint: a prop it has not seen is offered, a failure leaves every prop offered,
-  and `check_usd_params` still refuses a wrong one at resolve. ~730 of the ~1,100 are offered.
+  by days, so it is a hint: a prop it has not seen is offered, and `check_usd_params` still refuses
+  a wrong one at resolve. ~730 of the ~1,100 are offered. The packages it named are kept in the
+  index, so a build whose search does not answer to the end — an error, a cursor that repeats or
+  runs out, a page cap, no names at all — leaves out the last build's, and says so as
+  `central_filter`.
 - **Every URL is pinned.** The dataset's head moves several times a week, and has withdrawn props.
   The build pins `HfApi().dataset_info(...).sha` and writes it into every URL, in the form Arena's
   Central loader takes: `https://huggingface.co/datasets/nvidia/simready-assets/resolve/<sha>/<key>`.
   A rebuild moves the pin; a spec written before keeps its own, which Hugging Face keeps resolving.
-- **The index keeps Central apart**, under `central: {revision, assets}` beside the bucket's `assets`.
-  An index from before has none and reads as the bucket alone, and an older composer reading a new
-  one sees the bucket's props alone, since it reads `assets` and nothing else.
-- **A package lives in the Hugging Face cache, not here.** `usd_assets.localize` downloads it file by
-  file with `hf_hub_download` at the pinned commit, exactly what Arena's
-  `download_and_wrap_central_asset` downloads, so the two share every file and `HF_HOME` moves them.
+- **The index keeps Central apart**, under `central: {revision, assets, multi_body}` beside the
+  bucket's `assets`. An index from before has none and reads as the bucket alone, and an older
+  composer reading a new one sees the bucket's props alone, since it reads `assets` and nothing else.
+- **Central failing costs the build only Central.** Any failure listing it, or no answer within
+  `simready.CENTRAL_DEADLINE`, keeps the Central section the index had, or writes none, beside a
+  fresh bucket listing, and says why as `central_error`. Reindexing needs only S3, as it did.
+  `reindex_assets` returns `central_error` and `central_filter` as keys, and the reindex button's
+  answer carries them as the panel's errors. The deadline is the build's own: huggingface_hub's
+  client waits on a stalled connection for ever, and it is Arena's client too.
+- **A package lives in the Hugging Face cache, not here.** A resolve has Arena's
+  `download_and_wrap_central_asset` download it (`resolve_layout.check_usd_params`), and Arena builds
+  the prop from the wrapper layer that writes, so no Central URL reaches the mirror. One that reaches
+  `usd_assets.localize` anyway — through `Usd.Stage.Open`, or Arena's own `retrieve_file_path`,
+  which `_route_retrievals` sends there — is downloaded the same way: file by file with
+  `hf_hub_download` at the pinned commit, so the two share every file and `HF_HOME` moves them.
   Nothing of it is mirrored into composer's cache, and none of its layers is relinked: the files are
-  the Hugging Face cache's, shared with Arena. A cached entry is read with no network: it is
-  downloaded last, so it is there only once its package is.
+  the Hugging Face cache's, shared with Arena. The Hub is asked once a process for the package's
+  files, cached or not: a cached entry is no sign of a whole package, since Arena's loader downloads
+  in no order and may have been stopped halfway, and with the commit pinned a cached file costs a
+  stat. Only a Hub that cannot be reached is answered from the cache. Arena's loader asks the Hub
+  every time, so a resolve naming a Central prop needs huggingface.co either way.
 - **A picture is kept once, small.** Central publishes them at 1024 px whatever their `256x256`
   folder says, ~850 KB each. `simready.fetch_thumbnails` fetches each and keeps one 256 px copy,
   ~60 KB, under `simready-central/` in the asset cache, named by its layer and not the commit, so a

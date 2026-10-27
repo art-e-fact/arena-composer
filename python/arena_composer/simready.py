@@ -40,9 +40,9 @@ import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -148,40 +148,114 @@ def load() -> list[RemoteAsset]:
     `assets`, so an index built before Central was indexed still reads, and
     an older composer reading one built since sees the bucket's props alone.
     """
+    document = _document()
+    if document is None:
+        return []
+    listed = _central_of(document)
+    return [*(RemoteAsset(**entry) for entry in document["assets"]), *(listed.assets if listed else [])]
+
+
+def _document() -> dict[str, Any] | None:
+    """The index on disk, or None where there is none of this root."""
     try:
         document = json.loads(index_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return []
-    if document.get("root") != ROOT:
-        return []
-    central = document.get("central") or {}
-    return [
-        *(RemoteAsset(**entry) for entry in document["assets"]),
-        *(RemoteAsset(**entry, revision=central["revision"]) for entry in central.get("assets", [])),
-    ]
+        return None
+    return document if document.get("root") == ROOT else None
 
 
-def build() -> list[RemoteAsset]:
-    """List the bucket and SimReady Central and write the index. About a
-    minute, and network only: nothing is downloaded. The pictures are the
-    caller's to ask for, with :func:`fetch_thumbnails` — a viewer wants them,
-    an agent searching by name does not."""
+@dataclass
+class Central:
+    """SimReady Central, as one build listed it."""
+
+    #: The commit every prop is pinned at.
+    revision: str
+    #: The props offered.
+    assets: list[RemoteAsset]
+    #: The packages left out as more than one rigid body: kept in the index for
+    #: a build whose search does not answer.
+    multi_body: list[str]
+    #: What did not go as it should, by the key `reindex_assets` reports it under.
+    notes: dict[str, str] = field(default_factory=dict)
+
+
+def _central_of(document: dict[str, Any]) -> Central | None:
+    """The Central an index lists, or None for one that lists none."""
+    if not (section := document.get("central")):
+        return None
+    revision = section["revision"]
+    assets = [RemoteAsset(**entry, revision=revision) for entry in section["assets"]]
+    return Central(revision, assets, section.get("multi_body", []))
+
+
+#: How long SimReady Central's half of a build may take. A few seconds as a
+#: rule; huggingface_hub's client waits on a stalled connection for ever, and
+#: is Arena's too, so the build bounds it here rather than there.
+CENTRAL_DEADLINE = 120.0
+
+
+def build() -> tuple[list[RemoteAsset], dict[str, str]]:
+    """List the bucket and SimReady Central and write the index: what it
+    holds, and what did not go as it should, by the key `reindex_assets`
+    reports it under. About a minute, and network only: nothing is
+    downloaded. The pictures are the caller's to ask for, with
+    :func:`fetch_thumbnails` — a viewer wants them, an agent searching by name
+    does not.
+
+    A Central that cannot be listed costs the build only Central: the index
+    keeps the Central props the one before it had, or has none, and says why
+    as `central_error`.
+    """
     bucket = assets_from_keys(list_keys())
-    revision, central_assets = central(bucket)
+    before = _central_of(_document() or {})
+    try:
+        listed = _within(CENTRAL_DEADLINE, central, bucket, before.multi_body if before else None)
+    except Exception as error:
+        kept = f"keeps the {len(before.assets)} props it had from there" if before else "has none from there"
+        reason = f"SimReady Central could not be listed, so the index {kept}: {type(error).__name__}: {error}"
+        print(f"simready: {reason}", file=sys.stderr)
+        listed = replace(before or Central("", [], []), notes={"central_error": reason})
     path = index_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {
         "root": ROOT,
         "built": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "assets": [_entry(asset) for asset in bucket],
-        "central": {"revision": revision, "assets": [_entry(asset) for asset in central_assets]},
     }
+    if listed.revision:
+        document["central"] = {
+            "revision": listed.revision,
+            "assets": [_entry(asset) for asset in listed.assets],
+            "multi_body": listed.multi_body,
+        }
     # Written beside and renamed over: the viewer and the MCP server may both
     # be reading, and neither can be handed half a file.
     partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
     partial.write_text(json.dumps(document, indent=1), encoding="utf-8")
     os.replace(partial, path)
-    return [*bucket, *central_assets]
+    return [*bucket, *listed.assets], listed.notes
+
+
+def _within(seconds: float, work: Callable[..., Any], *args: Any) -> Any:
+    """`work(*args)`, or a TimeoutError once `seconds` have passed. The work
+    goes on in a daemon thread, which is left to finish or hang on its own
+    without keeping the process from exiting."""
+    done: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            done["value"] = work(*args)
+        except BaseException as error:
+            done["error"] = error
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"no answer in {seconds:.0f} s")
+    if "error" in done:
+        raise done["error"]
+    return done["value"]
 
 
 def _entry(asset: RemoteAsset) -> dict[str, str]:
@@ -231,7 +305,7 @@ def _fetch_central_picture(usd_path: str) -> None:
     os.replace(partial, path)
 
 
-def fetch_thumbnails(usd_paths: Iterable[str]) -> int:
+def fetch_thumbnails(usd_paths: Iterable[str | None]) -> int:
     """Fetch the picture published beside each of these layers, and say how
     many had to be fetched.
 
@@ -243,7 +317,8 @@ def fetch_thumbnails(usd_paths: Iterable[str]) -> int:
     A picture counts as fetched once it is on disk, not once asking for it did
     not fail: a layer the bucket publishes nothing beside is skipped rather
     than raised, and one that is already a local file is handed back as it was
-    given, so neither is counted however often it is offered.
+    given, so neither is counted however often it is offered. An asset that
+    composes its USD has no path at all, and is passed over.
     """
     from arena_composer.usd_assets import localize
 
@@ -257,7 +332,7 @@ def fetch_thumbnails(usd_paths: Iterable[str]) -> int:
 
     # A set, because two assets may be listed under one layer, and every
     # duplicate here is a round trip.
-    wanted = {path for path in usd_paths if thumbnail_url(path) and picture(path) is None}
+    wanted = {path for path in usd_paths if path and thumbnail_url(path) and picture(path) is None}
     if not wanted:
         return 0
     with ThreadPoolExecutor(WORKERS) as pool:
@@ -305,7 +380,7 @@ def assets_from_keys(keys: Iterable[str]) -> list[RemoteAsset]:
     return found
 
 
-def central(bucket: Iterable[RemoteAsset]) -> tuple[str, list[RemoteAsset]]:
+def central(bucket: Iterable[RemoteAsset], known_multi_body: Iterable[str] | None = None) -> Central:
     """SimReady Central's head commit, and its props worth offering beside the
     `bucket`'s, pinned at that commit. About ten requests, a few seconds.
 
@@ -316,16 +391,26 @@ def central(bucket: Iterable[RemoteAsset]) -> tuple[str, list[RemoteAsset]]:
 
     Arena spawns a SimReady prop as exactly one rigid body, and refuses the
     rest at resolve, so a prop :func:`multi_body` knows to have more is left
-    out. One whose count is not known is offered.
+    out. One whose count is not known is offered. Where the search does not
+    answer, the props left out are those `known_multi_body` names, the last
+    index's, and the build says so as `central_filter`.
     """
     from huggingface_hub import HfApi
     from huggingface_hub.hf_api import RepoFolder
 
+    notes = {}
+    if (unwanted := multi_body()) is None:
+        unwanted = set(known_multi_body or ())
+        kept = (
+            "the props the last index left out as more than one rigid body are left out again"
+            if unwanted
+            else "props are offered whatever their count of rigid bodies"
+        )
+        notes["central_filter"] = f"unavailable: SimReady Central's search did not answer, so {kept}"
     api = HfApi()
     revision = api.dataset_info(CENTRAL).sha
     root = api.list_repo_tree(CENTRAL, repo_type="dataset", revision=revision)
     taken = {_stem(asset.key) for asset in bucket}
-    unwanted = multi_body()
     packages = [
         entry.path
         for entry in root
@@ -336,7 +421,7 @@ def central(bucket: Iterable[RemoteAsset]) -> tuple[str, list[RemoteAsset]]:
         for package, key in _entry_layers(api, revision, packages).items()
         if _stem(key) not in taken
     ]
-    return revision, sorted(found, key=lambda asset: asset.key)
+    return Central(revision, sorted(found, key=lambda asset: asset.key), sorted(unwanted), notes)
 
 
 def _guess(package: str) -> str:
@@ -359,16 +444,20 @@ def _entry_layers(api: Any, revision: str, packages: list[str]) -> dict[str, str
     has neither has its entry read from the list every package publishes of
     its own, which lands in the Hugging Face cache where Arena's loader takes
     it from; a package without that list is not offered.
+
+    One request after another, two as a rule: a pool's threads would keep a
+    process whose build ran out of time from exiting (:func:`_within`).
     """
     from huggingface_hub import hf_hub_download
 
     guesses = [_guess(package).removesuffix(".usd") + suffix for package in packages for suffix in (".usd", ".usda")]
-    chunks = [guesses[start : start + PATHS_INFO] for start in range(0, len(guesses), PATHS_INFO)]
-    def ask(chunk: list[str]) -> list[Any]:
-        return api.get_paths_info(CENTRAL, chunk, repo_type="dataset", revision=revision)
-
-    with ThreadPoolExecutor(8) as pool:
-        layers = {info.path.split("/", 1)[0]: info.path for found in pool.map(ask, chunks) for info in found}
+    layers = {
+        info.path.split("/", 1)[0]: info.path
+        for start in range(0, len(guesses), PATHS_INFO)
+        for info in api.get_paths_info(
+            CENTRAL, guesses[start : start + PATHS_INFO], repo_type="dataset", revision=revision
+        )
+    }
     for package in packages:
         if package in layers:
             continue
@@ -383,21 +472,25 @@ def _entry_layers(api: Any, revision: str, packages: list[str]) -> dict[str, str
 _SEARCHED = re.compile(rf"/datasets/{re.escape(CENTRAL)}/resolve/[0-9a-f]{{40}}/([^/]+)/simready_usd/")
 
 
-def multi_body() -> set[str]:
+#: The most pages :func:`multi_body` reads: ten times what it takes today.
+SEARCH_PAGES = 20
+
+
+def multi_body() -> set[str] | None:
     """The Central packages SimReady Central's search knows to be more than
-    one rigid body: ~950 paths in two pages, a second or two.
+    one rigid body: ~950 paths in two pages, a second or two. None where the
+    search did not answer to the end.
 
     A prop's count is in its entry layer's metadata, which only opening the
     layer reads, and the search has it indexed. That search is a service and
     not the dataset: it covers other datasets too, left out here, and lags
-    this one by days, so a package it has not seen is simply not named. A
-    failure leaves what was named before it, nothing at worst, and every prop
-    not named is offered.
+    this one by days, so a package it has not seen is simply not named. An
+    answer naming nothing is taken for none: the dataset has hundreds.
     """
     found: set[str] = set()
-    cursor = None
+    cursor, cursors = None, set()
     try:
-        while True:
+        for _ in range(SEARCH_PAGES):
             query = {
                 "hybrid_text_query": "",
                 "file_extension_include": "usd*",
@@ -412,17 +505,24 @@ def multi_body() -> set[str]:
                 page = json.load(response)
             found |= {match[1] for hit in page["hits"] if (match := _SEARCHED.search(hit["source"]["path"]))}
             if not page.get("has_more"):
-                return found
-            cursor = page["next_cursor"]
+                return found or None
+            # A cursor missing, or one already followed, would page for ever.
+            if not (cursor := page.get("next_cursor")) or cursor in cursors:
+                break
+            cursors.add(cursor)
     except Exception as error:
         print(f"simready: SimReady Central's rigid-body counts: {type(error).__name__}: {error}", file=sys.stderr)
-        return found
+        return None
+    print(f"simready: SimReady Central's search paged on past {len(cursors) + 1} page(s); dropped", file=sys.stderr)
+    return None
 
 
 def main() -> int:
     """``python -m arena_composer.simready``: build the index and say how big it is."""
-    assets = build()
+    assets, notes = build()
     print(f"{len(assets)} assets indexed at {index_path()}")
+    for key, note in notes.items():
+        print(f"{key}: {note}")
     return 0
 
 

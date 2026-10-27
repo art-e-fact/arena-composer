@@ -28,7 +28,8 @@ def test_a_remote_asset_is_found_with_the_params_to_add_it(tmp_path: Path, monke
         key="paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd",
         revision="faaa6cea782d370b0b73408674507ad9f7835484",
     )
-    monkeypatch.setattr(simready, "central", lambda bucket: (spray_gun.revision, [spray_gun]))
+    listed = simready.Central(spray_gun.revision, [spray_gun], [])
+    monkeypatch.setattr(simready, "central", lambda bucket, known: listed)
     simready.build()
 
     # A Central prop is found by its words run together, and says whose it is.

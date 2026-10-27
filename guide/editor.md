@@ -70,8 +70,8 @@ SimReady props join the browser once they are listed: ⟳, in the browser's head
 fetches their pictures. That takes a couple of minutes and about 830 MB of downloads, once. They
 come from two places: about 1,500 from the bucket Isaac Sim ships its assets from, and about 700 more
 from [SimReady Central](https://huggingface.co/datasets/nvidia/simready-assets), under
-*SimReady › Central*. A Central prop is downloaded on its first solve into the Hugging Face cache,
-where Arena's own Central loader looks for it too, so the two never download it twice.
+*SimReady › Central*. A Central prop is downloaded on its first solve into the Hugging Face cache
+(`$HF_HOME`), where Arena's own Central loader looks for it too, so the two never download it twice.
 
 SimReady Central's props are licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): a
 Central prop's details give the credit to keep with whatever you share that uses it.

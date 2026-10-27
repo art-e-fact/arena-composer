@@ -330,6 +330,18 @@ def test_a_central_hit_carries_its_credit(tmp_path: Path, monkeypatch):
     assert "credit" not in mcp_server._hit(catalog.Asset("banana", "object", [], "rigid", "banana")), "none asked"
 
 
+def test_a_reindex_says_what_it_got_only_part_of(monkeypatch):
+    """SimReady Central unlisted, or listed without its rigid-body counts, is
+    an index that was written, so it is a result and not an error: the agent
+    reads what was kept in its keys."""
+    from arena_composer import simready
+
+    note = "unavailable: SimReady Central's search did not answer, so props are offered whatever their count"
+    monkeypatch.setattr(simready, "build", lambda: ([], {"central_filter": note}))
+    result = asyncio.run(mcp_server.reindex_assets())
+    assert (result["indexed"], result["central"], result["central_filter"]) == (0, 0, note)
+
+
 def test_the_skill_names_every_tool_the_server_has():
     """A tool renamed or added is a skill out of step with the server."""
     skill = (cli.SKILLS / "author-arena-spec" / "SKILL.md").read_text()

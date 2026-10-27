@@ -53,7 +53,7 @@ the tools at the task; the edit tools work out which file an edit belongs in.
 How the tools fit together:
 
 1. `search_assets` to find a `registry_name`. Never guess one: the registry is
-   the only place these names exist. NVIDIA's SimReady props — ~2,300 objects
+   the only place these names exist. NVIDIA's SimReady props — ~2,200 objects
    beyond the registry — are searched too once `reindex_assets` has built the
    local index; a hit among them carries the `params` to add it with, and one
    from SimReady Central the `credit` its CC-BY-4.0 license asks for.
@@ -291,18 +291,24 @@ async def reindex_assets() -> dict[str, Any]:
     Run it again to pick up props published since. `central` is how many of
     those indexed are SimReady Central's: the ones the bucket has not got,
     less those known to be more than the one rigid body Arena spawns a prop as.
+
+    Two keys say what went only partly: `central_error` where SimReady Central
+    could not be listed, so the index kept the Central props it had, if any;
+    and `central_filter` where its search did not say which props are more
+    than one rigid body, so the last index's word on that was kept, if any.
     """
     started = time.monotonic()
-    assets = await asyncio.to_thread(_reindex)
+    assets, notes = await asyncio.to_thread(_reindex)
     return {
         "indexed": len(assets),
         "central": sum(1 for asset in assets if asset.revision),
         "index": str(simready.index_path()),
         "seconds": round(time.monotonic() - started, 1),
+        **notes,
     }
 
 
-def _reindex() -> list[simready.RemoteAsset]:
+def _reindex() -> tuple[list[simready.RemoteAsset], dict[str, str]]:
     with _quiet():
         return simready.build()
 

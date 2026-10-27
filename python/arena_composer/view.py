@@ -246,12 +246,15 @@ async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, crawls: as
 
     That answer carries the prop list again, a failed crawl's included: the
     panel is waiting on that list, and an answer is what tells it to stop.
+    What the crawl got only part of — SimReady Central unlisted, or listed
+    without its rigid-body counts — goes with it as errors, as a failure does.
     """
     while True:
         await crawls.get()
         errors: list[str] | None = None
         try:
-            found = await asyncio.to_thread(simready.build)
+            found, notes = await asyncio.to_thread(simready.build)
+            errors = list(notes.values()) or None
             print(f"{simready.index_path()}: {len(found)} assets", file=sys.stderr)
             fetched = await asyncio.to_thread(simready.fetch_thumbnails, [asset.usd_path for asset in found])
             print(f"simready: fetched {fetched} thumbnail(s)", file=sys.stderr)

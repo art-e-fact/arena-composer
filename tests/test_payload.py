@@ -31,7 +31,7 @@ def test_a_prop_carries_its_picture_once_that_is_on_disk(tmp_path: Path, monkeyp
     folder = f"{simready.PREFIX}Residential/Kitchen/Baskets/Plastic_Basket_A01"
     layer, sidecar = f"{folder}/sm_basket_a01.usd", f"{folder}/.thumbs/256x256/sm_basket_a01.usd.png"
     monkeypatch.setattr(simready, "list_keys", lambda: [layer, sidecar])
-    monkeypatch.setattr(simready, "central", lambda bucket: ("", []))
+    monkeypatch.setattr(simready, "central", lambda bucket, known: simready.Central("", [], []))
     simready.build()
 
     (prop,) = payload._remote()
@@ -64,7 +64,7 @@ def test_a_central_prop_carries_its_credit_and_its_small_picture(tmp_path: Path,
         revision="faaa6cea782d370b0b73408674507ad9f7835484",
     )
     monkeypatch.setattr(simready, "list_keys", lambda: [])
-    monkeypatch.setattr(simready, "central", lambda bucket: (central.revision, [central]))
+    monkeypatch.setattr(simready, "central", lambda bucket, known: simready.Central(central.revision, [central], []))
     simready.build()
 
     (prop,) = payload._remote()

@@ -225,20 +225,28 @@ def _hf_package(repo_id: str, revision: str, filename: str) -> str:
     ``hf_hub_download``. So the two share every file, `HF_HOME` moves both, and
     none of it is copied into this module's cache.
 
-    A cached entry is taken for the whole package without asking the Hub,
-    which is what makes it work offline. The entry is downloaded last, so it is
-    there only once the files it references are.
+    The Hub is asked every time, once a process (`localize` remembers): a
+    cached entry is no sign of a whole package, since Arena's loader downloads
+    in no order and may have been stopped halfway. With the commit pinned, a
+    file already cached costs a stat, so asking completes a partial package
+    for the price of a listing, and a reader beside a download waits on
+    huggingface_hub's lock rather than reading half a file. Only a Hub that
+    cannot be reached at all is answered from the cache, with the entry as it
+    is there.
     """
+    import httpx
     from huggingface_hub import HfApi, hf_hub_download
     from huggingface_hub.hf_api import RepoFile
 
-    # ponytail: a package Arena's loader was interrupted in, which downloads in
-    # no order, stays partial here until Arena's next resolve of it completes it.
-    if (cached := _hf_cached(repo_id, revision, filename)) is not None:
-        return cached
     folder = filename.split("/simready_usd/", 1)[0]
-    listing = HfApi().list_repo_tree(repo_id, folder, recursive=True, revision=revision, repo_type="dataset")
-    files = [entry.path for entry in listing if isinstance(entry, RepoFile)]
+    try:
+        listing = HfApi().list_repo_tree(repo_id, folder, recursive=True, revision=revision, repo_type="dataset")
+        files = [entry.path for entry in listing if isinstance(entry, RepoFile)]
+    # No connection, or HF_HUB_OFFLINE, which raises a ConnectionError.
+    except (httpx.TransportError, ConnectionError):
+        if (cached := _hf_cached(repo_id, revision, filename)) is not None:
+            return cached
+        raise
     if filename not in files:
         raise FileNotFoundError(f"no {filename} in {repo_id} at {revision}")
 
