@@ -5,6 +5,11 @@ Arena asset paths are Nucleus/HTTPS URLs. Inside Kit an Omniverse asset resolver
 mirrors a remote asset and its dependencies into a local directory, so patching
 ``Usd.Stage.Open`` to open that mirror makes every USD read in Arena — bounding boxes, prim
 transforms, object-type detection — work sim-free.
+
+Since Isaac Lab 3.0 the mirror holds the downloads as they are, and a layer whose references had
+to be pointed at local files is copied, so pointed, into a fresh ``isaaclab_usd_<uuid>`` folder
+of the cache in every process: :func:`_note_copy` removes this process's at exit. A UDIM texture
+it leaves on the server, which :func:`_udim` fetches.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from pxr import Usd
@@ -36,7 +42,9 @@ def cache_dir() -> Path:
 
 
 def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
-    """Patch ``Usd.Stage.Open`` to localize remote paths first, and return the cache directory."""
+    """Patch ``Usd.Stage.Open`` to localize remote paths first, and Isaac Lab's
+    ``retrieve_file_path`` where Arena calls it without a directory, and return the cache
+    directory."""
     global _cache_dir, _patched
     if cache_dir is not None:
         _cache_dir = Path(cache_dir).expanduser()
@@ -47,8 +55,35 @@ def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
             return stage_open(localize(path) if isinstance(path, str) else path, *args, **kwargs)
 
         Usd.Stage.Open = staticmethod(open_local)
+        _route_retrievals()
         _patched = True
     return _cache_dir
+
+
+def _route_retrievals() -> None:
+    """Send Arena's own downloads of a URL through :func:`localize`, once a process.
+
+    Arena calls Isaac Lab's ``retrieve_file_path`` with no directory for every object it builds, to
+    count its rigid bodies, and for every robot on a stand. Since Isaac Lab 3.0 each call writes a
+    fresh copy of the asset's rewritten layers to the system's temporary directory, and nothing
+    removes them: a sweep of solves left 8 GB there in 17 minutes. A local copy Isaac Lab made goes
+    the same way, since it would make another from the URL it came from, here in the cache: the
+    rigid-body count runs on the copy :func:`localize` returned. Arena imports the function by name,
+    so every module holding it is repointed, and the one it comes from for later imports.
+    """
+    import isaaclab.utils.assets
+
+    retrieve_file_path = isaaclab.utils.assets.retrieve_file_path
+
+    def retrieve(path: str, download_dir: str | None = None, force_download: bool = False) -> str:
+        url = str(path) if "://" in str(path) else isaaclab.utils.assets.unmirror_file_path(str(path))
+        if download_dir is None and not force_download and url:
+            return localize(url)
+        return retrieve_file_path(path, download_dir, force_download)
+
+    for module in list(sys.modules.values()):
+        if getattr(module, "__dict__", {}).get("retrieve_file_path") is retrieve_file_path:
+            module.retrieve_file_path = retrieve
 
 
 def localize(usd_path: str) -> str:

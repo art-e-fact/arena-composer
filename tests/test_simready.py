@@ -5,6 +5,7 @@ are fetched."""
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -155,3 +156,29 @@ def test_a_udim_texture_left_on_the_server_has_its_tiles_fetched(tmp_path: Path,
     local = usd_assets._udim("https://host/robot/textures/albedo.<UDIM>.png")
     assert asked == ["1001", "1002", "1003"]
     assert local == str(tmp_path / "https" / "host" / "robot" / "textures" / "albedo.<UDIM>.png")
+
+
+def test_arenas_own_downloads_of_a_url_go_through_the_cache(monkeypatch):
+    """Arena calls Isaac Lab's `retrieve_file_path` with no directory for every object it builds,
+    and since Isaac Lab 3.0 each call leaves a copy in the temporary directory; a URL, or a copy
+    Isaac Lab made of one, goes through `localize` instead, once a process, and a local path or a
+    named directory as before."""
+    import types
+
+    from arena_composer import usd_assets
+
+    calls = []
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", lambda *args: calls.append(args) or "raw")
+    module = types.ModuleType("arena_module")
+    module.retrieve_file_path = sys.modules["isaaclab.utils.assets"].retrieve_file_path
+    monkeypatch.setitem(sys.modules, "arena_module", module)
+    monkeypatch.setattr(usd_assets, "localize", lambda url: f"cached {url}")
+    copies = {"/cache/isaaclab_usd_1/1/bowl.usd": "https://host/bowl.usd"}
+    monkeypatch.setattr("isaaclab.utils.assets.unmirror_file_path", lambda path: copies.get(path, ""))
+
+    usd_assets._route_retrievals()
+    assert module.retrieve_file_path("https://host/bowl.usd") == "cached https://host/bowl.usd"
+    assert module.retrieve_file_path("/cache/isaaclab_usd_1/1/bowl.usd") == "cached https://host/bowl.usd"
+    assert module.retrieve_file_path("/local/bowl.usd") == "raw"
+    assert module.retrieve_file_path("https://host/bowl.usd", "/elsewhere") == "raw"
+    assert calls == [("/local/bowl.usd", None, False), ("https://host/bowl.usd", "/elsewhere", False)]
