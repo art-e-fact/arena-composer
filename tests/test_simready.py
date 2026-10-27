@@ -5,6 +5,7 @@ are fetched."""
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -158,12 +159,15 @@ def test_a_udim_texture_left_on_the_server_has_its_tiles_fetched(tmp_path: Path,
     assert local == str(tmp_path / "https" / "host" / "robot" / "textures" / "albedo.<UDIM>.png")
 
 
-def test_arenas_own_downloads_of_a_url_go_through_the_cache(monkeypatch):
+def test_arenas_own_downloads_of_a_url_go_through_the_cache(tmp_path: Path, monkeypatch):
     """Arena calls Isaac Lab's `retrieve_file_path` with no directory for every object it builds,
     and since Isaac Lab 3.0 each call leaves a copy in the temporary directory; a URL, or a copy
-    Isaac Lab made of one, goes through `localize` instead, once a process; another local path is
-    retrieved into the cache, whose copies go at exit; and a named directory is left as it was."""
+    Isaac Lab made of one, goes through `localize` instead, once a process; another local file is
+    copied into the cache once a process while it is unchanged; and a named directory is left as
+    it was."""
     import types
+
+    import isaaclab_arena.embodiments.robot_on_stand_utils as robot_on_stand
 
     from arena_composer import usd_assets
 
@@ -172,14 +176,53 @@ def test_arenas_own_downloads_of_a_url_go_through_the_cache(monkeypatch):
     module = types.ModuleType("arena_module")
     module.retrieve_file_path = sys.modules["isaaclab.utils.assets"].retrieve_file_path
     monkeypatch.setitem(sys.modules, "arena_module", module)
+    monkeypatch.setattr(robot_on_stand, "retrieve_file_path", robot_on_stand.retrieve_file_path)
     monkeypatch.setattr(usd_assets, "localize", lambda url: f"cached {url}")
+    usd_assets._copy_of.cache_clear()
     copies = {"/cache/isaaclab_usd_1/1/bowl.usd": "https://host/bowl.usd"}
     monkeypatch.setattr("isaaclab.utils.assets.unmirror_file_path", lambda path: copies.get(path, ""))
+    local = tmp_path / "bowl.usd"
+    local.write_text("#usda 1.0\n")
 
     usd_assets._route_retrievals()
     assert module.retrieve_file_path("https://host/bowl.usd") == "cached https://host/bowl.usd"
     assert module.retrieve_file_path("/cache/isaaclab_usd_1/1/bowl.usd") == "cached https://host/bowl.usd"
-    assert module.retrieve_file_path("/local/bowl.usd") == "raw"
+    assert module.retrieve_file_path(str(local)) == module.retrieve_file_path(str(local)) == "raw"
+    os.utime(local, ns=(0, 0))
+    module.retrieve_file_path(str(local))
     assert module.retrieve_file_path("https://host/bowl.usd", "/elsewhere") == "raw"
     cache = str(usd_assets._cache_dir)
-    assert calls == [("/local/bowl.usd", cache, False), ("https://host/bowl.usd", "/elsewhere", False)]
+    local_calls = [(str(local), cache, False)] * 2
+    assert calls == [*local_calls, ("https://host/bowl.usd", "/elsewhere", False)]
+    assert robot_on_stand.retrieve_file_path is usd_assets._kept_copy
+
+
+def test_a_robot_on_a_stand_keeps_its_copy_and_reuses_it_while_the_server_has_not_changed(
+    tmp_path: Path, monkeypatch
+):
+    """Arena writes a robot on a stand to a file other processes read, which references the copy
+    `retrieve_file_path` returned: that copy is never removed, and a later process reuses it until
+    the server's file changes."""
+    from arena_composer import usd_assets
+
+    revision = {"hash": "a"}
+    made = []
+
+    def retrieve(url: str, download_dir: str) -> str:
+        copy = tmp_path / f"isaaclab_usd_{len(made)}" / "1" / "robot.usd"
+        copy.parent.mkdir(parents=True)
+        copy.write_text("#usda 1.0\n")
+        made.append(str(copy))
+        return str(copy)
+
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    monkeypatch.setattr(usd_assets, "_copies", set())
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", retrieve)
+    monkeypatch.setattr("isaaclab.utils.assets._remote_fingerprint", lambda url: dict(revision))
+
+    first = usd_assets._kept_copy("https://host/robot.usd")
+    assert usd_assets._kept_copy("https://host/robot.usd") == first and made == [first]
+    revision["hash"] = "b"
+    assert usd_assets._kept_copy("https://host/robot.usd") != first
+    usd_assets._drop_copies()
+    assert all(Path(copy).exists() for copy in made)

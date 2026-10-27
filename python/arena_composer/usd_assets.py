@@ -8,13 +8,18 @@ transforms, object-type detection — work sim-free.
 
 Since Isaac Lab 3.0 the mirror holds the downloads as they are, and a layer whose references had
 to be pointed at local files is copied, so pointed, into a fresh ``isaaclab_usd_<uuid>`` folder
-of the cache in every process: :func:`_note_copy` removes this process's at exit. A UDIM texture
-it leaves on the server, which :func:`_udim` fetches.
+of the cache in every process: :func:`_note_copy` removes this process's at exit, all but a robot
+on a stand's (:func:`_kept_copy`). A UDIM texture it leaves on the server, which :func:`_udim`
+fetches.
 """
 
 from __future__ import annotations
 
 import atexit
+import contextlib
+import functools
+import hashlib
+import json
 import os
 import shutil
 import sys
@@ -44,7 +49,13 @@ def cache_dir() -> Path:
 def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
     """Patch ``Usd.Stage.Open`` to localize remote paths first, and Isaac Lab's
     ``retrieve_file_path`` where Arena calls it without a directory, and return the cache
-    directory."""
+    directory.
+
+    Arena's wrapper of a SimReady Central prop is made once a process too: the composer's check
+    and Arena's build each ask for it, and each time costs a listing from the server and a
+    rewritten wrapper, whose new mtime would be a new copy of it for ``retrieve_file_path``. Arena
+    imports the function where it calls it, so replacing it on its module reaches every call.
+    """
     global _cache_dir, _patched
     if cache_dir is not None:
         _cache_dir = Path(cache_dir).expanduser()
@@ -56,6 +67,9 @@ def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
 
         Usd.Stage.Open = staticmethod(open_local)
         _route_retrievals()
+        import isaaclab_arena.assets.simready_central_asset_loader as central
+
+        central.download_and_wrap_central_asset = functools.cache(central.download_and_wrap_central_asset)
         _patched = True
     return _cache_dir
 
@@ -69,27 +83,65 @@ def _route_retrievals() -> None:
     removes them: a sweep of solves left 457 of them, 1.3 GB, there in 17 minutes. A local copy
     Isaac Lab made goes the same way, since it would make another from the URL it came from, here
     in the cache: the rigid-body count runs on the copy :func:`localize` returned. Any other local
-    file is retrieved into the cache, where its copy goes at exit: Arena's wrapper of a SimReady
-    Central prop gets one each solve. Arena imports the function by name, so every module holding
-    it is repointed, and the one it comes from for later imports.
+    file is copied into the cache once a process while it is unchanged (:func:`_copy_of`). Arena
+    imports the function by name, so every module holding it is repointed, and the one it comes
+    from for later imports. A forced download is left to Isaac Lab: nothing Arena builds asks for one.
+
+    The robot on a stand is the exception: Arena writes it to a file of its own, which other
+    processes read, so its copies stay (:func:`_kept_copy`).
     """
     import isaaclab.utils.assets
+    import isaaclab_arena.embodiments.robot_on_stand_utils as robot_on_stand
 
     retrieve_file_path = isaaclab.utils.assets.retrieve_file_path
 
     def retrieve(path: str, download_dir: str | None = None, force_download: bool = False) -> str:
-        if download_dir is not None:
+        if download_dir is not None or force_download:
             return retrieve_file_path(path, download_dir, force_download)
         url = str(path) if "://" in str(path) else isaaclab.utils.assets.unmirror_file_path(str(path))
-        if url and not force_download:
+        if url:
             return localize(url)
-        local_path = retrieve_file_path(path, str(_cache_dir), force_download)
-        _note_copy(local_path)
-        return local_path
+        path = os.path.abspath(path)
+        return _copy_of(path, os.path.getmtime(path))
 
     for module in list(sys.modules.values()):
         if getattr(module, "__dict__", {}).get("retrieve_file_path") is retrieve_file_path:
             module.retrieve_file_path = retrieve
+    robot_on_stand.retrieve_file_path = _kept_copy
+
+
+@functools.cache
+def _copy_of(path: str, mtime: float) -> str:
+    """Isaac Lab's copy of local file `path`, made in the cache once a process while its `mtime`
+    holds, and removed at exit. Arena retrieves the same file for every object built from it."""
+    from isaaclab.utils.assets import retrieve_file_path
+
+    local_path = retrieve_file_path(path, str(_cache_dir))
+    _note_copy(local_path)
+    return local_path
+
+
+def _kept_copy(path: str) -> str:
+    """``retrieve_file_path`` for Arena's robot on a stand, whose USD references what this returns.
+
+    Arena writes that USD to ``~/.cache/isaaclab_arena/usd/robot_on_stand/``, one file for each
+    robot, height and footprint, which every process rewrites and any running beside it reads, an
+    Isaac Sim run among them. The robot's and the stand's copies are therefore never removed, and a
+    later process reuses them while the server's file is unchanged, so they do not pile up: a
+    DROID's are 32 MB. ``kept/`` in the cache lists them.
+    """
+    from isaaclab.utils.assets import _remote_fingerprint, retrieve_file_path
+
+    revision = _remote_fingerprint(path) if "://" in path else os.path.getmtime(path)
+    marker = _cache_dir / "kept" / hashlib.sha256(json.dumps([path, revision]).encode()).hexdigest()[:16]
+    with contextlib.suppress(OSError):
+        if os.path.isfile(kept := marker.read_text(encoding="utf-8")):
+            return kept
+    kept = retrieve_file_path(path, str(_cache_dir))
+    _relink_url_references(kept)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(kept, encoding="utf-8")
+    return kept
 
 
 def localize(usd_path: str) -> str:
@@ -114,7 +166,8 @@ def _note_copy(local_path: str) -> None:
     the cache, in every process that asks for it. In a cache that outlives the process those would
     pile up, a table's 14 MB a run.
     """
-    # ponytail: a process killed before exit leaves its copies; sweep old isaaclab_usd_* at start if that bites.
+    # ponytail: SIGKILL or a crash leaves this process's copies. A sweep at start would need to tell
+    # a live process's folders apart (a viewer runs for days), and a kept one (`_kept_copy`): none yet.
     root = os.path.abspath(_cache_dir)
     folder = os.path.relpath(os.path.abspath(local_path), root).split(os.sep)[0]
     if folder.startswith("isaaclab_usd_"):
@@ -130,14 +183,16 @@ def _drop_copies() -> None:
 
 
 def _relink_url_references(local_root: str) -> None:
-    """Repoint absolute URL references inside downloaded layers at their mirrored copies.
+    """Repoint the URL references Isaac Lab leaves in the layers under `local_root` at local copies.
 
-    The mirror keeps the remote directory structure, so *relative* references resolve on their
-    own. An absolute ``https://…`` reference does not: USD would try to open it remotely and
-    drop the subtree. Rewriting those to mirror-relative paths (once, in the cache) is what
-    makes a composed scene like a Replicator kitchen load completely. Isaac Lab 3.0 leaves a
-    UDIM texture, one image per tile, as a URL with its tiles on the server: those are fetched
-    here (:func:`_udim`).
+    USD outside Kit cannot open a URL. Since Isaac Lab 3.0 a reference to a file on the server is
+    pointed at its local copy by Isaac Lab, in its copy of the layer, and a URL left is one the
+    server has no file for, kept as it is, or a UDIM texture, one image per tile, whose tiles it
+    leaves on the server: those are fetched here (:func:`_udim`). The walk follows local references,
+    since one can be layers down. A download as it came is saved over only where it names a UDIM
+    texture by URL itself: Isaac Lab's freshness check compares its record of the server's file with
+    the server, never the file, so the edit costs no download, and one that replaces it is
+    repointed by the next process to localize it.
     """
     from pxr import Sdf, UsdUtils
 
