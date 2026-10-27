@@ -308,6 +308,28 @@ def test_the_tools_that_write_nothing_say_so():
     assert len(tools) == 10
 
 
+def test_a_central_hit_carries_its_credit(tmp_path: Path, monkeypatch):
+    """CC-BY-4.0 asks for credit wherever the prop is passed on, so the model
+    is handed it with the hit. `cached` looks in the Hugging Face cache, where
+    a Central prop is downloaded to."""
+    from arena_composer import catalog, simready
+
+    monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path))
+    url = (
+        "https://huggingface.co/datasets/nvidia/simready-assets/resolve/faaa6cea782d370b0b73408674507ad9f7835484/"
+        "paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd"
+    )
+    asset = catalog.Asset(
+        registry_name="simready_usd_object", role="object", tags=["central", "paint"], object_type="rigid",
+        name="paint_supplies_spraygun_b01", usd_path=url, params={"usd_path": url}, category="Central/paint",
+        credit=simready.CENTRAL_CREDIT,
+    )
+    hit = mcp_server._hit(asset)
+    assert hit["credit"] == simready.CENTRAL_CREDIT
+    assert hit["cached"] is False
+    assert "credit" not in mcp_server._hit(catalog.Asset("banana", "object", [], "rigid", "banana")), "none asked"
+
+
 def test_the_skill_names_every_tool_the_server_has():
     """A tool renamed or added is a skill out of step with the server."""
     skill = (cli.SKILLS / "author-arena-spec" / "SKILL.md").read_text()

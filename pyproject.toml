@@ -15,6 +15,8 @@ dependencies = [
     # Not on PyPI: installed into the venv Arena already built. Bounded to the
     # minor this was tested against, since some of what it imports is private.
     "isaaclab_arena>=0.3,<0.4",
+    # SimReady Central: listing it, and its packages in the cache Arena's loader shares.
+    "huggingface-hub>=0.36",
     "msgpack>=1.1",
     "numpy",
     # Packs OmniPBR's separate metallic and roughness maps into the one image Bevy reads.
