@@ -161,8 +161,8 @@ def test_a_udim_texture_left_on_the_server_has_its_tiles_fetched(tmp_path: Path,
 def test_arenas_own_downloads_of_a_url_go_through_the_cache(monkeypatch):
     """Arena calls Isaac Lab's `retrieve_file_path` with no directory for every object it builds,
     and since Isaac Lab 3.0 each call leaves a copy in the temporary directory; a URL, or a copy
-    Isaac Lab made of one, goes through `localize` instead, once a process, and a local path or a
-    named directory as before."""
+    Isaac Lab made of one, goes through `localize` instead, once a process; another local path is
+    retrieved into the cache, whose copies go at exit; and a named directory is left as it was."""
     import types
 
     from arena_composer import usd_assets
@@ -181,4 +181,5 @@ def test_arenas_own_downloads_of_a_url_go_through_the_cache(monkeypatch):
     assert module.retrieve_file_path("/cache/isaaclab_usd_1/1/bowl.usd") == "cached https://host/bowl.usd"
     assert module.retrieve_file_path("/local/bowl.usd") == "raw"
     assert module.retrieve_file_path("https://host/bowl.usd", "/elsewhere") == "raw"
-    assert calls == [("/local/bowl.usd", None, False), ("https://host/bowl.usd", "/elsewhere", False)]
+    cache = str(usd_assets._cache_dir)
+    assert calls == [("/local/bowl.usd", cache, False), ("https://host/bowl.usd", "/elsewhere", False)]

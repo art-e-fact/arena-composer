@@ -66,20 +66,26 @@ def _route_retrievals() -> None:
     Arena calls Isaac Lab's ``retrieve_file_path`` with no directory for every object it builds, to
     count its rigid bodies, and for every robot on a stand. Since Isaac Lab 3.0 each call writes a
     fresh copy of the asset's rewritten layers to the system's temporary directory, and nothing
-    removes them: a sweep of solves left 8 GB there in 17 minutes. A local copy Isaac Lab made goes
-    the same way, since it would make another from the URL it came from, here in the cache: the
-    rigid-body count runs on the copy :func:`localize` returned. Arena imports the function by name,
-    so every module holding it is repointed, and the one it comes from for later imports.
+    removes them: a sweep of solves left 457 of them, 1.3 GB, there in 17 minutes. A local copy
+    Isaac Lab made goes the same way, since it would make another from the URL it came from, here
+    in the cache: the rigid-body count runs on the copy :func:`localize` returned. Any other local
+    file is retrieved into the cache, where its copy goes at exit: Arena's wrapper of a SimReady
+    Central prop gets one each solve. Arena imports the function by name, so every module holding
+    it is repointed, and the one it comes from for later imports.
     """
     import isaaclab.utils.assets
 
     retrieve_file_path = isaaclab.utils.assets.retrieve_file_path
 
     def retrieve(path: str, download_dir: str | None = None, force_download: bool = False) -> str:
+        if download_dir is not None:
+            return retrieve_file_path(path, download_dir, force_download)
         url = str(path) if "://" in str(path) else isaaclab.utils.assets.unmirror_file_path(str(path))
-        if download_dir is None and not force_download and url:
+        if url and not force_download:
             return localize(url)
-        return retrieve_file_path(path, download_dir, force_download)
+        local_path = retrieve_file_path(path, str(_cache_dir), force_download)
+        _note_copy(local_path)
+        return local_path
 
     for module in list(sys.modules.values()):
         if getattr(module, "__dict__", {}).get("retrieve_file_path") is retrieve_file_path:
