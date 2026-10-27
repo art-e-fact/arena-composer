@@ -118,3 +118,20 @@ def test_a_local_layer_with_no_picture_is_never_counted_as_fetched(tmp_path: Pat
     layer.touch()
 
     assert simready.fetch_thumbnails([str(layer)]) == 0
+
+
+def test_a_layer_isaac_lab_copied_to_localize_goes_when_the_process_does(tmp_path: Path, monkeypatch):
+    """Isaac Lab writes a layer whose references it localized into a fresh folder of the cache in
+    every process; the composer's cache outlives the process, so its copies go at exit."""
+    from arena_composer import usd_assets
+
+    copy = tmp_path / "isaaclab_usd_0123" / "1" / "table.usd"
+    copy.parent.mkdir(parents=True)
+    copy.write_text("#usda 1.0\n")
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    monkeypatch.setattr(usd_assets, "_local_paths", {})
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", lambda url, download_dir: str(copy))
+    assert usd_assets.localize("https://host/table.usd") == str(copy)
+
+    usd_assets._drop_copies()
+    assert not copy.parent.parent.exists() and tmp_path.exists()

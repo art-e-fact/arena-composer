@@ -9,7 +9,9 @@ transforms, object-type detection — work sim-free.
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 from pathlib import Path
 
 from pxr import Usd
@@ -23,6 +25,8 @@ _cache_dir = DEFAULT_CACHE_DIR
 # Downloads are cached on disk; this memo also skips the per-call remote stat.
 _local_paths: dict[str, str] = {}
 _patched = False
+# This process's copies of rewritten layers; see `_note_copy`.
+_copies: set[str] = set()
 
 
 def cache_dir() -> Path:
@@ -55,9 +59,33 @@ def localize(usd_path: str) -> str:
         from isaaclab.utils.assets import retrieve_file_path
 
         local_path = retrieve_file_path(usd_path, download_dir=str(_cache_dir))
+        _note_copy(local_path)
         _relink_url_references(local_path)
         _local_paths[usd_path] = local_path
     return _local_paths[usd_path]
+
+
+def _note_copy(local_path: str) -> None:
+    """Remove at exit the copy Isaac Lab made of a layer whose references it localized.
+
+    Since Isaac Lab 3.0, ``retrieve_file_path`` leaves the downloads as they are and writes such a
+    layer, with its references pointed at local files, into a fresh ``isaaclab_usd_<uuid>`` folder in
+    the cache, in every process that asks for it. In a cache that outlives the process those would
+    pile up, a table's 14 MB a run.
+    """
+    # ponytail: a process killed before exit leaves its copies; sweep old isaaclab_usd_* at start if that bites.
+    root = os.path.abspath(_cache_dir)
+    folder = os.path.relpath(os.path.abspath(local_path), root).split(os.sep)[0]
+    if folder.startswith("isaaclab_usd_"):
+        if not _copies:
+            atexit.register(_drop_copies)
+        _copies.add(os.path.join(root, folder))
+
+
+def _drop_copies() -> None:
+    for folder in _copies:
+        shutil.rmtree(folder, ignore_errors=True)
+    _copies.clear()
 
 
 def _relink_url_references(local_root: str) -> None:
