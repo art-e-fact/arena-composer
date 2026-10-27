@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # PyPI shows the README the wheel carries, with no repository to resolve a
+      # relative link against, so each is pointed at GitHub, at this commit.
+      - run: python3 docs/site/stage.py --readme
       # The platform tag follows the newest glibc symbol the extension uses, so
       # the wheel is built against manylinux_2_28's glibc, not the runner's.
       # rust-cache cannot reach a build inside that container, so sccache keeps
@@ -82,3 +85,21 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --notes-file notes.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # The same wheel, to PyPI, once someone approves this run's deployment to the
+  # `pypi` environment, which deploys `v*` tags only. PyPI trusts this workflow
+  # through that environment (trusted publishing), so no token is stored.
+  pypi:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/arena-composer/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
