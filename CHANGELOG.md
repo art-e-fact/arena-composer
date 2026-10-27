@@ -18,6 +18,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   the panel or the MCP tools goes to the file holding what it changes, each section of the panel
   names the files it is in, and `arena-view` reloads when any of them changes. A file listed twice
   is refused, as Arena refuses it.
+- About 700 more SimReady props, from [SimReady Central](https://huggingface.co/datasets/nvidia/simready-assets)
+  on Hugging Face: the ⟳ in the asset browser and `reindex_assets` list them beside Isaac Sim's,
+  under *SimReady › Central*, and `search_assets` finds them. Each is pinned to the dataset's commit
+  of the day it was listed. A prop SimReady Central knows to be more than the one rigid body Arena
+  spawns is left out. The ⟳ now downloads about 830 MB of pictures where it took 170 MB, and keeps
+  about 40 MB of them.
+- A SimReady Central prop's details in the browser, and its `search_assets` hit, give the CC BY 4.0
+  credit its license asks for.
 
 ### Changed
 
