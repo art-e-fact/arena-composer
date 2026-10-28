@@ -137,9 +137,10 @@ sampled layout passing.
 ### Which Arena it runs on
 
 arena-composer's `main` is synced with IsaacLab-Arena's `main` at
-[dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362) (2026-10-20), the commit
-the template pins. Arena's `main` changes with no new version number, so the install cannot check
-which one you have.
+[f8c3e789b2](https://github.com/isaac-sim/IsaacLab-Arena/commit/f8c3e789b2) (2026-10-27), which
+runs on Isaac Lab 3.0. Release 0.5.0 is synced with
+[dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362) (2026-10-20). Arena's
+`main` changes with no new version number, so the install cannot check which one you have.
 
 ## Developing
 

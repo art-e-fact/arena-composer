@@ -242,19 +242,26 @@ def _attributed(spec: dict[str, Any], errors: list[str], warnings: list[str]) ->
 
 
 def _owners(spec_path: str | None) -> dict[str, str]:
-    """Which of the two files holds each top-level key.
+    """Which of the files holds each top-level key: ``task`` or ``scene``, or
+    with more than one include, the file's name; ``scene + task`` for a key
+    Arena merges across files.
 
-    The editor shows it, because a task and the scene it includes are a
-    disjoint union: a key lives in one file or the other, and which one is not
-    visible from the merged spec the form edits.
+    The editor shows it, because which file a key lives in is not visible
+    from the merged spec the form edits.
     """
     if not spec_path:
         return {}
     from arena_composer.spec_edit import INCLUDE, SpecFiles
 
     files = SpecFiles(Path(spec_path))
+
+    def name(path: Path) -> str:
+        if path == files.path:
+            return "task"
+        return "scene" if len(files.spellings) == 1 else Path(files.spellings[path]).name
+
     return {
-        key: "task" if files.owner(key) == files.path else "scene"
+        key: " + ".join(name(path) for path in files.merge_order if key in files.documents[path])
         for document in files.documents.values()
         for key in document
         if key != INCLUDE

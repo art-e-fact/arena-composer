@@ -65,6 +65,19 @@ def test_a_file_that_is_not_there_is_named(tmp_path: Path):
         check_usd_params([entry("can", str(tmp_path / "missing.usd"))])
 
 
+def test_a_central_url_is_checked_by_arenas_loader_and_never_mirrored_here(monkeypatch: pytest.MonkeyPatch):
+    """Arena downloads a SimReady Central package into the Hugging Face cache itself, so it is not
+    mirrored into the composer's cache too, and what its loader asserts comes out naming the object:
+    an unpinned URL is refused before anything is downloaded."""
+    from arena_composer import resolve_layout
+
+    monkeypatch.setattr(resolve_layout, "localize", lambda path: pytest.fail(f"mirrored {path}"))
+    url = "https://huggingface.co/datasets/nvidia/simready-assets/resolve/main/jar/simready_usd/jar.usd"
+    with pytest.raises(SpecError) as raised:
+        check_usd_params([entry("jar", url)])
+    assert raised.value.errors == ["jar: AssertionError: expected a pinned Hugging Face dataset URL"]
+
+
 def test_an_entry_without_a_usd_path_is_not_checked():
     check_usd_params([SimpleNamespace(id="bowl", registry_name="bowl_ycb_robolab", params={})])
 
@@ -143,7 +156,7 @@ def test_the_summary_names_the_checks_a_dry_solve_cannot_run():
     ran = {check: True for check in PlacementCheck if check not in (PlacementCheck.PHYSICS_SETTLED, PlacementCheck.IK_REACHABLE)}
     layout = sample(0.1, [])
     layout.validation_results.validation_results = ran
-    every_kind = {"on", "clutter_on", "next_to", "not_next_to", "face_to"}
+    every_kind = {"on", "clutter_on", "align_with", "next_to", "not_next_to", "face_to"}
     summary = _placement_summary([layout], seed=7, samples=1, kinds=every_kind)
     assert summary["checks"]["on_relation"] is True
     assert summary["not_run"] == ["physics_settled", "ik_reachable"]
@@ -190,6 +203,7 @@ def test_a_check_for_a_relation_kind_the_spec_does_not_use_did_not_run():
     assert summary["checks"] == {"no_overlap": True, "on_relation": True}
     assert summary["not_run"] == [
         "clutter_on_relation",
+        "align_with",
         "next_to",
         "not_next_to",
         "face_to",

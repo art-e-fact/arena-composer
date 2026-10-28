@@ -5,6 +5,8 @@ are fetched."""
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -118,3 +120,113 @@ def test_a_local_layer_with_no_picture_is_never_counted_as_fetched(tmp_path: Pat
     layer.touch()
 
     assert simready.fetch_thumbnails([str(layer)]) == 0
+
+
+def test_a_layer_isaac_lab_copied_to_localize_goes_when_the_process_does(tmp_path: Path, monkeypatch):
+    """Isaac Lab writes a layer whose references it localized into a fresh folder of the cache in
+    every process; the composer's cache outlives the process, so its copies go at exit."""
+    from arena_composer import usd_assets
+
+    copy = tmp_path / "isaaclab_usd_0123" / "1" / "table.usd"
+    copy.parent.mkdir(parents=True)
+    copy.write_text("#usda 1.0\n")
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    monkeypatch.setattr(usd_assets, "_local_paths", {})
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", lambda url, download_dir: str(copy))
+    assert usd_assets.localize("https://host/table.usd") == str(copy)
+
+    usd_assets._drop_copies()
+    assert not copy.parent.parent.exists() and tmp_path.exists()
+
+
+def test_a_udim_texture_left_on_the_server_has_its_tiles_fetched(tmp_path: Path, monkeypatch):
+    """Isaac Lab 3.0 leaves a UDIM texture's reference a URL and its tiles on the server; they are
+    fetched from 1001 up to the first missing one, and the reference names the local pattern."""
+    from arena_composer import usd_assets
+
+    asked = []
+
+    def retrieve(url: str, download_dir: str) -> str:
+        asked.append(url.rsplit(".", 2)[1])
+        if url.endswith(".1003.png"):
+            raise FileNotFoundError(url)
+        return url
+
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", retrieve)
+    local = usd_assets._udim("https://host/robot/textures/albedo.<UDIM>.png")
+    assert asked == ["1001", "1002", "1003"]
+    assert local == str(tmp_path / "https" / "host" / "robot" / "textures" / "albedo.<UDIM>.png")
+
+
+def test_arenas_own_downloads_of_a_url_go_through_the_cache(tmp_path: Path, monkeypatch):
+    """Arena calls Isaac Lab's `retrieve_file_path` with no directory for every object it builds,
+    and since Isaac Lab 3.0 each call leaves a copy in the temporary directory; a URL, or a copy
+    Isaac Lab made of one, goes through `localize` instead, once a process; another local file is
+    copied into the cache once a process while it is unchanged; and a named directory is left as
+    it was."""
+    import types
+
+    import isaaclab_arena.embodiments.robot_on_stand_utils as robot_on_stand
+
+    from arena_composer import usd_assets
+
+    calls = []
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", lambda *args: calls.append(args) or "raw")
+    module = types.ModuleType("arena_module")
+    module.retrieve_file_path = sys.modules["isaaclab.utils.assets"].retrieve_file_path
+    monkeypatch.setitem(sys.modules, "arena_module", module)
+    monkeypatch.setattr(robot_on_stand, "retrieve_file_path", robot_on_stand.retrieve_file_path)
+    monkeypatch.setattr(usd_assets, "localize", lambda url: f"cached {url}")
+    usd_assets._copy_of.cache_clear()
+    copies = {"/cache/isaaclab_usd_1/1/bowl.usd": "https://host/bowl.usd"}
+    monkeypatch.setattr("isaaclab.utils.assets.unmirror_file_path", lambda path: copies.get(path, ""))
+    local = tmp_path / "bowl.usd"
+    local.write_text("#usda 1.0\n")
+
+    usd_assets._route_retrievals()
+    assert module.retrieve_file_path("https://host/bowl.usd") == "cached https://host/bowl.usd"
+    assert module.retrieve_file_path("/cache/isaaclab_usd_1/1/bowl.usd") == "cached https://host/bowl.usd"
+    assert module.retrieve_file_path(str(local)) == module.retrieve_file_path(str(local)) == "raw"
+    os.utime(local, ns=(0, 0))
+    module.retrieve_file_path(str(local))
+    assert module.retrieve_file_path("https://host/bowl.usd", "/elsewhere") == "raw"
+    cache = str(usd_assets._cache_dir)
+    local_calls = [(str(local), cache, False)] * 2
+    assert calls == [*local_calls, ("https://host/bowl.usd", "/elsewhere", False)]
+    assert robot_on_stand.retrieve_file_path is usd_assets._kept_copy
+
+
+def test_a_robot_on_a_stand_keeps_its_copy_and_reuses_it_while_the_server_has_not_changed(
+    tmp_path: Path, monkeypatch
+):
+    """Arena writes a robot on a stand to a file other processes read, which references the copy
+    `retrieve_file_path` returned: that copy is never removed, and a later process reuses it until
+    the server reports another revision of the file; when it reports none, the last is reused."""
+    from arena_composer import usd_assets
+
+    revision: dict = {"hash": "a"}
+    made = []
+
+    def retrieve(url: str, download_dir: str) -> str:
+        copy = tmp_path / f"isaaclab_usd_{len(made)}" / "1" / "robot.usd"
+        copy.parent.mkdir(parents=True)
+        copy.write_text("#usda 1.0\n")
+        made.append(str(copy))
+        return str(copy)
+
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    monkeypatch.setattr(usd_assets, "_copies", set())
+    monkeypatch.setattr("isaaclab.utils.assets.retrieve_file_path", retrieve)
+    monkeypatch.setattr("isaaclab.utils.assets._remote_fingerprint", lambda url: dict(revision) if revision else None)
+
+    first = usd_assets._kept_copy("https://host/robot.usd")
+    assert usd_assets._kept_copy("https://host/robot.usd") == first and made == [first]
+    revision["hash"] = "b"
+    second = usd_assets._kept_copy("https://host/robot.usd")
+    assert second != first
+    revision.clear()
+    assert usd_assets._kept_copy("https://host/robot.usd") == second and len(made) == 2
+    usd_assets._drop_copies()
+    assert all(Path(copy).exists() for copy in made)
+    assert not list((tmp_path / "kept").glob("*.tmp"))

@@ -256,15 +256,17 @@ def test_a_rename_onto_an_id_in_use_is_refused_on_a_broken_spec_too(spec: Path):
 
 
 def test_an_edit_that_makes_the_pair_read_lands_with_the_rest_remaining(spec: Path):
-    """A key in both files is Arena's to refuse, so there was no before to
-    compare with, and every edit was refused for what was wrong already — the
-    fix for the other problem first too. The edit that makes the pair read
-    lands, with all that is wrong as what remains; and `add_object` answers
-    such a pair with a refusal, not a crash."""
+    """A value in both files is Arena's to refuse — relations have no id, so
+    two lists of them do not join — so there was no before to compare with,
+    and every edit was refused for what was wrong already — the fix for the
+    other problem first too. The edit that makes the pair read lands, with
+    all that is wrong as what remains; and `add_object` answers such a pair
+    with a refusal, not a crash."""
     broken(spec, "pick_up_object: banana", "pick_up_object: plantain", file=spec)
     spec.write_text(spec.read_text() + "relations: []\n")
-    assert "Duplicate env graph spec key" in spec_edit.check(spec).errors[0]
-    assert "Duplicate env graph spec key" in spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab").errors[0]
+    assert "Conflicting env graph spec value at 'relations'" in spec_edit.check(spec).errors[0]
+    refused = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab").errors[0]
+    assert "Conflicting env graph spec value at 'relations'" in refused
 
     result = spec_edit.apply(spec, "remove", ["relations"])
     assert result.ok and result.wrote == [str(spec)], result
@@ -318,6 +320,102 @@ def test_a_spec_without_an_include_edits_itself(tmp_path: Path):
     assert "apple" in [obj["id"] for obj in yaml.safe_load(path.read_text())["objects"]]
 
 
+def split(spec: Path) -> Path:
+    """`spec` including a second file beside its scene, which holds the
+    placer's settings and the last of the scene's objects, as Arena merges a
+    list include: the objects joined in file order, after the scene's."""
+    defaults = spec.parent.parent / "defaults.yaml"
+    defaults.write_text("placer_params:\n  max_placement_attempts: 4\nobjects:\n- id: distractor\n"
+                        "  registry_name: apple_02_objaverse_robolab\n  params: {}\n")
+    scene_of(spec).write_text(SCENE.replace(
+        "- id: distractor\n  registry_name: apple_02_objaverse_robolab\n  params: {}\n", ""))
+    spec.write_text(TASK.replace("external_yaml: ../scenes/scene.yaml", "external_yaml:\n- ../scenes/scene.yaml\n- ../defaults.yaml"))
+    assert spec_edit.check(spec).ok, spec_edit.check(spec).errors
+    return defaults
+
+
+def test_an_edit_lands_in_whichever_included_file_holds_it(spec: Path):
+    """An index into objects joined across files names one entry, renumbered
+    within the file holding it; a removal and a rename reach every file."""
+    defaults = split(spec)
+    from arena_composer.payload import _owners
+
+    owners = _owners(str(spec))
+    assert (owners["objects"], owners["placer_params"], owners["task"]) == ("scene.yaml + defaults.yaml", "defaults.yaml", "task")
+
+    result = spec_edit.apply(spec, "set", ["objects", 2, "params", "scale"], [2.0, 2.0, 2.0])
+    assert result.ok and result.wrote == [str(defaults)], result
+    assert yaml.safe_load(defaults.read_text())["objects"][0]["params"] == {"scale": [2.0, 2.0, 2.0]}
+
+    assert spec_edit.apply(spec, "set", ["placer_params", "max_placement_attempts"], 6).wrote == [str(defaults)]
+
+    result = spec_edit.apply(spec, "set", ["objects", 2, "id"], "apple")
+    assert result.ok and set(result.wrote) == {str(defaults), str(scene_of(spec))}, result
+    assert "subject: apple" in scene_of(spec).read_text()
+
+    result = spec_edit.remove_object(spec, "apple")
+    assert result.ok and set(result.wrote) == {str(defaults), str(scene_of(spec))}, result
+    assert yaml.safe_load(defaults.read_text())["objects"] == []
+    assert "apple" not in scene_of(spec).read_text()
+
+
+def test_a_line_names_the_included_file_holding_what_it_is_about(spec: Path):
+    defaults = split(spec)
+    assert broken(spec, "apple_02_objaverse_robolab", "apple_02_objaverse", file=defaults)[0].startswith(
+        "../defaults.yaml: objects.2.registry_name: Unknown asset registry_name 'apple_02_objaverse'"
+    )
+
+
+def test_a_line_about_what_files_join_names_the_file_holding_it(spec: Path):
+    """An object reference names its entry, in whichever file holds it, and a task's line its
+    subtasks, which a task merged key by key can hold apart from the rest of it."""
+    defaults = split(spec)
+    scene_of(spec).write_text(scene_of(spec).read_text() + REFERENCES.split("- id: distractor_top")[0])
+    defaults.write_text(defaults.read_text() + "object_references:\n- id" + REFERENCES.split("- id")[2])
+    assert broken(spec, "parent_id: maple_table_robolab", "parent_id: nothing")[0].startswith(
+        "../scenes/scene.yaml: Object reference 'table_top' references invalid parent 'nothing'"
+    )
+    broken(spec, "parent_id: nothing", "parent_id: maple_table_robolab")
+
+    subtasks = TASK[TASK.index("  subtasks:") :]
+    spec.write_text(TASK.replace(subtasks, "").replace(
+        "external_yaml: ../scenes/scene.yaml", "external_yaml:\n- ../scenes/scene.yaml\n- ../defaults.yaml"))
+    defaults.write_text(defaults.read_text() + "task:\n" + subtasks)
+    assert spec_edit.check(spec).ok, spec_edit.check(spec).errors
+    assert broken(spec, "pick_up_object: banana", "pick_up_object: banan", file=defaults)[0].startswith(
+        "../defaults.yaml: Task 'PickAndPlaceTask' param 'pick_up_object' references unknown node 'banan'"
+    )
+
+
+def test_a_file_included_twice_is_refused_as_arena_refuses_it(spec: Path):
+    """Arena merges each file the include lists, so one listed twice, however spelled, conflicts
+    with itself."""
+    from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
+
+    twice = "external_yaml:\n- ../scenes/scene.yaml\n- ../tasks/../scenes/scene.yaml"
+    spec.write_text(TASK.replace("external_yaml: ../scenes/scene.yaml", twice))
+    with pytest.raises(ValueError, match="Conflicting"):
+        ArenaEnvGraphSpec.from_yaml(spec)
+    result = spec_edit.check(spec)
+    assert not result.ok and "twice" in result.errors[0], result.errors
+
+
+def test_an_object_naming_itself_as_arena_did_is_told_of_the_rename(spec: Path):
+    """An object's `instance_name` is now `name`; a library background is passed its `name` by
+    Arena, so neither spelling belongs in its params."""
+    assert broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}", "registry_name: bowl_ycb_robolab\n"
+                  "  params: {instance_name: bowl}") == [
+        "../scenes/scene.yaml: objects.1.params.instance_name: Arena renamed it to 'name'"
+    ]
+    scene_of(spec).write_text(SCENE)
+    for key in ("name", "instance_name"):
+        assert broken(spec, f"registry_name: {TABLE}\n  params: {{}}", f"registry_name: {TABLE}\n"
+                      f"  params: {{{key}: top}}") == [
+            f"../scenes/scene.yaml: background.params.{key}: Arena passes {TABLE} its 'name' itself; remove it"
+        ]
+        scene_of(spec).write_text(SCENE)
+
+
 def test_check_judges_the_bytes_on_disk_and_writes_nothing(spec: Path):
     """The check an edit passes before it lands, on the files as they are: a
     bare `on` left by a hand edit is the boolean true under YAML 1.1, which
@@ -355,6 +453,10 @@ def test_a_scene_is_refused_with_a_regex_that_finds_its_task(spec: Path):
 
     assert re.search(pattern, spec.read_text())
     assert not re.search(pattern, spec.read_text().replace("scene.yaml", "other_scene.yaml"))
+    # An item of a list of includes, block or flow.
+    assert re.search(pattern, "external_yaml:\n- ../defaults.yaml\n- ../scenes/scene.yaml\n")
+    assert re.search(pattern, "external_yaml: [defaults.yaml, scene.yaml]")
+    assert not re.search(pattern, "external_yaml: [defaults.yaml, other_scene.yaml]")
     spec_edit.check_entry(spec)
 
 
@@ -886,9 +988,9 @@ def test_a_relation_param_is_checked_against_its_kind(spec: Path):
 def test_a_param_arena_passes_itself_is_refused(spec: Path):
     """Arena passes a relation its reference and an atomic task its
     description whatever the params hold, so one there too is a TypeError at
-    build. An object's `instance_name` it only defaults, so that one is fine."""
+    build. An object's `name` it only defaults, so that one is fine."""
     broken(spec, "registry_name: bowl_ycb_robolab\n  params: {}",
-           "registry_name: bowl_ycb_robolab\n  params: {instance_name: my_bowl}")
+           "registry_name: bowl_ycb_robolab\n  params: {name: my_bowl}")
     broken(spec, "  subject: banana\n  reference: maple_table_robolab\n  params: {}",
            "  subject: banana\n  reference: maple_table_robolab\n  params: {parent: bowl}")
     errors = broken(spec, "      background_scene:", "      task_description: grab it\n      background_scene:", file=spec)

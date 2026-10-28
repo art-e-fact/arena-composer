@@ -23,7 +23,7 @@ spec, every add picked from the vocabulary.
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
 **Rust never writes YAML.** [spec_edit.py](../python/arena_composer/spec_edit.py) is the only writer:
-it knows which of the two files a key belongs in, keeps comments, and quotes what YAML 1.1 would read
+it knows which file a value belongs in, keeps comments, and quotes what YAML 1.1 would read
 as a boolean. Rust's half is a form that cannot reach an invalid state — ids come from dropdowns, and
 a unary relation has no `reference` slot at all. What construction cannot prevent comes back in the
 payload's `errors`, each shown as a toast in the corner of the 3D view until it is closed (`toasts` in

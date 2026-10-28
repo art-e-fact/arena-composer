@@ -10,8 +10,8 @@ Two conventions worth matching in a viewer:
 * Bounding boxes are local and Arena's: measured from the USD default prim's origin with its
   authored rotation kept, and only the reported ``scale`` applied, the frame
   :mod:`arena_composer.usd.extract` draws in. ``world_bbox_min``/``world_bbox_max`` are the box
-  Arena checks the layout with: the local one turned by the asset's rotation and moved to its
-  position.
+  Arena checks a relation with: the local one turned by the asset's rotation, enclosed axis-aligned,
+  and moved to its position. Its overlap check keeps the turned box instead.
 * The layout is *one* seeded sample. At runtime Arena redraws a different valid layout from
   its pool on every reset, so pin ``--seed`` if the viewer should stay put between runs.
   ``--samples N`` solves N at once, one per env as Arena does, to say how many pass; the first
@@ -47,7 +47,7 @@ from isaaclab_arena.relations.object_placer import ObjectPlacer
 from isaaclab_arena.relations.passive_collision_objects import get_placement_collision_objects
 from isaaclab_arena.relations.placement_poses import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
-from isaaclab_arena.relations.relations import ClutterOn, FaceTo, NextTo, NotNextTo, On
+from isaaclab_arena.relations.relations import AlignWith, ClutterOn, FaceTo, NextTo, NotNextTo, On
 from isaaclab_arena.relations.validation.types import PlacementCheck
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
@@ -141,9 +141,18 @@ def check_usd_params(objects: Iterable[Any]) -> None:
     from inside the solver, or not until the sim. The download this costs is
     the one the resolve was about to make anyway.
 
+    A SimReady Central URL — a Hugging Face dataset — is checked by Arena's
+    own loader, which downloads the package into the Hugging Face cache and
+    asserts it is pinned and one rigid body: the one copy, which Arena's build
+    reads too, and a failure named here rather than from inside it.
+
     `objects` are the spec's object entries — anything with an `id`, a
     `registry_name` and `params`.
     """
+    from isaaclab_arena.assets.simready_central_asset_loader import (
+        download_and_wrap_central_asset,
+        is_central_asset_url,
+    )
     from isaaclab_arena.assets.simready_constants import SIMREADY_PHYSICS_VARIANTS, SIMREADY_USD_OBJECT_REGISTRY_NAME
     from isaaclab_arena.utils.usd.rigid_bodies import read_asset_rigid_body_paths
 
@@ -151,6 +160,12 @@ def check_usd_params(objects: Iterable[Any]) -> None:
     for obj in objects:
         usd_path = obj.params.get("usd_path")
         if not usd_path:
+            continue
+        if obj.registry_name == SIMREADY_USD_OBJECT_REGISTRY_NAME and is_central_asset_url(usd_path):
+            try:
+                download_and_wrap_central_asset(usd_path)
+            except Exception as error:
+                errors.append(f"{obj.id}: {type(error).__name__}: {error}")
             continue
         if "://" not in usd_path and not Path(usd_path).is_file():
             errors.append(f"{obj.id}: no file at {usd_path}")
@@ -446,6 +461,7 @@ _CHECKED_KIND = {
     PlacementCheck.NEXT_TO: NextTo.name,
     PlacementCheck.NOT_NEXT_TO: NotNextTo.name,
     PlacementCheck.FACE_TO: FaceTo.name,
+    PlacementCheck.ALIGN_WITH: AlignWith.name,
 }
 
 
