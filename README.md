@@ -136,11 +136,16 @@ sampled layout passing.
 
 ### Which Arena it runs on
 
-arena-composer's `main` is synced with IsaacLab-Arena's `main` at
-[f8c3e789b2](https://github.com/isaac-sim/IsaacLab-Arena/commit/f8c3e789b2) (2026-10-27), which
-runs on Isaac Lab 3.0. Release 0.5.0 is synced with
-[dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362) (2026-10-20). Arena's
-`main` changes with no new version number, so the install cannot check which one you have.
+Each release is synced with one commit of IsaacLab-Arena's `main`. Arena's `main` changes with no
+new version number, so the install cannot check which one you have: install a release into an
+Arena venv at its commit.
+
+| arena-composer | IsaacLab-Arena `main` |
+| --- | --- |
+| 0.6.0 | [f8c3e789b2](https://github.com/isaac-sim/IsaacLab-Arena/commit/f8c3e789b2) (2026-10-27), on Isaac Lab 3.0 |
+
+Release 0.5.0 is synced with [dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362)
+(2026-10-20). arena-composer's `main` is synced with the table's last row.
 
 ## Developing
 
