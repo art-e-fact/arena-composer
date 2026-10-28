@@ -320,12 +320,19 @@ mod tests {
                 "name": "Plastic_Basket_A01",
                 "params": {"usd_path": "https://bucket/basket.usd"},
                 "thumbnail": "/cache/https/bucket/.thumbs/256x256/basket.usd.png",
+            }, {
+                "registry_name": "simready_usd_object",
+                "name": "paint_supplies_spraygun_b01",
+                "category": "Central/paint",
+                "credit": "NVIDIA SimReady Central, CC-BY-4.0",
             }],
         }));
         let props = sent.remote.expect("the list this message carried");
         assert_eq!(props[0].name, "Plastic_Basket_A01");
         assert_eq!(props[0].params["usd_path"].as_text(), Some("https://bucket/basket.usd"));
         assert!(props[0].thumbnail.ends_with("basket.usd.png"));
+        assert_eq!(props[0].credit, "", "a bucket prop asks no credit");
+        assert_eq!(props[1].credit, "NVIDIA SimReady Central, CC-BY-4.0");
     }
 
     /// The blobs are raw little-endian arrays, and a truncated one is dropped

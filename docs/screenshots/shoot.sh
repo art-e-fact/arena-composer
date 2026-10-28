@@ -44,5 +44,5 @@ shoot() {
     echo "$png"
 }
 
-shoot assets.png kitchen_island ARENA_VIEWER_SEARCH=kitchenware ARENA_VIEWER_PICK=wooden_bowl
+shoot assets.png kitchen_island ARENA_VIEWER_SEARCH="kitchenware mug" ARENA_VIEWER_PICK=wooden_bowl
 shoot graph.png kitchen_island ARENA_VIEWER_DOCK=graph ARENA_VIEWER_DOCK_HEIGHT=400 ARENA_VIEWER_PICK=10 ARENA_VIEWER_SHOW_RELATIONS=7,10,12

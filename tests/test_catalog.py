@@ -22,7 +22,20 @@ def test_a_remote_asset_is_found_with_the_params_to_add_it(tmp_path: Path, monke
         "list_keys",
         lambda: [f"{folder}/sm_misc_basket_plastic_a01_01.usd", f"{folder}/.thumbs/256x256/sm_misc_basket_plastic_a01_01.usd.png"],
     )
+    spray_gun = simready.RemoteAsset(
+        name="paint_supplies_spraygun_b01",
+        category="Central/paint",
+        key="paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd",
+        revision="faaa6cea782d370b0b73408674507ad9f7835484",
+    )
+    listed = simready.Central(spray_gun.revision, [spray_gun], [])
+    monkeypatch.setattr(simready, "central", lambda bucket, known: listed)
     simready.build()
+
+    # A Central prop is found by its words run together, and says whose it is.
+    (hit,) = [asset for asset in catalog.search("spray gun") if asset.params]
+    assert hit.params == {"usd_path": spray_gun.usd_path}
+    assert hit.credit == simready.CENTRAL_CREDIT and "central" in hit.tags
 
     # The folder name, the category and the layer's file name all count.
     for query in ("plastic basket", "kitchen basket", "sm_misc"):

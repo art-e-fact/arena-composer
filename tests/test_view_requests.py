@@ -402,7 +402,7 @@ def test_a_crawl_says_it_started_and_answers_with_the_prop_list(monkeypatch, tmp
     each one would queue another crawl behind the first."""
     found = [SimpleNamespace(usd_path="https://bucket/Baskets/basket.usd")]
     fetched: list[list[str]] = []
-    monkeypatch.setattr(view.simready, "build", lambda: found)
+    monkeypatch.setattr(view.simready, "build", lambda: (found, {}))
     monkeypatch.setattr(view.simready, "fetch_thumbnails", lambda usd_paths: fetched.append(usd_paths) or 1)
 
     answers = _served(monkeypatch, {"op": "reindex"}, tmp_path)
@@ -427,6 +427,17 @@ def test_a_failed_crawl_still_says_it_stopped(monkeypatch, tmp_path: Path):
     assert answers[-1]["indexing"] is False, "the browser is still waiting on the crawl"
 
 
+def test_a_crawl_that_got_only_part_says_which(monkeypatch, tmp_path: Path):
+    """SimReady Central unlisted, or listed without its rigid-body counts, is a
+    crawl that landed: the prop list goes out, and the reason beside it."""
+    note = "SimReady Central could not be listed, so the index has none from there: ConnectError: no route"
+    monkeypatch.setattr(view.simready, "build", lambda: ([], {"central_error": note}))
+    monkeypatch.setattr(view.simready, "fetch_thumbnails", len)
+
+    answers = _served(monkeypatch, {"op": "reindex"}, tmp_path)
+    assert (answers[-1]["errors"], answers[-1]["remote"], answers[-1]["indexing"]) == ([note], True, False)
+
+
 def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
     """An edit's answer can be dropped when the spec will not parse, because the
     watcher sends another. This one is a request's only reply."""
@@ -439,7 +450,7 @@ def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
         return _packed(spec, errors, solving, remote, indexing)
 
     monkeypatch.setattr(view, "SETTLE", 0.01)
-    monkeypatch.setattr(view.simready, "build", list)
+    monkeypatch.setattr(view.simready, "build", lambda: ([], {}))
     monkeypatch.setattr(view.simready, "fetch_thumbnails", len)
     monkeypatch.setattr(view, "encode_spec", mid_write)
     monkeypatch.setattr(

@@ -44,7 +44,8 @@ SETTLE = 0.3
 SAMPLES = 5
 
 #: What the panel asks for that is not an edit: the props, from NVIDIA's
-#: bucket — see :func:`_serve_assets` — and the layouts again, from a new seed.
+#: bucket and SimReady Central — see :func:`_serve_assets` — and the layouts
+#: again, from a new seed.
 #: Neither touches the spec.
 ASSET_REQUEST = "reindex"
 REGENERATE = "regenerate"
@@ -233,22 +234,27 @@ async def _serve_requests(
 
 
 async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, crawls: asyncio.Queue[None]) -> None:
-    """Crawl the bucket as the browser asks, one crawl at a time.
+    """Crawl the bucket and SimReady Central as the browser asks, one crawl at
+    a time.
 
     A crawl writes the index, then fetches the picture of everything in it —
-    about a minute each, and ~170 MB for the pictures, which is what the button
-    that asks for this says. The panel hears twice: `_reload_on_change` notices
+    about a minute each, and ~830 MB for the pictures, ~660 MB of it Central's
+    published at four times the size they are kept at, which is what the
+    button that asks for this says. The panel hears twice: `_reload_on_change` notices
     the index the moment it lands and sends the names, and this answer carries
     the pictures behind them.
 
     That answer carries the prop list again, a failed crawl's included: the
     panel is waiting on that list, and an answer is what tells it to stop.
+    What the crawl got only part of — SimReady Central unlisted, or listed
+    without its rigid-body counts — goes with it as errors, as a failure does.
     """
     while True:
         await crawls.get()
         errors: list[str] | None = None
         try:
-            found = await asyncio.to_thread(simready.build)
+            found, notes = await asyncio.to_thread(simready.build)
+            errors = list(notes.values()) or None
             print(f"{simready.index_path()}: {len(found)} assets", file=sys.stderr)
             fetched = await asyncio.to_thread(simready.fetch_thumbnails, [asset.usd_path for asset in found])
             print(f"simready: fetched {fetched} thumbnail(s)", file=sys.stderr)
@@ -296,7 +302,7 @@ async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) ->
     assets are in no index — nothing else would ever fetch theirs, and they are
     what the browser opens on. A few hundred small files, ~20 MB, the first
     time; a stat each after that. The props are not offered here even where
-    the index has some without pictures: that is up to 170 MB, and only the
+    the index has some without pictures: that is up to 830 MB, and only the
     reindex button asks for it.
 
     The answer is sent only if something arrived. Without that, every startup

@@ -175,7 +175,10 @@ def add_spec_options(parser: argparse.ArgumentParser) -> None:
         "--asset-cache",
         type=Path,
         metavar="DIR",
-        help="Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)",
+        help=(
+            "Directory for downloaded USD assets (default: $ARENA_COMPOSER_ASSET_CACHE, else ~/.cache/arena-composer)."
+            " SimReady Central's packages go to the Hugging Face cache ($HF_HOME) instead"
+        ),
     )
     parser.add_argument(
         "--import",

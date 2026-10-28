@@ -53,9 +53,10 @@ the tools at the task; the edit tools work out which file an edit belongs in.
 How the tools fit together:
 
 1. `search_assets` to find a `registry_name`. Never guess one: the registry is
-   the only place these names exist. NVIDIA's SimReady props — ~1,500 objects
+   the only place these names exist. NVIDIA's SimReady props — ~2,200 objects
    beyond the registry — are searched too once `reindex_assets` has built the
-   local index; a hit among them carries the `params` to add it with.
+   local index; a hit among them carries the `params` to add it with, and one
+   from SimReady Central the `credit` its CC-BY-4.0 license asks for.
    `list_kinds` for the relation and task kinds a spec can name, and the
    params each takes. `get_prim_tree` for the parts of the background or of
    an object an `object_references` entry can name — a tabletop, a drawer —
@@ -238,14 +239,21 @@ def search_assets(query: str = "", role: str | None = None, limit: int = 20) -> 
     Two sources. Arena's registry, with the Isaac Cap assets its own CLI adds
     and whatever the modules in `ARENA_COMPOSER_IMPORTS` register — set in
     `bin/arena-mcp`, which `arena-composer init --import MODULE` writes. And
-    NVIDIA's SimReady props: ~1,500 physics-ready objects on a public bucket,
-    searched once `reindex_assets` has built the local index. A SimReady hit shares one `registry_name` with
-    every other and is told apart by its `params`, which `add_object` has to be
-    given as they are. Never make a URL up; the index is where they come from.
+    NVIDIA's SimReady props, searched once `reindex_assets` has built the local
+    index: ~1,500 physics-ready objects on Isaac Sim's bucket, and ~700 more
+    from SimReady Central, a Hugging Face dataset, under the category
+    `Central/...`. A SimReady hit shares one `registry_name` with every other
+    and is told apart by its `params`, which `add_object` has to be given as
+    they are. Never make a URL up; the index is where they come from.
+
+    A SimReady Central hit carries `credit`: its license is CC-BY-4.0, which
+    asks for that credit wherever the spec or what is made with it is shared.
+    Pass it on to the user when you add one.
 
     `cached` says whether the asset's USD is already on this machine. The
     first resolve of one that is not downloads it: tens of megabytes for a
-    prop, more for a scene.
+    prop, more for a scene. A SimReady Central prop comes as a whole package,
+    into the Hugging Face cache: tens to hundreds of megabytes.
 
     Args:
         query: Words to match against an asset's name, tags and file name,
@@ -267,6 +275,7 @@ def _hit(asset: catalog.Asset) -> dict[str, Any]:
         "tags": asset.tags,
         **({"object_type": asset.object_type} if asset.object_type else {}),
         **({"params": asset.params} if asset.params else {}),
+        **({"credit": asset.credit} if asset.credit else {}),
         **({"cached": usd_assets.mirrored(asset.usd_path) is not None} if asset.usd_path else {}),
     }
 
@@ -277,16 +286,29 @@ async def reindex_assets() -> dict[str, Any]:
     finds them.
 
     Needed once: the index is a file, kept until this runs again, and shared
-    with a viewer open on the same machine. Takes tens of seconds — a listing
-    of the bucket, with no asset downloaded. Run it again to pick up props
-    published since.
+    with a viewer open on the same machine. Takes about a minute — a listing
+    of Isaac Sim's bucket and of SimReady Central, with no asset downloaded.
+    Run it again to pick up props published since. `central` is how many of
+    those indexed are SimReady Central's: the ones the bucket has not got,
+    less those known to be more than the one rigid body Arena spawns a prop as.
+
+    Two keys say what went only partly: `central_error` where SimReady Central
+    could not be listed, so the index kept the Central props it had, if any;
+    and `central_filter` where its search did not say which props are more
+    than one rigid body, so the last index's word on that was kept, if any.
     """
     started = time.monotonic()
-    assets = await asyncio.to_thread(_reindex)
-    return {"indexed": len(assets), "index": str(simready.index_path()), "seconds": round(time.monotonic() - started, 1)}
+    assets, notes = await asyncio.to_thread(_reindex)
+    return {
+        "indexed": len(assets),
+        "central": sum(1 for asset in assets if asset.revision),
+        "index": str(simready.index_path()),
+        "seconds": round(time.monotonic() - started, 1),
+        **notes,
+    }
 
 
-def _reindex() -> list[simready.RemoteAsset]:
+def _reindex() -> tuple[list[simready.RemoteAsset], dict[str, str]]:
     with _quiet():
         return simready.build()
 

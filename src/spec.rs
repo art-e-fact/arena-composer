@@ -201,9 +201,14 @@ pub struct CatalogAsset {
     /// none beside the layer.
     pub thumbnail: String,
     /// A SimReady prop's folders under the bucket's SimReady root, e.g.
-    /// `Residential/Kitchen/Baskets`: where the browser's tree files it.
-    /// Empty for a registered asset.
+    /// `Residential/Kitchen/Baskets`, or `Central/paint` for a SimReady
+    /// Central one: where the browser's tree files it. Empty for a registered
+    /// asset.
     pub category: String,
+    /// The attribution the asset's license asks for, which the browser shows
+    /// beside it: a SimReady Central prop's CC-BY-4.0 credit. Empty where none
+    /// is asked.
+    pub credit: String,
 }
 
 impl CatalogAsset {

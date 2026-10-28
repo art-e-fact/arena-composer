@@ -31,6 +31,7 @@ def test_a_prop_carries_its_picture_once_that_is_on_disk(tmp_path: Path, monkeyp
     folder = f"{simready.PREFIX}Residential/Kitchen/Baskets/Plastic_Basket_A01"
     layer, sidecar = f"{folder}/sm_basket_a01.usd", f"{folder}/.thumbs/256x256/sm_basket_a01.usd.png"
     monkeypatch.setattr(simready, "list_keys", lambda: [layer, sidecar])
+    monkeypatch.setattr(simready, "central", lambda bucket, known: simready.Central("", [], []))
     simready.build()
 
     (prop,) = payload._remote()
@@ -48,6 +49,36 @@ def test_a_prop_carries_its_picture_once_that_is_on_disk(tmp_path: Path, monkeyp
 
     (prop,) = payload._remote()
     assert prop["thumbnail"] == str(mirrored)
+    assert prop["credit"] == "", "a bucket prop asks for none"
+
+
+def test_a_central_prop_carries_its_credit_and_its_small_picture(tmp_path: Path, monkeypatch):
+    """CC-BY-4.0 asks for credit wherever the prop is offered, so the browser
+    is given it. The picture is the downscaled copy, not one in the Hugging
+    Face cache, which the viewer never reads from."""
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
+    central = simready.RemoteAsset(
+        name="paint_supplies_spraygun_b01",
+        category="Central/paint",
+        key="paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd",
+        revision="faaa6cea782d370b0b73408674507ad9f7835484",
+    )
+    monkeypatch.setattr(simready, "list_keys", lambda: [])
+    monkeypatch.setattr(simready, "central", lambda bucket, known: simready.Central(central.revision, [central], []))
+    simready.build()
+
+    (prop,) = payload._remote()
+    assert prop["params"] == {"usd_path": central.usd_path}
+    assert prop["category"] == "Central/paint"
+    assert prop["credit"] == simready.CENTRAL_CREDIT
+    assert "central" in prop["tags"], "searchable by where it comes from"
+    assert prop["thumbnail"] == ""
+
+    picture = tmp_path / "simready-central" / "sm_paint_supplies_spraygun_b01_01.usd.png"
+    picture.parent.mkdir()
+    picture.write_bytes(b"not really a png")
+    (prop,) = payload._remote()
+    assert prop["thumbnail"] == str(picture)
 
 
 def test_the_props_ride_only_the_message_that_changed_them(tmp_path: Path, monkeypatch):

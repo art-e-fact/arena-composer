@@ -92,9 +92,13 @@ class Asset:
     #: the URL, for a remote asset.
     params: dict[str, Any] = field(default_factory=dict)
     #: A remote asset's folders under the SimReady root, e.g.
-    #: ``Residential/Kitchen/Baskets``: where the viewer's browser files it.
+    #: ``Residential/Kitchen/Baskets``, or ``Central/paint`` for a SimReady
+    #: Central prop: where the viewer's browser files it.
     #: Empty for a registered asset.
     category: str = ""
+    #: The attribution its license asks for, shown wherever it is offered: a
+    #: SimReady Central prop's CC-BY-4.0 credit. Empty where none is asked.
+    credit: str = ""
 
     def matches(self, terms: list[str]) -> bool:
         """Whether every term appears in the name, a tag or the USD's file name."""
@@ -171,6 +175,7 @@ def _remote(stamp: int | None) -> tuple[Asset, ...]:
             usd_path=asset.usd_path,
             params={"usd_path": asset.usd_path},
             category=asset.category,
+            credit=asset.credit,
         )
         for asset in simready.load()
     )

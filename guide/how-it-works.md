@@ -116,8 +116,9 @@ relation holds:
 > Quote the kind `'on'`. Arena reads YAML 1.1, where a bare `on` is the boolean `true`. The editor
 > and your agent's tools quote it for you; by hand, you have to.
 
-Assets, relation kinds and task kinds come from Arena's registries, plus about 1,500 of NVIDIA's
-SimReady props once they are indexed. Assets and kinds your project registers itself appear once the
+Assets, relation kinds and task kinds come from Arena's registries, plus about 2,200 of NVIDIA's
+SimReady props once they are indexed: from Isaac Sim's bucket, and from SimReady Central on Hugging
+Face. Assets and kinds your project registers itself appear once the
 module that registers them is imported: `--import MODULE` names it for a command, and
 `ARENA_COMPOSER_IMPORTS` for all of them.
 

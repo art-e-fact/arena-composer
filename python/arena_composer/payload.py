@@ -318,7 +318,9 @@ def _asset(asset: Any) -> dict[str, Any]:
     writes an entry that builds without knowing which kind it picked. The URL
     is given again as `usd_path` whether `params` carries it or not, because an
     asset is searched by it and the browser shows it. `category` is a prop's
-    folder under the SimReady root, where the browser's tree files it.
+    folder under the SimReady root, where the browser's tree files it, and
+    `credit` the attribution a SimReady Central prop's license asks for, which
+    the browser shows beside it.
     """
     return {
         "registry_name": asset.registry_name,
@@ -330,6 +332,7 @@ def _asset(asset: Any) -> dict[str, Any]:
         "thumbnail": _thumbnail(asset.usd_path),
         "params": asset.params,
         "category": asset.category,
+        "credit": asset.credit,
     }
 
 
@@ -342,10 +345,9 @@ def _thumbnail(usd_path: str | None) -> str:
     beside a layer, whoever published it, and an asset that composes its USD
     has no layer and so no picture.
     """
-    from arena_composer.simready import thumbnail_url
-    from arena_composer.usd_assets import mirrored
+    from arena_composer.simready import picture
 
-    return mirrored(thumbnail_url(usd_path or "")) or ""
+    return picture(usd_path or "") or ""
 
 
 def encode(dump: dict[str, Any], remote: bool = True) -> bytes:

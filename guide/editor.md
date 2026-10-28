@@ -10,7 +10,7 @@ arena-view environments/tasks/banana_in_bowl.yaml
 ```
 
 <!-- assets.png -->
-[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/400a1839-d059-4580-a59d-1bfa5339b4bd)](https://github.com/user-attachments/assets/400a1839-d059-4580-a59d-1bfa5339b4bd)
+[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/59614bfe-536f-4cbf-8de5-b2523f98d2e2)](https://github.com/user-attachments/assets/59614bfe-536f-4cbf-8de5-b2523f98d2e2)
 
 > [!TIP]
 > Leave it open while you edit the YAML in your text editor, or while your agent works on it: the
@@ -67,12 +67,19 @@ as the robot* or *use as the background*, or choose another from its card's menu
 drag, so a stray click cannot replace either.
 
 SimReady props join the browser once they are listed: ⟳, in the browser's header, lists them and
-fetches their pictures. That takes a couple of minutes and about 170 MB, once.
+fetches their pictures. That takes a couple of minutes and about 830 MB of downloads, once. They
+come from two places: about 1,500 from the bucket Isaac Sim ships its assets from, and about 700 more
+from [SimReady Central](https://huggingface.co/datasets/nvidia/simready-assets), under
+*SimReady › Central*. A Central prop is downloaded on its first solve into the Hugging Face cache
+(`$HF_HOME`), where Arena's own Central loader looks for it too, so the two never download it twice.
+
+SimReady Central's props are licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): a
+Central prop's details give the credit to keep with whatever you share that uses it.
 
 ## The spatial graph
 
 <!-- graph.png -->
-[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/4ff5b088-8cdc-4287-a3dc-703ce46225f8)](https://github.com/user-attachments/assets/4ff5b088-8cdc-4287-a3dc-703ce46225f8)
+[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/99207dd3-21eb-4942-b7d1-c412e4bfd31c)](https://github.com/user-attachments/assets/99207dd3-21eb-4942-b7d1-c412e4bfd31c)
 
 The graph draws the spec the way Arena's own review GUI does: a node per object, and an edge per
 relation, labelled with its kind. What a thing is placed against is drawn below it, so the anchor

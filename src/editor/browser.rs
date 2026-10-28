@@ -16,7 +16,8 @@
 //! the reindex button asks for. A pick writes the same kind of entry either
 //! way: the asset carries the `params` its own entry needs, so nothing here
 //! has to know which kind it picked. The details say which it is all the same,
-//! since a prop is fetched from the network on its first solve.
+//! since a prop is fetched from the network on its first solve, and give the
+//! credit a SimReady Central prop's license asks for.
 
 use std::collections::BTreeMap;
 
@@ -91,7 +92,10 @@ pub fn header(ui: &mut egui::Ui, form: &Form, state: &mut Browser, total: usize)
         ui.spinner().on_hover_text("listing NVIDIA's SimReady props…");
     } else if ui
         .button("⟳")
-        .on_hover_text("list NVIDIA's SimReady props and fetch their pictures — a couple of minutes and ~170 MB")
+        .on_hover_text(
+            "list NVIDIA's SimReady props, from Isaac Sim's bucket and SimReady Central, and fetch their \
+             pictures — a couple of minutes and ~830 MB",
+        )
         .clicked()
     {
         send(Request::Reindex);
@@ -449,6 +453,12 @@ fn details(ui: &mut egui::Ui, form: &Form, state: &mut Browser, listed: &[Listed
                 }
                 let file = asset.usd_path.rsplit('/').next().unwrap_or_default();
                 ui.add(egui::Label::new(file).truncate()).on_hover_text(&asset.usd_path);
+            });
+        }
+        // Wrapped, as the folder is, for the dataset's URL in it.
+        if !asset.credit.is_empty() {
+            row(ui, "credit", None, |ui| {
+                ui.horizontal_wrapped(|ui| ui.add(egui::Label::new(&asset.credit).wrap()));
             });
         }
         let nodes = in_scene(&form.spec, asset);
@@ -845,13 +855,15 @@ mod tests {
         assert!(within("Arena/Objects", ""), "everything is under all");
     }
 
-    /// A prop's folder wraps in the details rather than widening them: a panel
-    /// grows to fit what it cannot wrap, and what it takes is the grid's.
+    /// A prop's folder and credit wrap in the details rather than widening
+    /// them: a panel grows to fit what it cannot wrap, and what it takes is the
+    /// grid's.
     #[test]
     fn a_long_folder_does_not_widen_the_details() {
-        let width = |category: &str| {
+        let width = |category: &str, credit: &str| {
             let mut form = catalogue();
             form.remote[0].category = category.into();
+            form.remote[0].credit = credit.into();
             let mut state = Browser { picked: Some(key(&form.remote[0])), ..Browser::default() };
             let ctx = egui::Context::default();
             for time in 0..3 {
@@ -865,7 +877,9 @@ mod tests {
             }
             egui::PanelState::load(&ctx, egui::Id::new("asset details")).expect("the details are drawn").size().x
         };
-        assert_eq!(width("Residential/Furnishing/Kitchen/Kitchenware/Cleaning_Supplies"), width("Residential"));
+        assert_eq!(width("Residential/Furnishing/Kitchen/Kitchenware/Cleaning_Supplies", ""), width("Residential", ""));
+        let credit = "NVIDIA SimReady Central (https://huggingface.co/datasets/nvidia/simready-assets), CC-BY-4.0";
+        assert_eq!(width("Central/paint", credit), width("Central/paint", ""), "the credit widened them");
     }
 
     /// The grid alone, a frame at a time, with the input a person would give

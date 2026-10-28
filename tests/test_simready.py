@@ -1,15 +1,21 @@
 """The SimReady index: how a bucket listing becomes assets, that a page of the
-listing is read the way S3 writes one, and how the pictures beside the assets
-are fetched."""
+listing is read the way S3 writes one, which of SimReady Central's props join
+them, and how the pictures beside the assets are fetched. Off the network: the
+Hub's and the search's answers are recordings."""
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from huggingface_hub.hf_api import RepoFile, RepoFolder
+from PIL import Image
 
 from arena_composer import simready
 
@@ -50,6 +56,15 @@ def test_an_asset_is_a_sidecar_whose_layer_is_listed():
     assert simready.thumbnail_url("sm_basket.usd") == "", "no folder, so nowhere to look"
 
 
+REVISION = "faaa6cea782d370b0b73408674507ad9f7835484"
+SPRAY_GUN = simready.RemoteAsset(
+    name="paint_supplies_spraygun_b01",
+    category="Central/paint",
+    key="paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd",
+    revision=REVISION,
+)
+
+
 def test_the_index_is_read_back_unless_its_root_has_moved(tmp_path: Path, monkeypatch):
     index = tmp_path / "index.json"
     monkeypatch.setattr(simready, "index_path", lambda: index)
@@ -61,16 +76,217 @@ def test_the_index_is_read_back_unless_its_root_has_moved(tmp_path: Path, monkey
         "list_keys",
         lambda: [f"{simready.PREFIX}A/B/x.usd", f"{simready.PREFIX}A/B/.thumbs/256x256/x.usd.png"],
     )
+    monkeypatch.setattr(simready, "central", lambda bucket, known: simready.Central(REVISION, [SPRAY_GUN], []))
     assert simready.load() == []
-    built = simready.build()
-    assert built[0].name == "B"
+    built, notes = simready.build()
+    assert notes == {}
+    assert [asset.name for asset in built] == ["B", "paint_supplies_spraygun_b01"]
     assert simready.load() == built
+    assert built[1].usd_path == (
+        "https://huggingface.co/datasets/nvidia/simready-assets/resolve/"
+        f"{REVISION}/paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd"
+    ), "pinned, in the form Arena's Central loader takes"
+    assert (built[0].credit, built[1].credit) == ("", simready.CENTRAL_CREDIT)
+
+    # An older composer builds each of `assets` from the three keys it knows,
+    # and reads nothing else: it has to find the bucket's props there as
+    # before, and none of Central's.
+    document = json.loads(index.read_text())
+    assert [set(entry) for entry in document["assets"]] == [{"name", "category", "key"}]
+    # And an index it built, with no Central at all, still reads.
+    del document["central"]
+    index.write_text(json.dumps(document))
+    assert simready.load() == built[:1]
 
     # What is on disk names the old bucket's files, so it reads as no index.
-    document = json.loads(index.read_text())
     document["root"] = "https://elsewhere/Assets/Isaac/7.0/Isaac/SimReady"
     index.write_text(json.dumps(document))
     assert simready.load() == []
+
+
+def test_central_failing_costs_the_build_only_central(tmp_path: Path, monkeypatch):
+    """Reindexing needs only the bucket, as it did before Central: a Hub that
+    fails, or never answers, keeps the Central props the index had, or writes
+    none, and the build says why."""
+    monkeypatch.setattr(simready, "index_path", lambda: tmp_path / "index.json")
+    keys = [f"{simready.PREFIX}A/B/x.usd", f"{simready.PREFIX}A/B/.thumbs/256x256/x.usd.png"]
+    monkeypatch.setattr(simready, "list_keys", lambda: keys)
+
+    def unreachable(bucket, known):
+        raise ConnectionError("no route to huggingface.co")
+
+    monkeypatch.setattr(simready, "central", unreachable)
+    built, notes = simready.build()
+    assert [asset.name for asset in built] == ["B"]
+    assert "has none from there" in notes["central_error"] and "no route" in notes["central_error"]
+
+    # With Central listed once, a failure after keeps it, and what it left out.
+    listed = simready.Central(REVISION, [SPRAY_GUN], ["IV_pole_a03"])
+    monkeypatch.setattr(simready, "central", lambda bucket, known: listed)
+    simready.build()
+    known: list = []
+    monkeypatch.setattr(simready, "CENTRAL_DEADLINE", 0.2)
+    monkeypatch.setattr(simready, "central", lambda bucket, multi_body: known.append(multi_body) or time.sleep(5))
+    built, notes = simready.build()
+    assert known == [["IV_pole_a03"]], "the last index's word on rigid bodies was not passed on"
+    assert built[1] == SPRAY_GUN and simready.load() == built
+    assert "keeps the 1 props" in notes["central_error"] and "TimeoutError" in notes["central_error"]
+
+
+class _Hub:
+    """The Hub's answers about SimReady Central, as recorded at REVISION on
+    2026-10-27, cut down to five packages: one the bucket has too, one with a
+    `.usda` entry, one more than a rigid body, and one whose entry is named
+    in another case from its package."""
+
+    PACKAGES = [
+        "IV_pole_a03",
+        "cleaning_barSoap_d01",
+        "dishware_bowl_a01",
+        "misc_basket_plastic_a01",
+        "paint_supplies_spraygun_b01",
+    ]
+    FILES = [
+        "IV_pole_a03/simready_usd/sm_IV_pole_a03_01.usd",
+        "cleaning_barSoap_d01/simready_usd/sm_cleaning_barsoap_d01_01.usd",
+        "dishware_bowl_a01/simready_usd/sm_dishware_bowl_a01_01.usda",
+        "misc_basket_plastic_a01/simready_usd/sm_misc_basket_plastic_a01_01.usd",
+        "paint_supplies_spraygun_b01/simready_usd/sm_paint_supplies_spraygun_b01_01.usd",
+    ]
+
+    def __init__(self) -> None:
+        self.asked: list[list[str]] = []
+
+    def dataset_info(self, repo_id):
+        return SimpleNamespace(sha=REVISION)
+
+    def list_repo_tree(self, repo_id, path_in_repo=None, *, recursive=False, revision=None, repo_type=None):
+        assert (path_in_repo, recursive, revision) == (None, False, REVISION), "listed more than the root"
+        return [RepoFolder(path=package, oid="") for package in self.PACKAGES]
+
+    def get_paths_info(self, repo_id, paths, *, repo_type=None, revision=None):
+        assert len(paths) <= simready.PATHS_INFO and revision == REVISION
+        self.asked.append(list(paths))
+        return [RepoFile(path=path, size=1, oid="") for path in paths if path in self.FILES]
+
+
+def test_central_offers_what_the_bucket_has_not(tmp_path: Path, monkeypatch):
+    """Central holds nearly every bucket prop again; those stay the bucket's.
+    A prop known to be more than one rigid body is left out, since Arena
+    spawns one only as exactly one; an entry named off the usual pattern is
+    read from the package's own list of its entries."""
+    hub = _Hub()
+    monkeypatch.setattr("huggingface_hub.HfApi", lambda: hub)
+    roots = tmp_path / "root_usds.json"
+    roots.write_text(json.dumps({"format_version": "1.0", "entries": ["simready_usd/sm_cleaning_barsoap_d01_01.usd"]}))
+    read: list[str] = []
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download", lambda repo_id, filename, **kwargs: read.append(filename) or str(roots)
+    )
+    monkeypatch.setattr(simready, "multi_body", lambda: {"IV_pole_a03"})
+    folder = f"{simready.PREFIX}Residential/Kitchen/Baskets/Plastic_Basket_A01"
+    layer = "sm_misc_basket_plastic_a01_01.usd"
+    bucket = simready.assets_from_keys([f"{folder}/{layer}", f"{folder}/.thumbs/256x256/{layer}.png"])
+
+    listed = simready.central(bucket)
+    assert (listed.revision, listed.multi_body, listed.notes) == (REVISION, ["IV_pole_a03"], {})
+    assert [(asset.name, asset.category, asset.key) for asset in listed.assets] == [
+        (
+            "cleaning_barSoap_d01",
+            "Central/cleaning",
+            "cleaning_barSoap_d01/simready_usd/sm_cleaning_barsoap_d01_01.usd",
+        ),
+        ("dishware_bowl_a01", "Central/dishware", "dishware_bowl_a01/simready_usd/sm_dishware_bowl_a01_01.usda"),
+        ("paint_supplies_spraygun_b01", "Central/paint", SPRAY_GUN.key),
+    ]
+    assert read == ["cleaning_barSoap_d01/.metadata/com.nvidia.simready.root_usds.json"], "one package off the pattern"
+    assert sum(hub.asked, []) == [
+        f"{package}/simready_usd/sm_{package}_01{suffix}"
+        for package in ("cleaning_barSoap_d01", "dishware_bowl_a01", "paint_supplies_spraygun_b01")
+        for suffix in (".usd", ".usda")
+    ], "asked after a package already left out"
+
+    # A search that does not answer leaves out what the last index left out,
+    # and says so; with no last index, it leaves out nothing.
+    monkeypatch.setattr(simready, "multi_body", lambda: None)
+    listed = simready.central(bucket, ["IV_pole_a03"])
+    assert "IV_pole_a03" not in [asset.name for asset in listed.assets]
+    note = listed.notes["central_filter"]
+    assert note.startswith("unavailable") and "left out again" in note
+    assert "IV_pole_a03" in [asset.name for asset in simready.central(bucket).assets]
+
+
+#: A page of SimReady Central's search, as recorded on 2026-10-27, cut down to
+#: a hit in the dataset and one in another the search covers too.
+SEARCHED = {
+    "hits": [
+        {"source": {"path": f"hf://huggingface.co/datasets/{path}"}}
+        for path in (
+            "nvidia/simready-assets/resolve/19512d4dd4b7c0868530efd3ec62277fa2dc1cde/IV_pole_a03/simready_usd/sm_IV_pole_a03_01.usd",
+            "Comau/N220-27/resolve/6bc7c706854044358eab7c28cbab1f4daaa4753a/N-220-27/simready_usd/n-220-27.usd",
+        )
+    ],
+    "has_more": True,
+    "next_cursor": "next",
+}
+
+
+def test_multi_body_props_are_read_from_the_search_to_the_end_or_not_at_all(monkeypatch):
+    """The search is a service in development. A pass that does not reach its
+    last page — a failure, or a cursor it has handed out before — names
+    nothing, rather than part of the props, so the build can say so."""
+    pages: list[dict] = [SEARCHED, {**SEARCHED, "has_more": False}]
+    asked: list[dict] = []
+
+    def urlopen(request, timeout):
+        asked.append(json.loads(request.data))
+        page = pages[min(len(asked), len(pages)) - 1]
+        if isinstance(page, Exception):
+            raise page
+        return io.BytesIO(json.dumps(page).encode())
+
+    monkeypatch.setattr(simready.urllib.request, "urlopen", urlopen)
+    assert simready.multi_body() == {"IV_pole_a03"}, "another dataset's package, or none"
+    assert asked[0]["filter_by_properties_numeric"] == "simready_metadata_rigid_body_count>1"
+    assert asked[1]["cursor"] == "next"
+
+    for pages[1] in (OSError("503 Service Unavailable"), SEARCHED, {**SEARCHED, "next_cursor": None}):
+        asked.clear()
+        assert simready.multi_body() is None, pages[1]
+        assert len(asked) <= 2, "paged on"
+
+
+def _png(size: int) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGBA", (size, size), (200, 40, 40, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_a_central_picture_is_kept_once_and_small(tmp_path: Path, monkeypatch):
+    """Central publishes its pictures at 1024 px, ~850 KB each. One copy is
+    kept, at the bucket's 256, named by its layer and not the commit, so an
+    index rebuilt at a newer commit finds what it has."""
+    monkeypatch.setattr(simready, "index_path", lambda: tmp_path / "index.json")
+    fetched: list[str] = []
+
+    def urlopen(url, timeout):
+        fetched.append(url)
+        return io.BytesIO(_png(1024))
+
+    monkeypatch.setattr(simready.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr("arena_composer.usd_assets.localize", lambda url: pytest.fail(f"mirrored {url}"))
+
+    assert simready.picture(SPRAY_GUN.usd_path) is None
+    assert simready.fetch_thumbnails([SPRAY_GUN.usd_path]) == 1
+    assert fetched == [simready.thumbnail_url(SPRAY_GUN.usd_path)]
+    kept = Path(simready.picture(SPRAY_GUN.usd_path))
+    assert kept.parent == tmp_path / "simready-central"
+    assert Image.open(kept).size == (simready.PICTURE, simready.PICTURE)
+    assert [path.name for path in kept.parent.iterdir()] == [kept.name], "a partial file left behind"
+
+    newer = SPRAY_GUN.usd_path.replace(REVISION, "0" * 40)
+    assert simready.picture(newer) == str(kept)
+    assert simready.fetch_thumbnails([newer]) == 0 and len(fetched) == 1
 
 
 def test_a_picture_is_fetched_beside_its_layer(monkeypatch):
@@ -230,3 +446,84 @@ def test_a_robot_on_a_stand_keeps_its_copy_and_reuses_it_while_the_server_has_no
     usd_assets._drop_copies()
     assert all(Path(copy).exists() for copy in made)
     assert not list((tmp_path / "kept").glob("*.tmp"))
+
+
+def test_a_central_prop_is_read_from_the_hugging_face_cache(tmp_path: Path, monkeypatch):
+    """A Central package is downloaded where Arena's Central loader downloads
+    it, file for file, so neither pulls it twice and composer's own cache
+    holds no copy. A cached entry is no sign of a whole package — Arena's
+    loader may have stopped halfway — so the Hub is asked, and only a Hub out
+    of reach is answered from the cache."""
+    import httpx
+    import huggingface_hub
+
+    from arena_composer import usd_assets
+
+    monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path / "hub"))
+    monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path / "composer")
+    monkeypatch.setattr(usd_assets, "_local_paths", {})
+    package = "paint_supplies_spraygun_b01"
+    files = [
+        f"{package}/com.nvidia.simready.packaging.json",
+        f"{package}/.metadata/LICENSE.txt",
+        f"{package}/simready_usd/payloads/base.usda",
+        f"{package}/simready_usd/Textures/T_spraygun_BaseColor.png",
+        SPRAY_GUN.key,
+    ]
+    downloaded: list[str] = []
+    hub_fails: list[Exception] = []
+
+    class Hub:
+        def list_repo_tree(self, repo_id, path_in_repo=None, *, recursive=False, revision=None, repo_type=None):
+            assert (repo_id, path_in_repo, recursive, revision) == (simready.CENTRAL, package, True, REVISION)
+            if hub_fails:
+                raise hub_fails[0]
+            return [RepoFile(path=path, size=1, oid="") for path in files] + [
+                RepoFolder(path=f"{package}/simready_usd", oid="")
+            ]
+
+    def hf_hub_download(repo_id, filename, *, repo_type=None, revision=None):
+        # Where the real one puts it, which is where `try_to_load_from_cache`
+        # looks; and as the real one, a file already there is not fetched again.
+        path = tmp_path / "hub" / f"datasets--{repo_id.replace('/', '--')}" / "snapshots" / revision / filename
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("#usda 1.0\n")
+            downloaded.append(filename)
+        return str(path)
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Hub)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", hf_hub_download)
+
+    assert usd_assets.mirrored(SPRAY_GUN.usd_path) is None, "not cached yet"
+    local = usd_assets.localize(SPRAY_GUN.usd_path)
+    assert local == str(tmp_path / "hub" / "datasets--nvidia--simready-assets" / "snapshots" / REVISION / SPRAY_GUN.key)
+    assert sorted(downloaded) == sorted(files), "the whole package, once"
+    assert not (tmp_path / "composer").exists(), "a copy in composer's own cache"
+    assert usd_assets.mirrored(SPRAY_GUN.usd_path) == local
+
+    # Another process, after Arena's loader stopped halfway: the entry is
+    # there, a texture is not, and asking the Hub fetches that alone.
+    texture = Path(local).parent / "Textures" / "T_spraygun_BaseColor.png"
+    texture.unlink()
+    downloaded.clear()
+    monkeypatch.setattr(usd_assets, "_local_paths", {})
+    assert usd_assets.localize(SPRAY_GUN.usd_path) == local
+    assert downloaded == [files[3]] and texture.exists()
+
+    # A Hub out of reach is answered from the cache; any other failure is not.
+    hub_fails.append(httpx.ConnectError("no route to huggingface.co"))
+    monkeypatch.setattr(usd_assets, "_local_paths", {})
+    assert usd_assets.localize(SPRAY_GUN.usd_path) == local
+    hub_fails[0] = ValueError("Repository Not Found")
+    monkeypatch.setattr(usd_assets, "_local_paths", {})
+    with pytest.raises(ValueError):
+        usd_assets.localize(SPRAY_GUN.usd_path)
+
+
+def test_an_asset_that_composes_its_usd_is_passed_over(monkeypatch):
+    """Registered assets that compose their USD have no path at all, and the
+    startup pass offers every registered asset."""
+    monkeypatch.setattr("arena_composer.usd_assets.localize", lambda url: pytest.fail(f"asked for {url}"))
+    monkeypatch.setattr("arena_composer.usd_assets.mirrored", lambda url: f"/cache/{url}")
+    assert simready.fetch_thumbnails([None, "", "https://bucket/a/x.usd"]) == 0

@@ -11,6 +11,12 @@ to be pointed at local files is copied, so pointed, into a fresh ``isaaclab_usd_
 of the cache in every process: :func:`_note_copy` removes this process's at exit, all but a robot
 on a stand's (:func:`_kept_copy`). A UDIM texture it leaves on the server, which :func:`_udim`
 fetches.
+
+A layer in a SimReady package on Hugging Face — SimReady Central's, as
+:mod:`arena_composer.simready` indexes them — is not mirrored here at all. Its
+package goes into the Hugging Face cache, file for file where Arena's own
+Central loader puts it, so whichever of the two pulls a package first, the other
+reads it from there (:func:`_hf_package`).
 """
 
 from __future__ import annotations
@@ -21,8 +27,10 @@ import functools
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from pxr import Usd
@@ -31,6 +39,15 @@ DEFAULT_CACHE_DIR = Path(
     os.environ.get("ARENA_COMPOSER_ASSET_CACHE", Path.home() / ".cache" / "arena-composer" / "usd")
 )
 _USD_SUFFIXES = {".usd", ".usda", ".usdc"}
+
+#: A USD layer in a Hugging Face dataset, pinned to a commit, inside a package
+#: folder: ``…/datasets/<owner>/<repo>/resolve/<sha>/<package>/simready_usd/<layer>``,
+#: the URLs Arena's Central loader takes. The groups are the repo, the commit,
+#: and the file in the repo.
+_HF_PACKAGE = re.compile(
+    r"(?:https|hf)://huggingface\.co/datasets/([^/]+/[^/]+)/(?:resolve|blob)/([0-9a-f]{40})/"
+    r"([^?#]+?/simready_usd/[^?#]+\.usd[acz]?)"
+)
 
 _cache_dir = DEFAULT_CACHE_DIR
 # Downloads are cached on disk; this memo also skips the per-call remote stat.
@@ -160,11 +177,16 @@ def localize(usd_path: str) -> str:
     if "://" not in usd_path:
         return usd_path
     if usd_path not in _local_paths:
-        from isaaclab.utils.assets import retrieve_file_path
+        if (package := _HF_PACKAGE.fullmatch(usd_path)) is not None:
+            # Not relinked: those files are the Hugging Face cache's, shared
+            # with Arena, and a package's layers reference each other relatively.
+            local_path = _hf_package(*package.groups())
+        else:
+            from isaaclab.utils.assets import retrieve_file_path
 
-        local_path = retrieve_file_path(usd_path, download_dir=str(_cache_dir))
-        _note_copy(local_path)
-        _relink_url_references(local_path)
+            local_path = retrieve_file_path(usd_path, download_dir=str(_cache_dir))
+            _note_copy(local_path)
+            _relink_url_references(local_path)
         _local_paths[usd_path] = local_path
     return _local_paths[usd_path]
 
@@ -192,6 +214,56 @@ def _drop_copies() -> None:
     for folder in list(_copies):
         shutil.rmtree(folder, ignore_errors=True)
     _copies.clear()
+
+
+def _hf_package(repo_id: str, revision: str, filename: str) -> str:
+    """`filename`, a package's entry layer, in the Hugging Face cache, with
+    every file of its package beside it.
+
+    Downloaded as Arena's ``download_and_wrap_central_asset`` downloads it: the
+    package folder listed at the pinned commit, and each file through
+    ``hf_hub_download``. So the two share every file, `HF_HOME` moves both, and
+    none of it is copied into this module's cache.
+
+    The Hub is asked every time, once a process (`localize` remembers): a
+    cached entry is no sign of a whole package, since Arena's loader downloads
+    in no order and may have been stopped halfway. With the commit pinned, a
+    file already cached costs a stat, so asking completes a partial package
+    for the price of a listing, and a reader beside a download waits on
+    huggingface_hub's lock rather than reading half a file. Only a Hub that
+    cannot be reached at all is answered from the cache, with the entry as it
+    is there.
+    """
+    import httpx
+    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub.hf_api import RepoFile
+
+    folder = filename.split("/simready_usd/", 1)[0]
+    try:
+        listing = HfApi().list_repo_tree(repo_id, folder, recursive=True, revision=revision, repo_type="dataset")
+        files = [entry.path for entry in listing if isinstance(entry, RepoFile)]
+    # No connection, or HF_HUB_OFFLINE, which raises a ConnectionError.
+    except (httpx.TransportError, ConnectionError):
+        if (cached := _hf_cached(repo_id, revision, filename)) is not None:
+            return cached
+        raise
+    if filename not in files:
+        raise FileNotFoundError(f"no {filename} in {repo_id} at {revision}")
+
+    def download(path: str) -> str:
+        return hf_hub_download(repo_id, path, repo_type="dataset", revision=revision)
+
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(download, [path for path in files if path != filename]))
+    return download(filename)
+
+
+def _hf_cached(repo_id: str, revision: str, filename: str) -> str | None:
+    """`filename` in the Hugging Face cache at `revision`, or None. A stat, no network."""
+    from huggingface_hub import try_to_load_from_cache
+
+    cached = try_to_load_from_cache(repo_id, filename, revision=revision, repo_type="dataset")
+    return cached if isinstance(cached, str) else None
 
 
 def _relink_url_references(local_root: str) -> None:
@@ -267,9 +339,14 @@ def mirrored(url: str) -> str | None:
     :func:`localize` goes by — some assets are registered from a directory
     another SDK has already downloaded, and what sits beside those layers is
     just as much on disk as what was mirrored here.
+
+    A layer in a Hugging Face package is looked for in the Hugging Face cache,
+    where :func:`localize` puts it.
     """
     if "://" not in url:
         return url if os.path.isfile(url) else None
+    if (package := _HF_PACKAGE.fullmatch(url)) is not None:
+        return _hf_cached(*package.groups())
 
     from isaaclab.utils.assets import _mirror_path
 
