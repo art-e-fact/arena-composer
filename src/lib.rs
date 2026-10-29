@@ -7,8 +7,10 @@
 //! [`render`], which writes a PNG per view and exits.
 //!
 //! Each has a Python front end (the [`python`] module, behind the `python`
-//! feature) and a `[[bin]]` that reads the same payload off disk. The window
-//! can also play a storyboard, and record it: the README's video ([`tour`]).
+//! feature) and a `[[bin]]` that reads the same payload off disk; the window
+//! also runs in a browser, over a payload a web page fetched (`web`, on
+//! wasm32). The window can also play a storyboard, and record it: the README's
+//! video ([`tour`]).
 
 pub mod editor;
 pub mod layout;
@@ -23,3 +25,5 @@ pub mod wire;
 
 #[cfg(feature = "python")]
 mod python;
+#[cfg(target_arch = "wasm32")]
+mod web;

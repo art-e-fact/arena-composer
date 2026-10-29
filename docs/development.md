@@ -64,6 +64,24 @@ Its video is a tour played in a real `arena-view`, so the edits it makes are sol
 shots nor the video are committed: [docs/publish.sh](publish.sh) uploads them to the pull request
 and points the README and the guide at them.
 
+### The web viewer
+
+The same window runs in a browser, over a packed payload a static page fetches: a prototype of a
+hosted composer, read-only since no Arena stands behind the page. [web/build.sh](../web/build.sh)
+builds the crate for `wasm32-unknown-unknown` ([web.rs](../src/web.rs) is its entry) into a folder
+any static server can serve, and readies the payloads it is given with
+[web/export.py](../web/export.py), which copies the textures and pictures a payload names out of the
+asset cache and rewrites the payload to name the copies:
+
+```bash
+web/build.sh /tmp/scene.msgpack
+python -m http.server -d web/site    # open http://localhost:8000/?payload=scene.msgpack
+```
+
+It needs rustup's wasm32 target and the `wasm-bindgen` CLI at the version `Cargo.lock` pins
+(`cargo install wasm-bindgen-cli --version <it>`). It draws through WebGL2. An edit in the panel
+stays in its card, as it does in `arena-viewer`.
+
 ## Tests
 
 ```bash
