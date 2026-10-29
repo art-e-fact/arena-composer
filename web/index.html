@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>arena-composer</title>
+<link rel="icon" href="data:,">
+<style>
+  /* The viewer's backdrop, so the page does not flash white before the first frame. */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #39414f; color: #dfe3ea; font: 15px system-ui, sans-serif; }
+  #status { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; }
+  canvas { display: block; outline: none; }
+</style>
+</head>
+<body>
+<div id="status">Loading…</div>
+<script type="module">
+  // The page's half of `src/web.rs`: fetch the payload `?payload=` names, hand it over whole, and
+  // get out of the way. Bevy adds the canvas, and fetches the textures from `assets/`.
+  const status = document.getElementById("status");
+  const show = (message) => {
+    status.textContent = message;
+    document.body.append(status);
+  };
+  // The renderer starts after `view` returns, so a browser without WebGL2 fails then, as an error
+  // event rather than in the `catch` below. Bevy logs the panic's own message to the console.
+  const stopped = (error) => show(`The viewer stopped (${error}). The browser's console says why.`);
+  addEventListener("error", (event) => stopped(event.error ?? event.message));
+  addEventListener("unhandledrejection", (event) => stopped(event.reason));
+
+  const payload = new URLSearchParams(location.search).get("payload") ?? "scene.msgpack";
+  try {
+    status.textContent = `Loading ${payload}…`;
+    // Imported here, not at the top, so a page served without its build says so.
+    const { default: init, view } = await import("./arena_composer.js");
+    const [, response] = await Promise.all([init(), fetch(payload)]);
+    if (!response.ok) throw new Error(`${payload}: HTTP ${response.status}`);
+    view(new Uint8Array(await response.arrayBuffer()));
+    status.remove();
+  } catch (error) {
+    show(String(error));
+  }
+</script>
+</body>
+</html>

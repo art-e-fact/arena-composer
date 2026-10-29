@@ -4,3 +4,4 @@ __pycache__/
 *.abi3.so
 *.msgpack
 docs/screenshots/*.png
+web/site/
