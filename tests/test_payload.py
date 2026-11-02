@@ -366,6 +366,21 @@ def test_each_layout_rides_the_payload_and_shares_what_it_draws():
     assert built["layouts"][0]["assets"] == built["assets"]
 
 
+def test_a_geometry_is_named_by_what_it_draws():
+    """Each geometry carries an id hashed from its packed pieces: the same in
+    another payload drawing the same thing wherever it stands, so `arena-view`
+    can name it there by its id alone, and another for anything else."""
+
+    def named(x: float, top: float) -> str:
+        box = {
+            "id": "crate", "role": "object", "position_xyz": [x, 0, 0], "rotation_xyzw": [0, 0, 0, 1],
+            "bbox_min": [0, 0, 0], "bbox_max": [1, 1, top],
+        }
+        return payload.build_payload({"assets": [box]}, remote=False)["geometries"][0]["id"]
+
+    assert named(0.0, 1.0) == named(5.0, 1.0) != named(0.0, 2.0)
+
+
 def test_a_robot_is_drawn_at_the_start_pose_arena_places_it_by(tmp_path: Path):
     """Arena bounds a robot at its `init_state.joint_pos`, and props keep clear of
     that box. Drawn at the pose its file authors, the arm stands a metre tall where
@@ -379,7 +394,7 @@ def test_a_robot_is_drawn_at_the_start_pose_arena_places_it_by(tmp_path: Path):
     }
 
     built = payload.build_payload({"assets": [robot]}, remote=False)
-    nodes = built["geometries"][built["assets"][0]["geometry"]]
+    nodes = built["geometries"][built["assets"][0]["geometry"]]["nodes"]
     positions = np.vstack([np.frombuffer(node["positions"], dtype="<f4").reshape(-1, 3) for node in nodes])
     box = compute_local_bounding_box_from_usd_at_joint_pos(str(usda), joint_pos)
     np.testing.assert_allclose(positions.min(axis=0), np.asarray(box.min_point).reshape(-1), atol=1e-6)

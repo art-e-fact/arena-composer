@@ -6,6 +6,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Changed
+
+- After an edit, `arena-view`'s window builds only the assets the edit changed, and turning to
+  another layout builds nothing: the rest is kept from the layout before, where the whole scene was
+  sent and built again. For a kitchen, an edit's layout is a tenth of a megabyte rather than 90. A
+  scene written with `--payload` by an earlier version no longer opens: write it again.
+
 ## [0.6.0] - 2026-10-28
 
 ### Added

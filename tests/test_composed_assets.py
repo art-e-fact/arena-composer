@@ -22,7 +22,7 @@ def test_a_deformable_cube_is_drawn_as_its_bounding_box():
     assert entry["usd_path"] is None
 
     built = payload.build_payload({"assets": [entry]}, remote=False)
-    (node,) = built["geometries"][built["assets"][0]["geometry"]]
+    (node,) = built["geometries"][built["assets"][0]["geometry"]]["nodes"]
     positions = np.frombuffer(node["positions"], dtype="<f4").reshape(-1, 3)
     np.testing.assert_allclose(positions.min(axis=0), entry["bbox_min"], atol=1e-6)
     np.testing.assert_allclose(positions.max(axis=0), entry["bbox_max"], atol=1e-6)

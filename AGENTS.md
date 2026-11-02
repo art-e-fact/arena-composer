@@ -59,9 +59,9 @@ how a scene is drawn redraws its picture of the showcase: `python showcase/colla
 | [lib.rs](src/lib.rs) | crate root; the architecture in one paragraph |
 | [scene.rs](src/scene.rs) | the payload's layout half, and the Z-up → Y-up convention |
 | [spec.rs](src/spec.rs) | the payload's editor half — spec and vocabulary — and `Request`, what the panel sends back |
-| [wire.rs](src/wire.rs) | length-prefixed framing on the pipe, both directions |
+| [wire.rs](src/wire.rs) | length-prefixed framing on the pipe, both directions; fills in the geometry a layout names by id |
 | [layout.rs](src/layout.rs) | putting a layout in a world and framing it; shared by the window and the renderer |
-| [spawn.rs](src/spawn.rs) | payload geometry → meshes and materials |
+| [spawn.rs](src/spawn.rs) | payload geometry → meshes and materials, built once per geometry and kept by its id |
 | [viewer.rs](src/viewer.rs) | the windowed app: applies incoming messages, draws the page the panel's header is on (`turn_page`) and the status line (`hud_line`) |
 | [editor/](src/editor/) | the panel: a card per spec entry, the dock with the asset browser and the spatial graph, drag-and-drop, picking and a right-click menu in the view, relation gizmos |
 | [render.rs](src/render.rs) | headless renders, a PNG per view |
@@ -90,7 +90,7 @@ does it. Its nav in [zensical.toml](zensical.toml) lists every page, and `pytest
 AGENTS.md. Rules, the reasons for them and pointers into the code, as dense as they need to be. They
 are read on GitHub, not on the site.
 
-- [docs/architecture.md](docs/architecture.md) — the split, the payload, the processes, the pipe, and why an edit is answered twice
+- [docs/architecture.md](docs/architecture.md) — the split, the payload, the processes, the pipe, why geometry is sent once, and why an edit is answered twice
 - [docs/editor.md](docs/editor.md) — the panel; read before touching the camera gate, framing, backdrop, gizmos or drag-and-drop
 - [docs/assets.md](docs/assets.md) — SimReady props, the index, pictures, reindexing
 - [docs/mcp.md](docs/mcp.md) — rules for the MCP server, and `arena-composer init`

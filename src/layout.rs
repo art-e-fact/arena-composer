@@ -54,10 +54,9 @@ pub fn spawn_scene(world: &mut World, scene: &Scene, views: &[View]) -> Entity {
         .id();
 
     for asset in scene.assets() {
-        let nodes = scene.geometry_of(asset);
-        if nodes.is_empty() {
+        let Some(geometry) = scene.geometry(asset).filter(|geometry| !geometry.nodes().is_empty()) else {
             continue;
-        }
+        };
         let placement = world
             .spawn((
                 AssetId(asset.id.clone()),
@@ -66,7 +65,7 @@ pub fn spawn_scene(world: &mut World, scene: &Scene, views: &[View]) -> Entity {
                 ChildOf(root),
             ))
             .id();
-        let pieces = spawn_geometry(world, nodes, placement);
+        let pieces = spawn_geometry(world, geometry, placement);
         if asset.role != "background" {
             continue;
         }
@@ -416,7 +415,7 @@ pub fn corners((lo, hi): (Vec3, Vec3)) -> impl Iterator<Item = Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::{Node as GeometryNode, Rotation, Scale};
+    use crate::scene::{Geometry, Node as GeometryNode, Rotation, Scale};
     use std::f32::consts::FRAC_1_SQRT_2;
 
     /// The extents an orthographic framing was fitted to. `ScalingMode` carries
@@ -450,7 +449,7 @@ mod tests {
                 geometry: drawable.then_some(0),
                 ..default()
             }]),
-            geometries: vec![vec![piece(bbox.0, bbox.1)]],
+            geometries: vec![Geometry::new("a", vec![piece(bbox.0, bbox.1)])],
             ..default()
         }
     }
@@ -488,20 +487,24 @@ mod tests {
     #[test]
     fn an_outsized_piece_is_left_out_of_the_bounds() {
         let mut scene = scene([0.0; 3], ([-2500.0, -2500.0, 0.0], [2500.0, 2500.0, 1.0]), true);
-        scene.geometries[0] = vec![
-            piece([-2500.0, -2500.0, 0.0], [2500.0, 2500.0, 0.0]),
-            piece([-1.0, -1.0, 0.0], [1.0, 1.0, 1.0]),
-            piece([0.0; 3], [0.1; 3]),
-        ];
+        scene.geometries[0] = Geometry::new(
+            "packing_table",
+            vec![
+                piece([-2500.0, -2500.0, 0.0], [2500.0, 2500.0, 0.0]),
+                piece([-1.0, -1.0, 0.0], [1.0, 1.0, 1.0]),
+                piece([0.0; 3], [0.1; 3]),
+            ],
+        );
         let (min, max) = bounds(&scene).unwrap();
         assert!(min.abs_diff_eq(Vec3::new(-1.0, 0.0, -1.0), 1e-5), "{min}");
         assert!(max.abs_diff_eq(Vec3::new(1.0, 1.0, 1.0), 1e-5), "{max}");
         // A floor about as wide as the wall beside it stays.
-        scene.geometries[0] = vec![piece([-5.0, -5.0, 0.0], [5.0, 5.0, 0.0]), piece([-5.0, 5.0, 0.0], [5.0, 5.1, 3.0])];
+        scene.geometries[0] =
+            Geometry::new("room", vec![piece([-5.0, -5.0, 0.0], [5.0, 5.0, 0.0]), piece([-5.0, 5.0, 0.0], [5.0, 5.1, 3.0])]);
         let (min, max) = bounds(&scene).unwrap();
         assert!((max - min).max_element() >= 10.0, "{min} {max}");
         // So does a box's body beside the small label on it: it is not flat.
-        scene.geometries[0] = vec![piece([0.0; 3], [1.0; 3]), piece([0.0; 3], [0.01; 3])];
+        scene.geometries[0] = Geometry::new("box", vec![piece([0.0; 3], [1.0; 3]), piece([0.0; 3], [0.01; 3])]);
         let (min, max) = bounds(&scene).unwrap();
         assert!((max - min).max_element() > 0.99, "{min} {max}");
     }
@@ -529,9 +532,9 @@ mod tests {
         let scene = Scene {
             assets: Some(vec![asset("background", 0), asset("object", 1), asset("embodiment", 2)]),
             geometries: vec![
-                room,
-                vec![piece([0.6, -0.1, 1.0], [0.8, 0.1, 1.1])],
-                vec![piece([-1.0, -0.25, 0.0], [-0.5, 0.25, 1.6])],
+                Geometry::new("room", room),
+                Geometry::new("cup", vec![piece([0.6, -0.1, 1.0], [0.8, 0.1, 1.1])]),
+                Geometry::new("robot", vec![piece([-1.0, -0.25, 0.0], [-0.5, 0.25, 1.6])]),
             ],
             ..default()
         };

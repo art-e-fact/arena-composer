@@ -37,10 +37,12 @@ when its entry is fixed.
 Over the cards, the panel's header pages the view through the layouts the last solve drew, one per
 sample: each is the layout one env starts from, as `arena-resolve-layout --samples` solves them,
 five by default (`arena-view --samples`). `Form::page` is the one on screen, and `viewer::turn_page`
-draws whichever it names. Another layout of the same solve stands the same pieces elsewhere, so a
-page turns by moving the placements and builds nothing; a new solve, and a layout whose object set
-draws another member, are built afresh. The page outlives a solve: the same env, solved again from
-the same start, moves only as far as an edit moved it.
+draws whichever it names. Every page is spawned afresh, from the meshes and materials already built
+for each geometry (`spawn::Built`): a page turn, or a solve that left an asset alone, builds nothing
+again, and only a geometry no layout drew before is built — an object set's other member, an asset an
+edit added. No entity of the old page survives the turn, so hang nothing on one that has to. See
+[architecture.md](architecture.md#geometry-sent-once). The page outlives a solve: the same env, solved
+again from the same start, moves only as far as an edit moved it.
 
 Beside the pager is what the checks a dry solve runs made of the layout on screen, and the seed the
 layouts were drawn from. The ⟳ asks for new ones (`Request::Regenerate`): `view._solve_when_asked`

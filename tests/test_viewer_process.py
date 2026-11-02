@@ -25,6 +25,19 @@ def test_a_whole_scene_reaches_the_decoder():
     assert b"invalid type: integer `7`" in done.stderr
 
 
+def test_a_layout_naming_geometry_the_window_never_had_is_refused():
+    """A layout names by its id alone only what the layout before it drew. The
+    first has none before it, so naming one there means the two ends disagree
+    on what the window holds, and the reader says so rather than drawing the
+    asset as nothing."""
+    from arena_composer.payload import pack
+
+    layout = {"assets": [], "geometries": [{"id": "ab12", "nodes": []}]}
+    done = subprocess.run(CHILD, input=pack_scene(pack(layout, held={"ab12"})), capture_output=True)
+    assert done.returncode == 1
+    assert b"geometry ab12 is named by its id" in done.stderr
+
+
 def test_an_empty_pipe_is_not_a_scene():
     done = subprocess.run(CHILD, input=b"", capture_output=True)
     assert done.returncode == 1

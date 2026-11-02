@@ -46,7 +46,9 @@ bevy_egui = "0.42"
 # Bevy 0.19's built-in camera controllers are free-fly and pan only; a viewer
 # wants orbit. Same crate and version the sibling projects pin.
 bevy_panorbit_camera = "0.35.0"
-serde = { version = "1", features = ["derive"] }
+# `rc`: a geometry's nodes decode into an `Arc`, which the pipe's reader shares
+# with the layout after (`src/wire.rs`).
+serde = { version = "1", features = ["derive", "rc"] }
 # The payload is MessagePack: maps for the scene, `bin` blobs for the vertex
 # arrays. `serde_bytes` keeps those blobs from being decoded element by element,
 # and `bytemuck` reinterprets them as vertex arrays in one copy.
