@@ -59,7 +59,6 @@ use std::collections::HashMap;
 use bevy::camera::SubCameraView;
 use bevy::camera::primitives::Frustum;
 use bevy::camera::visibility::VisibilitySystems;
-use bevy::math::primitives::ViewFrustum;
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{EguiPlugin, EguiPostUpdateSet, EguiPrimaryContextPass, egui};
@@ -335,9 +334,9 @@ fn picture_frustum(clip_from_view: Mat4, transform: &GlobalTransform, far: f32) 
 /// about the panel drawn over it, so the panel has to take the camera away.
 ///
 /// Not `bevy_panorbit_camera`'s own `bevy_egui` feature, which exists to do
-/// exactly this: it is built against a different `bevy_egui` than the one we
-/// draw with, so turning it on compiles a second egui and gates the camera on a
-/// context nothing ever draws into. See `docs/editor.md`.
+/// exactly this: it asks egui whether the pointer is over it, which reads false
+/// over the panel (see [`PointerOverPanel`]), and it has no latch for a drag.
+/// See `docs/editor.md`.
 fn keep_the_camera_off_the_panel(
     mouse: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,

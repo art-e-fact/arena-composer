@@ -23,7 +23,7 @@ path = "src/main.rs"
 # Bevy's defaults less audio and gamepads, which link libasound and libudev: a
 # manylinux wheel may link neither. Both arrive with every default collection,
 # so the rest of the `3d` and `ui` collections is spelled out here instead.
-bevy = { version = "0.19.1", default-features = false, features = [
+bevy = { version = "0.20.1", default-features = false, features = [
     "default_app",
     "std",
     "multi_threaded",
@@ -41,11 +41,13 @@ bevy = { version = "0.19.1", default-features = false, features = [
 ] }
 # The editor panel. Immediate mode, so the form is a function of the last spec
 # rather than a widget tree to keep in step with one. Pinned: the bevy version
-# it integrates with is the version in its number, not in a range.
-bevy_egui = "0.42"
-# Bevy 0.19's built-in camera controllers are free-fly and pan only; a viewer
-# wants orbit. Same crate and version the sibling projects pin.
-bevy_panorbit_camera = "0.35.0"
+# it integrates with is the version in its number, not in a range. 0.43.1
+# fixes its shader in a browser.
+bevy_egui = "0.43.1"
+# Bevy 0.20 has a pan-orbit camera of its own, but no input for it yet: every
+# example copies a few hundred lines of it. It also has no focus to frame, and
+# it smooths by the wall clock, which the recorded tour does not run on.
+bevy_panorbit_camera = "0.36.0"
 # `rc`: a geometry's nodes decode into an `Arc`, which the pipe's reader shares
 # with the layout after (`src/wire.rs`).
 serde = { version = "1", features = ["derive", "rc"] }
@@ -65,7 +67,7 @@ pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
 # wasm-bindgen at the version Bevy already pulls in, which the wasm-bindgen CLI
 # has to match. Cargo.lock gains the WebGL crates; a native build fetches none.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-bevy = { version = "0.19.1", default-features = false, features = ["web", "webgl2"] }
+bevy = { version = "0.20.1", default-features = false, features = ["web", "webgl2"] }
 wasm-bindgen = "0.2.127"
 
 [features]

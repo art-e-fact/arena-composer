@@ -33,22 +33,16 @@ pub fn plugin(app: &mut App) {
 #[derive(Resource, Default)]
 struct SrgbImages(HashSet<AssetId<Image>>);
 
-/// Bevy decodes a 16-bit PNG to a format of its own, whatever the loader was told. An RGB one becomes
-/// `Rgba16Unorm`, which has no sRGB variant, so a colour map drew as if it were linear: washed out, as
-/// robolab's fruit and Lightwheel's microwaves and toasters did. A greyscale one (Lightwheel's
-/// `marble_5_0.png`) becomes `R16Uint`, or `Rg16Uint` with alpha, which `StandardMaterial` cannot sample
-/// at all. This repacks each as 8-bit RGBA, sRGB where a material asked for it so. It runs in `Update`,
-/// after the loader has inserted the image and before the render world extracts it, so the first frame
-/// that draws it already sees the 8-bit one.
+/// Bevy decodes a 16-bit PNG to `Rgba16Unorm`, whatever the loader was told — a greyscale one too
+/// (Lightwheel's `marble_5_0.png`), its grey copied into all three colour channels. That format has no
+/// sRGB variant, so a colour map drew as if it were linear: washed out, as robolab's fruit and
+/// Lightwheel's microwaves and toasters did. This repacks each as 8-bit RGBA, sRGB where a material
+/// asked for it so. It runs in `Update`, after the loader has inserted the image and before the render
+/// world extracts it, so the first frame that draws it already sees the 8-bit one.
 fn narrow_16_bit_textures(mut images: ResMut<Assets<Image>>, srgb: Res<SrgbImages>) {
     let wide: Vec<_> = images
         .iter()
-        .filter(|(_, image)| {
-            matches!(
-                image.texture_descriptor.format,
-                TextureFormat::R16Uint | TextureFormat::Rg16Uint | TextureFormat::Rgba16Unorm
-            )
-        })
+        .filter(|(_, image)| image.texture_descriptor.format == TextureFormat::Rgba16Unorm)
         .map(|(id, _)| id)
         .collect();
     for id in wide {
@@ -59,26 +53,11 @@ fn narrow_16_bit_textures(mut images: ResMut<Assets<Image>>, srgb: Res<SrgbImage
 }
 
 fn narrow(image: &mut Image, srgb: bool) {
-    let channels = match image.texture_descriptor.format {
-        TextureFormat::R16Uint => 1,
-        TextureFormat::Rg16Uint => 2,
-        _ => 4,
-    };
     let Some(data) = image.data.take() else {
         return;
     };
     // Little-endian u16s, so the high byte is the second of each pair.
-    let rgba = data
-        .chunks_exact(2 * channels)
-        .flat_map(|texel| {
-            let high = |channel: usize| texel[2 * channel + 1];
-            match channels {
-                1 => [high(0), high(0), high(0), 255],
-                2 => [high(0), high(0), high(0), high(1)],
-                _ => [high(0), high(1), high(2), high(3)],
-            }
-        })
-        .collect();
+    let rgba = data.chunks_exact(2).map(|channel| channel[1]).collect();
     image.data = Some(rgba);
     image.texture_descriptor.format = if srgb {
         TextureFormat::Rgba8UnormSrgb
@@ -253,10 +232,9 @@ mod tests {
     }
 
     fn image(texels: &[u16], format: TextureFormat) -> Image {
-        let channels = if format == TextureFormat::R16Uint { 1 } else { 4 };
         Image::new(
             bevy::render::render_resource::Extent3d {
-                width: (texels.len() / channels) as u32,
+                width: (texels.len() / 4) as u32,
                 height: 1,
                 depth_or_array_layers: 1,
             },
@@ -267,11 +245,31 @@ mod tests {
         )
     }
 
-    /// A 16-bit greyscale PNG arrives from Bevy's loader as `R16Uint`, which `StandardMaterial` cannot
-    /// sample; it has to come out as a float format with the grey in all three colour channels.
+    /// A 16-bit greyscale PNG, two texels wide: black, then 0xff00.
+    const GREY_16_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+        0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x00, 0x00, 0x81, 0xd9, 0xfc, 0x15, 0x00, 0x00, 0x00,
+        0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x60, 0xf8, 0xcf, 0x00, 0x00, 0x02, 0x03, 0x01, 0x00,
+        0x28, 0xe8, 0xfc, 0x6d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// Bevy's loader expands a 16-bit greyscale PNG to `Rgba16Unorm`, the one wide format
+    /// [`narrow_16_bit_textures`] looks for. Up to Bevy 0.19 it came as `R16Uint`, which
+    /// `StandardMaterial` cannot sample: a Bevy that changes it again fails here.
     #[test]
-    fn a_16_bit_greyscale_texture_is_narrowed_to_rgba8() {
-        let mut grey = image(&[0x00, 0xff00], TextureFormat::R16Uint);
+    fn a_16_bit_greyscale_png_is_narrowed_to_grey_rgba8() {
+        use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
+
+        let mut grey = Image::from_buffer(
+            GREY_16_PNG,
+            ImageType::Extension("png"),
+            CompressedImageFormats::NONE,
+            true,
+            ImageSampler::Default,
+            RenderAssetUsages::default(),
+        )
+        .expect("a valid PNG");
+        assert_eq!(grey.texture_descriptor.format, TextureFormat::Rgba16Unorm);
         narrow(&mut grey, true);
         assert_eq!(grey.texture_descriptor.format, TextureFormat::Rgba8UnormSrgb);
         assert_eq!(grey.data.as_deref(), Some(&[0, 0, 0, 255, 0xff, 0xff, 0xff, 255][..]));

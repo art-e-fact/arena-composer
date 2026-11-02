@@ -27,7 +27,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::Context as _;
+// Bevy's prelude has a `ContextExt` of its own, whose `with_context` makes
+// anyhow's ambiguous; naming this one shadows it.
+use anyhow::Context as ContextExt;
 use bevy::ecs::change_detection::Tick;
 use bevy::ecs::message::{MessageUpdateSystems, Messages};
 use bevy::input::ButtonState;
