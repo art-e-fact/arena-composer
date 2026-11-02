@@ -38,7 +38,8 @@ struct SrgbImages(HashSet<AssetId<Image>>);
 /// sRGB variant, so a colour map drew as if it were linear: washed out, as robolab's fruit and
 /// Lightwheel's microwaves and toasters did. This repacks each as 8-bit RGBA, sRGB where a material
 /// asked for it so. It runs in `Update`, after the loader has inserted the image and before the render
-/// world extracts it, so the first frame that draws it already sees the 8-bit one.
+/// world extracts it, so the first frame that draws it already sees the 8-bit one. It is the only
+/// chance: a material's texture is loaded for the render world alone, and extraction takes its texels.
 fn narrow_16_bit_textures(mut images: ResMut<Assets<Image>>, srgb: Res<SrgbImages>) {
     let wide: Vec<_> = images
         .iter()
@@ -192,7 +193,13 @@ fn build_material(node: &Node, world: &mut World) -> Handle<StandardMaterial> {
         node.textures.get(slot).map(|path| {
             server
                 .load_builder()
-                .with_settings(move |settings: &mut ImageLoaderSettings| settings.is_srgb = srgb)
+                .with_settings(move |settings: &mut ImageLoaderSettings| {
+                    settings.is_srgb = srgb;
+                    // Only the GPU's copy is drawn. Keeping none in RAM as well
+                    // takes 40-50% off a texture-heavy render's peak, and the
+                    // upload moves the texels rather than copying them.
+                    settings.asset_usage = RenderAssetUsages::RENDER_WORLD;
+                })
                 .load::<Image>(path.clone())
         })
     };

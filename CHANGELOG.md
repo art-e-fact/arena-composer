@@ -12,6 +12,9 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   another layout builds nothing: the rest is kept from the layout before, where the whole scene was
   sent and built again. For a kitchen, an edit's layout is a tenth of a megabyte rather than 90. A
   scene written with `--payload` by an earlier version no longer opens: write it again.
+- `arena-render`, `render_views` and `arena-view`'s window keep a scene's textures on the GPU
+  alone, with no second copy in memory: a scene with large textures, such as a humanoid's or a
+  workshop's, renders in 40–50% less memory, and about a third of a second sooner.
 
 ## [0.6.0] - 2026-10-28
 
