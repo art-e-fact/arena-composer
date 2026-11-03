@@ -95,14 +95,13 @@ pub fn view_layers(i: usize) -> RenderLayers {
 const MATCH_ISAAC: f32 = 0.44;
 
 /// How the light divides between the sun and the [`Sky`], before [`MATCH_ISAAC`]:
-/// the sun's illuminance in lux and the sky's brightness in nits. Arena's dome
-/// light is all sky, which RTX shades wherever something blocks it. Where SSAO
-/// does that here ([`occlusion`]), most of the light comes from the sky as well,
-/// which draws closest to Isaac Sim's renders. WebGL2 has no SSAO, and in a
-/// browser the sun brings most of it: a sky that nothing shades draws everything
-/// flat.
-const SUN_LUX: f32 = if cfg!(target_arch = "wasm32") { 6_000.0 } else { 3_600.0 };
-const SKY_NITS: f32 = if cfg!(target_arch = "wasm32") { 400.0 } else { 1_056.0 };
+/// the sun's illuminance in lux and the sky's brightness in nits, straight up. On
+/// a table the sun brings two thirds of it, enough for the shadows it casts to
+/// read: they set what stands on the table down on it. Arena's dome light is all
+/// sky: a split nearer that, with most of the light from the sky, drew closer to
+/// Isaac Sim's renders but no shadow to speak of.
+const SUN_LUX: f32 = 5_000.0;
+const SKY_NITS: f32 = 700.0;
 
 /// How bright the [`Sky`] is in what reflects it, which stays where it was when
 /// the sky brought a fifth of the light. In Isaac Sim the room and the props
@@ -111,32 +110,54 @@ const SKY_NITS: f32 = if cfg!(target_arch = "wasm32") { 400.0 } else { 1_056.0 }
 /// seen at a slant, or a dark kitchen, drew much brighter than Isaac Sim's.
 const REFLECTED_SKY_NITS: f32 = 400.0;
 
+/// How bright the [`Sky`] is straight down, as a share of straight up: a face
+/// turned to the floor gets less of it than one turned up, as under a real sky
+/// over darker ground. Uniform, the sky lit the sides and the underside of a
+/// shape as brightly as its top, which left it no form where the sun missed it.
+const UNDERFOOT: f32 = 0.35;
+
 /// Stand in for the dome light Arena injects at build time when neither the
 /// spec nor the background USD supplies one, for a light the spec lists as an
 /// object, and for the lights a background's USD carries: none of them is
 /// drawn, and a room under the [`Sky`] alone is one flat grey.
 /// `payload.build_payload` sets the flag for all three. It lights whatever is
 /// drawn, so a reload leaves it alone.
+///
+/// A background's piece some views [cut away](cut_away) casts no shadow in any:
+/// the sun takes its shadows from the default layer alone.
 pub fn spawn_lighting(world: &mut World, scene: &Scene) {
     if scene.lighting.auto_injected_dome_light {
         world.spawn((
             DirectionalLight {
                 illuminance: SUN_LUX * MATCH_ISAAC,
+                shadow_maps_enabled: true,
                 ..default()
             },
-            Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.6), Vec3::Y),
+            // About 60° up, so that a shadow falls under what casts it rather
+            // than beside it.
+            Transform::default().looking_to(Vec3::new(-0.3, -1.0, -0.45), Vec3::Y),
+            // Shadow detail where a layout is: a table's within 2 m of the
+            // camera, a kitchen's within 20, and from 5 cm for a close look at a
+            // small prop. Bevy's defaults spread it out to 150 m.
+            bevy::light::CascadeShadowConfigBuilder {
+                minimum_distance: 0.05,
+                first_cascade_far_bound: 2.0,
+                maximum_distance: 20.0,
+                ..default()
+            }
+            .build(),
         ));
     }
 }
 
 /// The sky every camera sits under, standing in for the light of Arena's dome
-/// that the sun does not bring: cubemaps of one texel a face, white for its light
-/// and grey for its reflections ([`REFLECTED_SKY_NITS`]). It replaced Bevy's
-/// ambient fill, a cheap approximation that lights a matte surface at about half
-/// its colour and a metal by one bounce of light. An environment map lights both
-/// in full, as Isaac Sim's path tracer does, which draws a robot's metal and the
-/// sides the sun misses closer to its renders. How much of the light it brings:
-/// [`SUN_LUX`].
+/// that the sun does not bring: cubemaps bright overhead and darker underfoot
+/// ([`UNDERFOOT`]), one for its light and a dimmer one for its reflections
+/// ([`REFLECTED_SKY_NITS`]). It replaced Bevy's ambient fill, a cheap
+/// approximation that lights a matte surface at about half its colour and a metal
+/// by one bounce of light. An environment map lights both in full, as Isaac Sim's
+/// path tracer does, which draws a robot's metal and the sides the sun misses
+/// closer to its renders. How much of the light it brings: [`SUN_LUX`].
 #[derive(Resource)]
 pub struct Sky {
     light: Handle<Image>,
@@ -147,22 +168,41 @@ impl FromWorld for Sky {
     fn from_world(world: &mut World) -> Self {
         let mut images = world.get_resource_or_init::<Assets<Image>>();
         Self {
-            light: images.add(cubemap(255)),
-            reflection: images.add(cubemap((REFLECTED_SKY_NITS / SKY_NITS * 255.0).round() as u8)),
+            light: images.add(cubemap(1.0)),
+            reflection: images.add(cubemap(REFLECTED_SKY_NITS / SKY_NITS)),
         }
     }
 }
 
-/// A cubemap of one texel a face, each `level` grey, in linear light.
-fn cubemap(level: u8) -> Image {
-    let mut image = Image::new_fill(
+/// A cubemap whose grey falls from `level` straight up to `level * UNDERFOOT`
+/// straight down, in linear light. Its faces are in wgpu's order, +X −X +Y −Y +Z
+/// −Z, and a side's rows run from the zenith down: only how far up a texel looks
+/// matters.
+fn cubemap(level: f32) -> Image {
+    const SIDE: u32 = 16;
+    let mut data = Vec::new();
+    for face in 0..6 {
+        for row in 0..SIDE {
+            for col in 0..SIDE {
+                let [s, t] = [col, row].map(|i| (i as f32 + 0.5) / SIDE as f32 * 2.0 - 1.0);
+                let up = match face {
+                    2 => 1.0,
+                    3 => -1.0,
+                    _ => -t,
+                } / (1.0 + s * s + t * t).sqrt();
+                let grey = (level * (UNDERFOOT + (1.0 - UNDERFOOT) * (1.0 + up) / 2.0) * 255.0).round() as u8;
+                data.extend_from_slice(&[grey, grey, grey, 255]);
+            }
+        }
+    }
+    let mut image = Image::new(
         Extent3d {
-            width: 1,
-            height: 1,
+            width: SIDE,
+            height: SIDE,
             depth_or_array_layers: 6,
         },
         TextureDimension::D2,
-        &[level, level, level, 255],
+        data,
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -197,7 +237,7 @@ pub fn sky(world: &mut World) -> (EnvironmentMapLight, AmbientLight) {
 /// stands on it, as Arena's dome light does in Isaac Sim. Ultra quality, since
 /// the lower ones leave a grain on flat faces that one frame does not average
 /// away. SSAO needs MSAA off, so SMAA smooths the edges instead. None in a
-/// browser, whose WebGL2 has no SSAO: see [`SUN_LUX`].
+/// browser, whose WebGL2 has no SSAO.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn occlusion() -> impl Bundle {
     use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
@@ -675,9 +715,15 @@ mod tests {
             light.texture_view_descriptor.as_ref().and_then(|view| view.dimension),
             Some(TextureViewDimension::Cube)
         );
-        // Reflected as bright as the sky was before it brought most of the light.
-        let level = |image: &Image| image.data.as_ref().unwrap()[0] as f32;
-        let reflected = SKY_NITS * MATCH_ISAAC * level(reflection) / level(light);
+        // In full straight up, dimmer straight down, and dimmer still in what
+        // reflects it. Faces +Y and −Y are the third and the fourth.
+        let middle = |image: &Image, face: u32| {
+            let side = image.texture_descriptor.size.width;
+            image.data.as_ref().unwrap()[(((face * side + side / 2) * side + side / 2) * 4) as usize] as f32 / 255.0
+        };
+        assert!((middle(light, 2) - 1.0).abs() < 0.01, "{}", middle(light, 2));
+        assert!((middle(light, 3) - UNDERFOOT).abs() < 0.01, "{}", middle(light, 3));
+        let reflected = SKY_NITS * MATCH_ISAAC * middle(reflection, 2) / middle(light, 2);
         assert!((reflected - REFLECTED_SKY_NITS * MATCH_ISAAC).abs() < 1.0, "{reflected}");
     }
 

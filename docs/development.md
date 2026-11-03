@@ -169,7 +169,9 @@ inside its box or behind it, turns about the vertical, 45° at a time, until it 
 objects' boxes miss, such as a kitchen's cabinets, is skipped. A camera fails when its error rises more than 3 above the one
 [parity/baseline.json](../parity/baseline.json) records, so a change that draws further from Isaac
 Sim fails a test. A change that draws closer lowers the error; record it with `--write-baseline`,
-and the next run holds it.
+and the next run holds it. Record one meant to draw differently as well, as the sun's shadows did:
+the composer is a preview, where a picture that reads better is worth more than one nearer Isaac
+Sim's, so the comparison is there to show what a change moved.
 
 `artefacts run parity` runs it as an Artefacts job, a scenario per spec: see the
 [README](../README.md#the-isaac-sim-comparison-on-artefacts).
