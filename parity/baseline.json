@@ -1,9 +1,9 @@
 {
  "arena_appliances": {
-  "obj_brown_box": 44.02,
+  "obj_brown_box": 37.34,
   "obj_coffee_machine": 32.45,
   "obj_microwave": 48.02,
-  "obj_red_container": 29.69,
+  "obj_red_container": 36.12,
   "obj_stand_mixer": 24.65,
   "objects": 31.8,
   "robot": 47.42
@@ -65,6 +65,8 @@
   "obj_boc_choy_a01": 23.61,
   "obj_eggplant_a01": 19.79,
   "obj_plywood_crate_b01_01": 16.74,
+  "obj_printer_paper_a01": 17.43,
+  "obj_wide_pry_bar_a01": 26.54,
   "objects": 16.29,
   "overview": 15.73,
   "robot": 16.24,
