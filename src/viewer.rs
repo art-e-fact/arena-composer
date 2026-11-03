@@ -10,12 +10,15 @@
 //! here writes a spec either.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use bevy::asset::{AssetMetaCheck, AssetPlugin, UnapprovedPathMode};
 use bevy::prelude::*;
+use bevy::render::render_resource::PipelineCache;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
+use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 use crate::layout::{ArenaRoot, View, framing, occlusion, sky, spawn_lighting, spawn_scene};
@@ -92,8 +95,13 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
     // that path, quit. The way to look at the UI without a person at the
     // keyboard; it is the whole window, so it shows nothing but this app.
     if let Some(path) = std::env::var_os("ARENA_VIEWER_SCREENSHOT") {
+        let compiled = Compiled::default();
         app.insert_resource(ScreenshotPath(path.into()))
+            .insert_resource(compiled.clone())
             .add_systems(Update, screenshot);
+        app.sub_app_mut(RenderApp)
+            .insert_resource(compiled)
+            .add_systems(Render, note_compiled.in_set(RenderSystems::Cleanup));
     }
 
     // A tour that cannot be played says so in the exit code, which is what
@@ -117,26 +125,43 @@ fn resolution() -> bevy::window::WindowResolution {
 #[derive(Resource)]
 struct ScreenshotPath(PathBuf);
 
+/// Whether the render world's last frame left no pipeline compiling, for
+/// [`screenshot`] to read: the cache lives in the render world.
+#[derive(Resource, Clone, Default)]
+struct Compiled(Arc<AtomicBool>);
+
+fn note_compiled(cache: Res<PipelineCache>, compiled: Res<Compiled>) {
+    compiled.0.store(cache.waiting_pipelines().next().is_none(), Ordering::Relaxed);
+}
+
+#[allow(clippy::too_many_arguments)]
 fn screenshot(
     mut commands: Commands,
     mut frame: Local<u32>,
+    mut compiled_for: Local<u32>,
+    mut taken: Local<Option<u32>>,
+    compiled: Res<Compiled>,
     path: Res<ScreenshotPath>,
     capturing: Query<(), With<Capturing>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    // Long enough for the geometry to upload and its shaders to compile;
-    // neither happens on the frame the scene arrives.
+    // Long enough for the geometry to upload, which does not happen on the
+    // frame the scene arrives, and then for every shader it needs to have
+    // compiled for as long: Bevy draws nothing with a pipeline until it is
+    // ready, and under lavapipe one takes seconds.
     const SETTLE: u32 = 30;
     *frame += 1;
-    match *frame {
-        SETTLE => {
+    *compiled_for = if compiled.0.load(Ordering::Relaxed) { *compiled_for + 1 } else { 0 };
+    match *taken {
+        None if *frame >= SETTLE && *compiled_for >= SETTLE => {
             commands
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(path.0.clone()));
+            *taken = Some(*frame);
         }
         // The capture is written on a task; leaving before it lands writes
         // nothing.
-        n if n > SETTLE && capturing.is_empty() => {
+        Some(at) if *frame > at && capturing.is_empty() => {
             exit.write(AppExit::Success);
         }
         _ => {}
