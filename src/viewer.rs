@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::layout::{ArenaRoot, View, framing, sky, spawn_lighting, spawn_scene};
+use crate::layout::{ArenaRoot, View, framing, occlusion, sky, spawn_lighting, spawn_scene};
 use crate::scene::Scene;
 use crate::spawn::Built;
 
@@ -294,6 +294,7 @@ fn spawn_camera(world: &mut World, scene: &Scene) {
             ..default()
         },
         sky,
+        occlusion(),
     ));
 }
 
