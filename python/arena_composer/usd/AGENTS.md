@@ -85,7 +85,10 @@ left to the renderer, the corner-flattened mesh is shaded one flat normal per tr
 made Fourier's GR1T2 render in blocky light and dark patches. Primvars are matched by name *and*
 type, and authored values
 are checked for NaN: assets in this library do author a `token[]` where a float array belongs, and NaN
-UVs that spread through tangent generation.
+UVs that spread through tangent generation. A polygon mesh's normals, one per face corner on fewer
+points, are read per corner whatever interpolation they claim: the replicator kitchens' rooms author
+theirs so under USD's default `vertex`. Not a subdivision surface's: Isaac's robot stand authors normals
+that fit neither reading, and read per corner it drew nearly black where RTX draws it silver.
 
 `shapes.py` tessellates the analytic gprims. Not optional — assets in use are modelled from `Cube` and
 `Cylinder` prims.

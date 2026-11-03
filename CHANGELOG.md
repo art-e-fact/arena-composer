@@ -23,6 +23,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   machine without a GPU. The viewer in a browser, whose WebGL2 has no ambient occlusion, draws as
   before.
 
+### Fixed
+
+- Isaac Sim's five replicator kitchens, the `replicator_kitchen_*` backgrounds, drew half of each
+  floor, wall and ceiling darker than the other half: their normals, written one per face corner,
+  were read as one per point.
+
 ## [0.6.0] - 2026-10-28
 
 ### Added
