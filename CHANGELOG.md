@@ -35,6 +35,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- An object added from the panel or by `add_object` goes to the scene when another file the task
+  includes holds objects too, as every RoboLab task includes a file of the lights they all share.
+  It went to that file, and so into every task including it, while its `on` went to the scene. An
+  object added to a task that holds objects of its own, but nothing else of the scene, goes to the
+  scene too, with its `on`.
 - A background Arena spawns kinematic, as it now spawns RoboLab's `table_oak_robolab`,
   `table_black_robolab` and `table_bamboo_robolab`, is no longer warned about as falling in the sim.
 - A number typed into a card's unset box, one showing —, is the number set, where it set 0.

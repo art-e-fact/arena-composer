@@ -505,7 +505,8 @@ def add_object(
     """Add an object to a scene, resting on another asset.
 
     Writes to whichever of the spec and the files it includes holds
-    `objects`, the last of them where the includes split it. The edit is
+    `objects`; where several do, to the last of them holding more of the
+    scene, and not to a file of settings several tasks share. The edit is
     validated against the merged spec and every file is left untouched if it
     fails. A
     spec already broken is refused only for what this edit introduces, with
