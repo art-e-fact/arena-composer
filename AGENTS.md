@@ -68,6 +68,7 @@ how a scene is drawn redraws its picture of the showcase: `python showcase/colla
 | [tour.rs](src/tour.rs), [record.rs](src/record.rs) | the README's video: a storyboard played with a pointer of its own, and recorded |
 | [python.rs](src/python.rs) | the PyO3 wrapper, behind the `python` feature |
 | [main.rs](src/main.rs) | the dev `arena-viewer`: a packed payload off disk, in the window or, given `VIEW=PNG` pairs, headless |
+| [web.rs](src/web.rs) | the window in a browser, on wasm32, over a payload [web/](web/)'s page fetched; read-only |
 
 [tests/](tests/) is Python only. Rust tests are inline `#[cfg(test)]` modules beside the code.
 [showcase/](showcase/) is a gallery of renders for a person to look over, outside `pytest`'s run:

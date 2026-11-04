@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
-use bevy::asset::{AssetPlugin, UnapprovedPathMode};
+use bevy::asset::{AssetMetaCheck, AssetPlugin, UnapprovedPathMode};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
@@ -57,14 +57,20 @@ pub fn run(scene: Scene, updates: Receiver<Scene>) {
                     primary_window: Some(Window {
                         title: format!("arena · {}", scene.env_name),
                         resolution: resolution(),
+                        // In a browser the window is a canvas, sized by the page.
+                        #[cfg(target_arch = "wasm32")]
+                        fit_canvas_to_parent: true,
                         ..default()
                     }),
                     ..default()
                 })
                 // Textures sit next to their USD out in the asset cache, and
                 // Bevy refuses paths outside its own asset root by default.
+                // Nothing writes a `.meta` beside one, and in a browser asking
+                // for it is a 404 per texture.
                 .set(AssetPlugin {
                     unapproved_path_mode: UnapprovedPathMode::Allow,
+                    meta_check: AssetMetaCheck::Never,
                     ..default()
                 }),
             PanOrbitCameraPlugin,
