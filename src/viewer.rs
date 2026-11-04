@@ -267,16 +267,9 @@ fn turn_page(world: &mut World) {
         // shared by path, so a new geometry's that the old layout drew too is
         // still loaded when its material asks for it.
         let root = spawn_scene(world, scene, &[]);
-        let stale: Vec<Entity> = world
-            .query_filtered::<Entity, With<ArenaRoot>>()
-            .iter(world)
-            .filter(|entity| *entity != root)
-            .collect();
-        for entity in stale {
-            // Children go with their parent, and with them the last hold on
-            // whatever `Built` let go of.
-            world.entity_mut(entity).despawn();
-        }
+        // Children go with their parent, and with them the last hold on
+        // whatever `Built` let go of.
+        world.despawn_all_where::<Entity, With<ArenaRoot>>(|entity| entity != root);
         if let Ok(mut text) = world
             .query_filtered::<&mut Text, With<Hud>>()
             .single_mut(world)

@@ -161,11 +161,11 @@ is held, and runs in `PostUpdate` between `EguiPostUpdateSet::ProcessOutput` and
 **Check a change here in a real window.** No unit test builds the full schedule, and the failure is
 silent: every drag, click and scroll reaches the camera.
 
-**Do not turn on `bevy_panorbit_camera`'s `bevy_egui` feature** to replace the gate. It is built
-against `bevy_egui` 0.40 and the panel draws with 0.42, so it compiles a second egui and gates the
-camera on an `EguiContext` nothing draws into: a duplicate dependency tree that does nothing. Its
-only two behaviours are the ones we do not want either — ignoring hover lets a press on the panel
-orbit, and `EguiFocusIncludesHover` stops a drag the moment it crosses onto the panel.
+**Do not turn on `bevy_panorbit_camera`'s `bevy_egui` feature** to replace the gate. Since 0.36 it
+builds against the panel's `bevy_egui`, but it asks egui alone, and egui reads the pointer as off the
+docked panel (`PointerOverPanel`'s doc comment says why), so a press on the panel orbits.
+`EguiFocusIncludesHover` adds egui's hover test, which misses the panel the same way, and stops a
+drag the moment it crosses onto a popup.
 
 ## Framing in what the panels leave
 

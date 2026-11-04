@@ -148,7 +148,7 @@ impl FromWorld for Sky {
 }
 
 /// The light a camera carries: the [`Sky`], and none of the ambient fill Bevy
-/// would otherwise add. Per camera in Bevy 0.19, not a resource, so every camera
+/// would otherwise add. Per camera since Bevy 0.19, not a resource, so every camera
 /// that draws the layout has to carry its own.
 pub fn sky(world: &mut World) -> (EnvironmentMapLight, AmbientLight) {
     let map = world.get_resource_or_init::<Sky>().0.clone();
