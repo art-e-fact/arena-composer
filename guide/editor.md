@@ -10,7 +10,7 @@ arena-view environments/tasks/banana_in_bowl.yaml
 ```
 
 <!-- assets.png -->
-[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/fd434200-4132-4022-b7a3-07145d984e3d)](https://github.com/user-attachments/assets/fd434200-4132-4022-b7a3-07145d984e3d)
+[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce)](https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce)
 
 > [!TIP]
 > Leave it open while you edit the YAML in your text editor, or while your agent works on it: the
@@ -19,8 +19,9 @@ arena-view environments/tasks/banana_in_bowl.yaml
 ## The window
 
 - **The view.** Drag to orbit, right-drag to pan, scroll to zoom. Click something to pick it: its
-  card opens and its node in the graph is outlined. Hovering outlines what a click would pick, a
-  double-click turns the camera to it, and a click on the backdrop lets go. Right-click it for a
+  card opens and its node in the graph is outlined. Hovering lights up what a click would pick: it
+  is tinted, and outlined even where something stands in front of it. A double-click turns the
+  camera to it, and a click on the backdrop lets go. Right-click it for a
   menu: the relations naming it (hover one to draw it, click it to open its card), *+ relation* to
   add one with it as the subject, its kind and then what it is placed against picked from the
   submenus, and *remove*.
@@ -44,7 +45,10 @@ Every entry of the spec is a card, folded to one line or open to its fields:
 - **Fields are menus wherever they can be.** An id, a kind or an asset is picked from what exists, so
   a card cannot name something that is not there.
 - **A relation shows its shape.** Hover its card to draw it over the layout, and click its 👁 to keep
-  it drawn. Drag one of its numbers and the shape moves with you; the edit is sent when you let go.
+  it drawn. Its subject is boxed, the box the solver keeps clear. Where the relation places the
+  subject's origin rather than its box — `position_limits_box`, `position_limits_cylindrical`,
+  `at_position`, `not_next_to` — a **+** marks the origin, which is seldom the box's middle. Drag
+  one of its numbers and the shape moves with you; the edit is sent when you let go.
 - **— is a number left unset,** which is not zero: an unset `at_position` axis is free. A limit,
   such as `position_limits_box`'s `x_limits`, is a min and a max side by side. Leave a side unset
   for an open side, and × beside a set side opens it again.
@@ -82,14 +86,14 @@ Central prop's details give the credit to keep with whatever you share that uses
 ## The spatial graph
 
 <!-- graph.png -->
-[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/0def0ae7-592f-4485-b66a-03ef5d6bf848)](https://github.com/user-attachments/assets/0def0ae7-592f-4485-b66a-03ef5d6bf848)
+[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc)](https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc)
 
 The graph draws the spec the way Arena's own review GUI does: a node per object, and an edge per
 relation, labelled with its kind. What a thing is placed against is drawn below it, so the anchor
 ends up along the foot. A relation on one object alone is a chip on its node.
 
 - **Click** a node, a chip or a label to open its card in the panel.
-- **Hover** one to show it in the view: an object's box, or a relation's shape.
+- **Hover** one to show it in the view: an object lit up, or a relation's shape.
 - **Drag** to pan, and **scroll** to zoom. *fit*, or a double-click on the background, shows the
   whole graph.
 

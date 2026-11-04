@@ -45,6 +45,7 @@ use bevy_egui::egui::{self, Pos2, Rect, pos2, vec2};
 use bevy_egui::{
     EguiContext, EguiContexts, EguiFullOutput, EguiPostUpdateSet, EguiPrimaryContextPass, PrimaryEguiContext,
 };
+use bevy_panorbit_camera::PanOrbitCamera;
 use serde::{Deserialize, Deserializer};
 
 use crate::editor::Form;
@@ -511,7 +512,7 @@ impl Screen {
         let mut windows = world.query_filtered::<&Window, With<PrimaryWindow>>();
         let window = windows.single(world).ok()?;
         let window = Rect::from_min_size(Pos2::ZERO, vec2(window.width(), window.height()));
-        let mut cameras = world.query_filtered::<(&Camera, &GlobalTransform), With<Camera3d>>();
+        let mut cameras = world.query_filtered::<(&Camera, &GlobalTransform), With<PanOrbitCamera>>();
         let (camera, transform) = cameras.single(world).ok()?;
         // Set by the panel once it has been laid out: `editor::in_the_view`
         // puts the view at minus the offset, its full size.

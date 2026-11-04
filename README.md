@@ -21,9 +21,9 @@
 <table>
   <tr>
     <!-- assets.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/fd434200-4132-4022-b7a3-07145d984e3d"><img src="https://github.com/user-attachments/assets/fd434200-4132-4022-b7a3-07145d984e3d" alt="The visual editor with the asset browser searched"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce"><img src="https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce" alt="The visual editor with the asset browser searched"></a></td>
     <!-- graph.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/0def0ae7-592f-4485-b66a-03ef5d6bf848"><img src="https://github.com/user-attachments/assets/0def0ae7-592f-4485-b66a-03ef5d6bf848" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc"><img src="https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>

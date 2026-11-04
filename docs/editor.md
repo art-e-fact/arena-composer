@@ -19,6 +19,7 @@ spec, every add picked from the vocabulary.
 | [thumbnails.rs](../src/editor/thumbnails.rs) | asset pictures, for the browser's tiles, the objects' cards and their nodes |
 | [drop.rs](../src/editor/drop.rs) | dragging an asset onto the layout |
 | [pick.rs](../src/editor/pick.rs) | a click in the view: what it picks, and the double click that focuses the camera |
+| [highlight.rs](../src/editor/highlight.rs) | lighting up what is hovered: a tint, and a silhouette from a camera of its own |
 | [menu.rs](../src/editor/menu.rs) | the right-click menu in the view: an entry's relations, a relation to add, its removal |
 | [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
 
@@ -139,8 +140,8 @@ the card grows as it unfolds, so how far to scroll changes until it is open, and
 further than the card needs. After that the card is only outlined, until the background is
 clicked or the spec changes. The pick reaches the panel a frame late, since the dock is drawn after it.
 
-Hovering one shows it in the view as hovering its card does: a relation's shape, or a node's box
-(`relations::outline`). Whatever the view is drawing is orange in the graph too, the colour of a
+Hovering one shows it in the view as hovering its card does: a relation's shape, or a node's
+object lit up (`highlight`). Whatever the view is drawing is orange in the graph too, the colour of a
 relation's subject there, and a relation hovered or pinned in the panel lights its edge.
 
 The pan and zoom are the graph's own, a `TSTransform` from its points to the pane's. Keep it off
@@ -213,6 +214,11 @@ solved poses; see the module docs of [relations.rs](../src/editor/relations.rs).
 Two rules there are documented at their functions: the reported box already carries `Object.scale`
 (`layout::world_aabb`), and a spec's params are read with the vocabulary's defaults behind them.
 
+Every shape boxes its subject: that box is what the solver keeps clear, so it stays a box whatever
+lights up a hovered object. A cross marks the subject's origin only for the kinds whose loss holds
+the origin itself — the position limits, `at_position`, `not_next_to` — where an object can stand
+half out of a limits box and still pass. Elsewhere the origin, seldom the box's middle, is noise.
+
 A number being dragged is previewed before it is sent. `PanelState::editing` holds the value and
 its spec path, and `form::pending` lays it over the relation the gizmos are built from, so the
 shape follows the drag while the object stays where the last solve left it. The edit goes out once,
@@ -224,7 +230,7 @@ index under the param's path and sent as the whole pair, the one leaf a spec wit
 
 A click on something in the 3D view picks it as a click on its node in the graph does, through the
 same `Pick`: the panel opens its card and scrolls to it, and the graph outlines its node. Hovering
-outlines what a click would pick, as hovering its node does, and a double click brings the orbit
+lights up what a click would pick, as hovering its node does, and a double click brings the orbit
 camera round to it, as far off as `layout::fitting_distance` would frame it. A click on the backdrop
 drops the pick, as a click on the graph's background does. All of it is [pick.rs](../src/editor/pick.rs).
 
@@ -241,6 +247,25 @@ frame, and never while a button is held: a drag is turning the view, not pointin
 pointer is the view's at all is the camera gate's own answer, `pointer_in_the_view`
 ([mod.rs](../src/editor/mod.rs)), so whatever press the camera would take, the pick takes too, and
 neither takes one on the panels or on an asset being carried.
+
+## Lighting up what is hovered
+
+The hovered object is tinted and its silhouette traced ([highlight.rs](../src/editor/highlight.rs)).
+The tint swaps each piece's material for a copy pulled towards the subject's orange; it is
+depth-correct, so the part of an object hidden behind another stays as it was. The silhouette sees
+through: the lit pieces also go on a layer of their own (`MASK`), which a second `Camera3d` under
+the window's camera draws into a window-sized image, and a full-window `UiMaterial` traces that
+image's alpha, under the panels egui draws. So a mug inside a cabinet is traced, and the robot's
+stand under the table. The background is traced alone, since the pointer rests on it whenever it
+is on a wall or the floor, and an object reference, which draws nothing, keeps its box
+(`relations::outline`).
+
+Two rules follow. **Any query for the view's camera filters on `PanOrbitCamera`**: there are two
+`Camera3d` once something has been hovered, and a bare `Single<&Camera>` stops matching, which skips
+its system without a word. And the highlight is state, not a gizmo: the callers ask for it every
+frame (`Highlight::show`), and `apply` puts back whatever was not asked for again, so a caller that
+stops asking is all it takes to turn it off. The mask camera and the overlay are off while nothing
+is lit.
 
 ## The menu in the view
 
