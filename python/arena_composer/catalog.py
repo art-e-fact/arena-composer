@@ -32,7 +32,7 @@ import sys
 import types
 import typing
 from dataclasses import dataclass, field
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
@@ -245,7 +245,8 @@ class Field:
     """One parameter of a relation or task kind, as the control that edits it."""
 
     name: str
-    #: `number`, `int`, `bool`, `text`, `enum` or `node_ref`.
+    #: `number`, `int`, `bool`, `text`, `enum`, `node_ref` or `range`: a
+    #: `[min, max]` either side of which may be None, an open side.
     kind: str
     #: Whether the parameter accepts None. An optional number needs a way to say
     #: "unset" that a number box on its own cannot express.
@@ -370,6 +371,9 @@ def _field(param: inspect.Parameter, annotation: Any, ref: bool | None = None) -
     # accepts the enum's value as a string.
     if (choices := _enum(annotation)) is not None:
         return made("enum", optional=_accepts_none(annotation), options=choices)
+    # Its sides are what take None, so the field is not optional itself.
+    if _range(annotation, default):
+        return made("range", optional=False)
 
     base, optional = _unwrap(annotation)
     if base is bool:
@@ -440,6 +444,19 @@ def _unwrap(annotation: Any) -> tuple[Any, bool]:
         if len(rest) == 1:
             return rest[0], True
     return annotation, False
+
+
+def _range(annotation: Any, default: Any) -> bool:
+    """`annotation` is a `[min, max]` whose sides each take None: a
+    ``tuple[float | None, float | None]``, or a ``Sequence[float | None]``
+    defaulting to two, as `position_limits_box` takes its limits."""
+    members = get_args(annotation)
+    if get_origin(annotation) in (Sequence, list) and len(members) == 1:
+        # Only the default says how many: Arena asserts two in the constructor.
+        members = members * 2 if isinstance(default, list) and len(default) == 2 else ()
+    elif get_origin(annotation) is not tuple or len(members) != 2:
+        return False
+    return bool(members) and all(_unwrap(member) == (float, True) for member in members)
 
 
 def _accepts_none(annotation: Any) -> bool:

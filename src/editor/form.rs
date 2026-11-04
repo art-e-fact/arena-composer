@@ -670,7 +670,7 @@ fn relations(ui: &mut egui::Ui, form: &Form, state: &mut PanelState) -> BTreeSet
             .editing
             .as_ref()
             .and_then(|editing| relation_param(&editing.path))
-            .map(|(index, _)| index)
+            .map(|(index, ..)| index)
             .filter(|&index| index < count),
     );
     shown
@@ -760,22 +760,36 @@ fn add_menu(ui: &mut egui::Ui, label: &str, options: Vec<(String, Value)>, path:
 /// wrong relation.
 fn pending(relation: &Relation, index: usize, state: &PanelState) -> Option<Relation> {
     let editing = state.editing.as_ref()?;
-    let (at, name) = relation_param(&editing.path)?;
+    let (at, name, side) = relation_param(&editing.path)?;
     if at != index {
         return None;
     }
+    let value = match side {
+        None => Value::Number(editing.value),
+        // A side of a range: the pair as the spec has it, one side moved.
+        Some(side) => {
+            let mut pair = relation.params.get(name).and_then(Value::as_range).unwrap_or_default();
+            pair[side] = Some(editing.value);
+            Value::range(pair)
+        }
+    };
     let mut dragged = relation.clone();
-    dragged.params.insert(name.to_owned(), Value::Number(editing.value));
+    dragged.params.insert(name.to_owned(), value);
     Some(dragged)
 }
 
-/// The relation and the parameter a path addresses, where it addresses one.
-fn relation_param(path: &[Step]) -> Option<(usize, &str)> {
+/// The relation and the parameter a path addresses, where it addresses one,
+/// and the side of a range parameter it addresses, where it does.
+fn relation_param(path: &[Step]) -> Option<(usize, &str, Option<usize>)> {
     match path {
-        [Step::Key(relations), Step::Index(index), Step::Key(params), Step::Key(name)]
+        [Step::Key(relations), Step::Index(index), Step::Key(params), Step::Key(name), side @ ..]
             if relations == "relations" && params == "params" =>
         {
-            Some((*index, name))
+            match side {
+                [] => Some((*index, name, None)),
+                [Step::Index(side @ 0..=1)] => Some((*index, name, Some(*side))),
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -828,6 +842,7 @@ pub(super) fn required_params(kind: &Kind, ids: &[&str]) -> Params {
                 "enum" => field.options.first().map_or(Value::Null, Value::text),
                 "node_ref" => ids.first().map_or(Value::Null, |id| Value::text(*id)),
                 "number" | "int" => Value::Number(0.0),
+                "range" => Value::range([None, None]),
                 "bool" => Value::Bool(false),
                 _ => Value::text(""),
             };
@@ -999,6 +1014,38 @@ mod tests {
             Step::from("clearance_m"),
         ];
         assert!(pending(&relation, 3, &dragging(subtask)).is_none(), "not a relation parameter");
+    }
+
+    /// A side of a range being dragged moves that side of the pair, and the
+    /// other stays as the spec has it, set or open.
+    #[test]
+    fn a_dragged_side_of_a_range_moves_that_side_alone() {
+        let relation = Relation {
+            kind: "position_limits_box".into(),
+            subject: "bowl".into(),
+            params: Params::from([("x_limits".to_owned(), Value::range([Some(0.1), None]))]),
+            ..Default::default()
+        };
+        let dragging = |name: &str, side: usize| PanelState {
+            editing: Some(Editing {
+                path: vec![
+                    Step::from("relations"),
+                    Step::from(0usize),
+                    Step::from("params"),
+                    Step::from(name),
+                    Step::from(side),
+                ],
+                value: 0.5,
+                sent: false,
+            }),
+            ..PanelState::default()
+        };
+        let moved = |name: &str, side: usize| pending(&relation, 0, &dragging(name, side)).expect("a drag").params;
+        assert_eq!(moved("x_limits", 1)["x_limits"], Value::range([Some(0.1), Some(0.5)]));
+        assert_eq!(moved("x_limits", 0)["x_limits"], Value::range([Some(0.5), None]));
+        // Not in the spec yet: the kind's default, open both ways.
+        assert_eq!(moved("y_limits", 0)["y_limits"], Value::range([Some(0.5), None]));
+        assert!(pending(&relation, 0, &dragging("x_limits", 2)).is_none(), "a pair has two sides");
     }
 
     /// The texts drawn where they can be seen: inside the clip of whatever

@@ -8,7 +8,9 @@ not have is the two things this module adds:
   ``external_yaml`` — one file, or a list of them — and Arena merges them
   without overrides: a value lives in exactly one file, mappings merge key by
   key, and lists of entries with an ``id`` join in file order. An edit goes to
-  the file that holds the value it names, see :meth:`SpecFiles.locate`.
+  the file that holds the value it names, see :meth:`SpecFiles.locate`, and a
+  new entry of a list several files hold to the one holding its kin, see
+  :meth:`SpecFiles.owner`.
 * **What an edit drags with it.** Removing an object also has to remove the
   relations that name it and the object references inside it, and renaming one
   — an object's, the embodiment's, or the background's — has to carry every
@@ -44,6 +46,7 @@ from typing import Any, NamedTuple
 
 import yaml
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.representer import RoundTripRepresenter
 
 #: Key through which a task spec includes its scene.
@@ -236,22 +239,30 @@ class SpecFiles:
     def owner(self, key: str) -> Path:
         """The file that holds `key`, or the one an edit should add it to.
 
-        A key in more than one file — a mapping or a list of entries Arena
-        merges across them — is the last one's in merge order, the spec before
-        any include. A key nobody has goes with its kin: the scene's keys
-        together, the task's with the run's settings — so a missing ``task`` is
-        the task file's to fix, and a first ``cli_override_specs`` lands beside
-        the task, where the template keeps it. Arena's gear specs, before 0.3.1,
-        put the scene in the entry file and `env_cfg_override` in the include,
-        and this follows that layout too.
+        A key goes with its kin: the scene's keys together, the task's with the
+        run's settings. One in more than one file — a list of entries Arena
+        joins across them — is the last of them that holds its kin too, else
+        the last in merge order. RoboLab's tasks include their scene and a file
+        of settings every task shares, both holding `objects`: a new object
+        goes to the scene, beside the `on` that places it, and not into every
+        task. So does one added to a task holding objects of its own and
+        nothing else of the scene, since its `on` can go only to the scene's
+        `relations`: Arena joins no list without ids. A key nobody has goes to
+        a file holding its kin — so a missing ``task`` is the task file's to
+        fix, and a first ``cli_override_specs`` lands beside the task, where the
+        template keeps it. Arena's gear specs, before 0.3.1, put the scene in
+        the entry file and `env_cfg_override` in the include, and this follows
+        that layout too.
         """
+
+        def kin(document: Any) -> bool:
+            scene = key in _SCENE_KEYS
+            return any((other in _SCENE_KEYS) == scene for other in document if other not in (key, INCLUDE))
+
         holders = [path for path in self.merge_order if key in self.documents[path]]
         if holders:
-            return holders[-1]
-        for path, document in self.documents.items():
-            if any((other in _SCENE_KEYS) == (key in _SCENE_KEYS) for other in document if other != INCLUDE):
-                return path
-        return self.path
+            return next((path for path in reversed(holders) if kin(self.documents[path])), holders[-1])
+        return next((path for path, document in self.documents.items() if kin(document)), self.path)
 
     def locate(self, steps: list[Any]) -> tuple[Path, list[Any]]:
         """The file an edit at `steps`, a path into the merged spec, lands in,
@@ -261,7 +272,8 @@ class SpecFiles:
         index into a list of entries joined across files to the one entry it
         names, renumbered within its file. Where the walk runs out — a key or
         an entry no file has yet — the edit lands in the last file holding
-        what it got to, as :meth:`owner` places a whole key.
+        what it got to, and a top-level key no file has where :meth:`owner`
+        puts it.
         """
         if not any(steps[0] in document for document in self.documents.values()):
             return self.owner(str(steps[0])), list(steps)
@@ -695,10 +707,31 @@ def _relation_problems(spec: Any) -> list[str]:
         kind, params = relation.get("kind"), relation.get("params")
         if not isinstance(kind, str) or not registry.is_registered(kind):
             continue
-        cls = registry.get_object_relation_by_name(kind)
+        cls, params = registry.get_object_relation_by_name(kind), params if isinstance(params, dict) else {}
         # A binary relation's first argument is the reference, which Arena passes.
         given = () if cls.is_unary() else tuple(name for name in inspect.signature(cls.__init__).parameters)[1:2]
-        errors += _binding(f"relations.{index}.params", kind, cls, params if isinstance(params, dict) else {}, given)
+        errors += _binding(f"relations.{index}.params", kind, cls, params, given)
+        errors += _range_problems(f"relations.{index}.params", kind, params)
+    return errors
+
+
+def _range_problems(where: str, kind: str, params: dict[str, Any]) -> list[str]:
+    """The `range` params of relation `kind` against what `params` holds: a
+    `[min, max]`, each side a number or null, the min below the max. Arena's
+    constructor asserts both, naming the axis but not the relation."""
+    from arena_composer import catalog
+
+    fields = next((found.fields for found in catalog.relations() if found.name == kind), ())
+    errors = []
+    for name in (each.name for each in fields if each.kind == "range" and each.name in params):
+        value = params[name]
+        if not isinstance(value, list) or len(value) != 2 or not all(side is None or _number(side) for side in value):
+            errors.append(f"{where}.{name}: {kind} takes [min, max] here, each a number or null for an open side")
+        elif None not in value and value[0] >= value[1]:
+            errors.append(
+                f"{where}.{name}: {kind} reads it as [min, max], and {value[0]} is not below {value[1]}, so nothing"
+                " is ever in it"
+            )
     return errors
 
 
@@ -1130,6 +1163,12 @@ def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: t
     taken = [name for name in inspect.signature(cls.__init__).parameters if name not in ("self", *given)]
     unexpected = catalog.unexpected_params(cls, params)
     for name in unexpected:
+        # An axis's two bounds, which Arena now takes as one pair: difflib
+        # finds `x_limits` for `x_min` but not for `x_max`.
+        stem, _, end = str(name).rpartition("_")
+        if end in ("min", "max") and (pair := f"{stem}_limits") in taken:
+            errors.append(f"{where}.{name}: {label} takes no {name!r}; write {pair}: [min, max], null for an open side")
+            continue
         close = difflib.get_close_matches(str(name), taken, n=1)
         errors.append(f"{where}.{name}: {label} takes no {name!r}" + (f"; did you mean {close[0]!r}?" if close else ""))
     # Arena passes these whatever the params hold, so the build gets one twice.
@@ -1220,12 +1259,12 @@ def add_object(
     try:
         objects = files.section("objects")
         objects.append({"id": node_id, "registry_name": registry_name, "params": dict(params or {})})
-        changed, touched = [f"added object {node_id!r} ({registry_name})"], [f"objects.{_count(files, 'objects') - 1}"]
+        changed, touched = [f"added object {node_id!r} ({registry_name})"], [f"objects.{_appended(files, 'objects')}"]
         if on is not None:
             relations = files.section("relations")
             relations.append({"kind": "on", "subject": node_id, "reference": on, "params": {}})
             changed.append(f"added relation {node_id!r} on {on!r}")
-            touched.append(f"relations.{_count(files, 'relations') - 1}")
+            touched.append(f"relations.{_appended(files, 'relations')}")
     except TypeError as error:
         return Result.failed(str(error))
     return files.write(changed, tuple(touched))
@@ -1279,10 +1318,11 @@ def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     try:
         if op == "insert":
             # A single step names a top-level list, which may not exist yet,
-            # and may be joined across files: the entry goes on the end.
+            # and may be joined across files: the entry goes on the end of
+            # the list in the file `SpecFiles.owner` picks.
             target = files.section(key) if len(steps) == 1 else _walk(document, local)
             target.append(value)
-            index = _count(files, key) - 1 if len(steps) == 1 else len(target) - 1
+            index = _appended(files, key) if len(steps) == 1 else len(target) - 1
             changed = [f"added an entry to {_label(steps)}"]
             if steps == ["task", "subtasks"]:
                 changed += _fit_node_params(files, f"task.subtasks.{index}", target[-1])
@@ -1368,12 +1408,17 @@ _KEY_ORDER = (
 
 
 def _ordered(value: Any) -> Any:
-    """A mapping in the order a spec reads best.
+    """A value as a spec reads best: a mapping in a fixed key order, and a run
+    of numbers on one line, ``[0.5, null]``, as Arena's own specs write one.
 
     An edit arrives over MessagePack, where a mapping has whatever order the
     sender's map iterated in. These files are read by people, so a written
     entry gets a fixed key order instead of a fresh one each time.
     """
+    if isinstance(value, list) and value and all(item is None or _number(item) for item in value):
+        numbers = CommentedSeq(value)
+        numbers.fa.set_flow_style()
+        return numbers
     if not isinstance(value, dict):
         return value
     rank = {key: index for index, key in enumerate(_KEY_ORDER)}
@@ -1545,9 +1590,12 @@ def _introduced(
     return introduced, remaining
 
 
-def _count(files: SpecFiles, key: str) -> int:
-    """How many entries the list under `key` holds, joined across the files."""
-    return sum(len(document[key]) for document in files.documents.values() if isinstance(document.get(key), list))
+def _appended(files: SpecFiles, key: str) -> int:
+    """Where the entry just appended to the list under `key` sits in it, joined
+    across the files: the last of its owner's, which a later file's may follow."""
+    order = files.merge_order
+    held = [files.documents[path].get(key) for path in order[: order.index(files.owner(key)) + 1]]
+    return sum(len(entries) for entries in held if isinstance(entries, list)) - 1
 
 
 def _remove(files: SpecFiles, key: str, entries: list[Any]) -> None:

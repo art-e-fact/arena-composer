@@ -100,8 +100,9 @@ edit that landed. `_introduced` decides what is the same problem:
   not make every line below it read as new, and as a multiset, so a second entry wrong the same way
   as a first is new;
 - of two lines that read the same, the one at a path the edit `touched` is the new one — `apply`
-  and `add_object` pass the paths they wrote — and failing that, the later of two dangling slots
-  and the earlier of two lines.
+  and `add_object` pass the paths they wrote, an appended entry at the index it joins its list at
+  (`_appended`), short of the end where a later file holds the list too — and failing that, the
+  later of two dangling slots and the earlier of two lines.
 
 A pair on disk that does not read at all — a hand edit left a value in two files — has nothing to
 compare with, so an edit that makes it read lands, with everything wrong as `remaining_errors`. Two
@@ -126,7 +127,9 @@ leaves — `objects: null`, `relations: 'on'` — since it runs on specs the val
   `SpecFiles.owner`, for a key none has — a missing `task`, a first `cli_override_specs` — the file
   holding its kin: the scene's six keys together, the rest with the task. That covers the
   template's layout and the one Arena's gear specs had before 0.3.1, the scene in the entry file
-  and only `env_cfg_override` in the include.
+  and only `env_cfg_override` in the include. The same kin picks, of several files holding a list,
+  the one a new entry goes to: every RoboLab task includes its scene and then a file of settings
+  they all share, which holds their lights, and a new object goes to the scene, beside its `on`.
 - **The closest that exist** follow a name or id nothing declares (`_hint`, `_UNKNOWN`): from the
   registries for an asset, relation or task kind, from the spec's own ids for a slot, narrowed to
   the ids Arena allows there. Up to three within 0.1 of the best are offered, because a shared

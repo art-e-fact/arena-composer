@@ -49,6 +49,9 @@ Every entry of the spec is a card, folded to one line or open to its fields:
   subject's origin rather than its box — `position_limits_box`, `position_limits_cylindrical`,
   `at_position`, `not_next_to` — a **+** marks the origin, which is seldom the box's middle. Drag
   one of its numbers and the shape moves with you; the edit is sent when you let go.
+- **— is a number left unset,** which is not zero: an unset `at_position` axis is free. A limit,
+  such as `position_limits_box`'s `x_limits`, is a min and a max side by side. Leave a side unset
+  for an open side, and × beside a set side opens it again.
 - **⚠ marks an entry that is wrong.** Hover it to read what: red for what Arena would refuse to
   build, amber for what it builds but the sim will not do as meant, such as an object nothing
   places. It goes when the entry is fixed, however you fixed it.

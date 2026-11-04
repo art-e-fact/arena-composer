@@ -359,6 +359,53 @@ def test_an_edit_lands_in_whichever_included_file_holds_it(spec: Path):
     assert "apple" not in scene_of(spec).read_text()
 
 
+def lit(spec: Path, where: str) -> Path:
+    """`spec` with a light beside its scene's objects: in a file of settings
+    every task shares, included after the scene, as RoboLab's tasks have
+    theirs, or in the task itself. Returns the file holding the light."""
+    light = "objects:\n- id: light\n  registry_name: light\n  params:\n    intensity: 500.0\n"
+    if where == "task":
+        spec.write_text(TASK + light)
+        return spec
+    defaults = spec.parent.parent / "defaults.yaml"
+    defaults.write_text("env_cfg_override:\n  sim:\n    physics:\n      max_position_iteration_count: 32\n" + light)
+    spec.write_text(TASK.replace("external_yaml: ../scenes/scene.yaml", "external_yaml:\n- ../scenes/scene.yaml\n- ../defaults.yaml"))
+    return defaults
+
+
+@pytest.mark.parametrize("where", ["include", "task"])
+def test_a_new_object_goes_to_its_scene_and_not_beside_a_light(spec: Path, where: str):
+    """Every RoboLab task includes its scene, then a file of the settings they
+    all share, which holds their lights: both hold `objects`. A new object
+    went to the last of them, into every task, and its `on` to the scene. It
+    goes to the scene with its `on`, from the panel's insert as from
+    `add_object`; and from a task holding a light of its own too, since the
+    `on` can go nowhere else."""
+    held = lit(spec, where)
+    assert spec_edit.check(spec).ok, spec_edit.check(spec).errors
+    before = held.read_text()
+
+    result = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert result.ok and result.wrote == [str(scene_of(spec))], result
+    pear = {"id": "pear", "registry_name": "apple_02_objaverse_robolab", "params": {}}
+    result = spec_edit.apply(spec, "insert", ["objects"], pear)
+    assert result.ok and result.wrote == [str(scene_of(spec))], result
+    assert held.read_text() == before
+    merged = spec_edit.SpecFiles(spec).merged()
+    assert [obj["id"] for obj in merged["objects"]] == ["banana", "bowl", "distractor", "apple", "pear", "light"]
+
+
+def test_an_object_added_ahead_of_another_files_is_named_by_its_index(spec: Path):
+    """The new object joins the list ahead of the light, not at its end: a
+    refusal tells it from an older entry wrong the same way by that index."""
+    lit(spec, "include")
+    broken(spec, "apple_02", "aple_02")
+    result = spec_edit.add_object(spec, "pear", "aple_02_objaverse_robolab", on=TABLE)
+    assert not result.ok
+    assert result.errors[0].startswith("../scenes/scene.yaml: objects.3.registry_name:"), result.errors
+    assert result.remaining_errors[0].startswith("../scenes/scene.yaml: objects.2.registry_name:"), result
+
+
 def test_a_line_names_the_included_file_holding_what_it_is_about(spec: Path):
     defaults = split(spec)
     assert broken(spec, "apple_02_objaverse_robolab", "apple_02_objaverse", file=defaults)[0].startswith(
@@ -1249,6 +1296,32 @@ def test_a_tuple_param_holds_its_numbers_and_a_range_its_order(spec: Path):
         "task.yaml: task.subtasks.1.params.target_x_range: GoalPoseTask takes a list of 2 numbers here, [min, max]",
         "task.yaml: task.subtasks.1.params.target_z_range: GoalPoseTask reads it as [min, max], and 0.5 is above 0.1,"
         " so nothing is ever in it",
+    ]
+
+
+def test_a_limit_is_a_min_and_a_max_either_side_of_which_may_be_open(spec: Path):
+    """position_limits_box takes each axis as [min, max], null for an open side. The panel sets the
+    pair whole, and it is written on one line, as Arena's specs write it. Arena asserts its length
+    and order naming the axis but not the relation, so they are checked here."""
+    limits = {"kind": "position_limits_box", "subject": "banana", "params": {"x_limits": [0.5, None]}}
+    assert spec_edit.apply(spec, "insert", ["relations"], limits).ok
+    assert "x_limits: [0.5, null]" in scene_of(spec).read_text()
+
+    at = ["relations", 3, "params", "y_limits"]
+    assert spec_edit.apply(spec, "set", at, [-0.1, 0.1]).ok
+    assert "y_limits: [-0.1, 0.1]" in scene_of(spec).read_text()
+    assert spec_edit.apply(spec, "set", at, [0.4, 0.1]).errors == [
+        "../scenes/scene.yaml: relations.3.params.y_limits: position_limits_box reads it as [min, max], and 0.4"
+        " is not below 0.1, so nothing is ever in it"
+    ]
+    assert spec_edit.apply(spec, "set", at, [0.4]).errors == [
+        "../scenes/scene.yaml: relations.3.params.y_limits: position_limits_box takes [min, max] here, each a"
+        " number or null for an open side"
+    ]
+    # The bounds it took before Arena paired them name the pair to write.
+    assert spec_edit.apply(spec, "set", ["relations", 3, "params", "z_max"], 1.0).errors == [
+        "../scenes/scene.yaml: relations.3.params.z_max: position_limits_box takes no 'z_max'; write z_limits:"
+        " [min, max], null for an open side"
     ]
 
 

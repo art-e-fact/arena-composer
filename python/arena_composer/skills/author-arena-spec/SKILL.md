@@ -96,7 +96,7 @@ the conventions of a spec, and what to do when a check fails.
 | `warnings`: `X: no relation places it ...` | An object with nothing to say where it goes | Give it `on` a support, `at_position` or `position_limits` |
 | `warnings`: `relations.N: ... is ignored: ... is an anchor ...` | A relation on an anchor | Remove it. To move the anchor, give it an `initial_pose` in its `params` |
 | `warnings`: `<robot>: its origin ... is inside X's box ...` | The robot spawns inside the anchor | Give the robot, or the anchor, an `initial_pose` that clears the other |
-| `warnings`: `<background>: ... is a dynamic rigid body ...` | A background that falls in the sim, such as `table_oak_robolab` | Choose another background, and tell the user: the fix is Arena's |
+| `warnings`: `<background>: ... is a dynamic rigid body ...` | A background that falls in the sim | Choose another background, and tell the user: the fix is Arena's |
 
 ## Report
 
