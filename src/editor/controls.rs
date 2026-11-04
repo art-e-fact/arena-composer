@@ -93,7 +93,10 @@ fn control(ui: &mut egui::Ui, field: &Field, value: &Value, ids: &[&str], path: 
             menu(ui, &field.name, current, id_options(ids), set(path), width);
         }
         "number" | "int" => {
-            number(ui, value.as_number(), path, state);
+            number(ui, value.as_number(), path, state, |shown| set(path)(Value::Number(shown)));
+        }
+        "range" => {
+            range(ui, value, path, state);
         }
         "bool" => toggle(ui, matches!(value, Value::Bool(true)), path),
         "text" => {
@@ -141,15 +144,26 @@ pub fn text_field(ui: &mut egui::Ui, path: &[Step], current: &str, state: &mut P
 /// Sent only from an edit still in hand, and kept in hand once sent, so the
 /// number shows what was sent until the spec comes back carrying it. Escape
 /// drops the edit, and with it the text `DragValue` keeps for the value typed.
-fn number(ui: &mut egui::Ui, value: Option<f64>, path: &[Step], state: &mut PanelState) -> egui::Response {
+///
+/// `path` is where the edit is held, and `edit` the request it is sent as: a
+/// side of a [`range`] is held at its own index and sent as the whole pair.
+fn number(
+    ui: &mut egui::Ui,
+    value: Option<f64>,
+    path: &[Step],
+    state: &mut PanelState,
+    edit: impl FnOnce(f64) -> Request,
+) -> egui::Response {
     let editing = state.editing.as_ref().filter(|editing| editing.path == path);
     let held = editing.map(|editing| editing.value);
     let live = editing.is_some_and(|editing| !editing.sent);
     let mut shown = held.or(value).unwrap_or_default();
     let mut drag = egui::DragValue::new(&mut shown).speed(0.005).max_decimals(4);
     // No value is not zero: an unset `at_position.x` leaves the axis free,
-    // where 0.0 pins it to the origin. It drags from zero all the same.
-    if held.or(value).is_none() {
+    // where 0.0 pins it to the origin. It drags from zero all the same, and
+    // keeps the dash until it has moved: a click holds the edit at zero, and
+    // swapping the dash for a 0 under the caret loses what is then typed.
+    if value.is_none() && held.is_none_or(|held| held == 0.0) {
         drag = drag.custom_formatter(|_, _| "—".into());
     }
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
@@ -169,10 +183,63 @@ fn number(ui: &mut egui::Ui, value: Option<f64>, path: &[Step], state: &mut Pane
     if escaped || Some(shown) == value {
         state.editing = None;
     } else {
-        send(Request::Set { path: path.to_vec(), value: Value::Number(shown) });
+        send(edit(shown));
         state.editing = Some(Editing { path: path.to_vec(), value: shown, sent: true });
     }
     response
+}
+
+/// A `[min, max]` either side of which may be open, as `position_limits_box`
+/// takes an axis: a number per side, and a cross beside a set one that opens
+/// it again. Sent as the whole pair, the one leaf a spec that has none yet can
+/// take; opening the last set side drops it, back to the kind's default.
+/// Returns the two numbers.
+fn range(ui: &mut egui::Ui, value: &Value, path: &[Step], state: &mut PanelState) -> Vec<egui::Response> {
+    let Some(sides) = value.as_range() else {
+        ui.weak(format!("{value:?}"));
+        return Vec::new();
+    };
+    let edit = |pair: [Option<f64>; 2]| match pair {
+        [None, None] => Request::Remove { path: path.to_vec() },
+        _ => Request::Set { path: path.to_vec(), value: Value::range(pair) },
+    };
+    // Both halves cut from one strip, so a cross taller than a number does not
+    // push the second half below the first.
+    let gap = ui.spacing().item_spacing.x;
+    let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    let (strip, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let half = egui::vec2((strip.width() - gap) / 2.0, strip.height());
+    let mut numbers = Vec::new();
+    for (side, current) in sides.into_iter().enumerate() {
+        let corner = strip.left_top() + egui::vec2(side as f32 * (half.x + gap), 0.0);
+        // Right to left, so the cross keeps the far edge, as a row's does.
+        let layout = egui::Layout::right_to_left(egui::Align::Center);
+        let rect = egui::Rect::from_min_size(corner, half);
+        let ui = &mut ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
+        let open = current.is_some() && cross(ui, if side == 0 { "open the min" } else { "open the max" }).clicked();
+        let set = |shown| {
+            let mut pair = sides;
+            pair[side] = Some(shown);
+            edit(pair)
+        };
+        numbers.push(number(ui, current, &with(path, side), state, set));
+        // After the number, which may send an edit of its own as this click
+        // takes its focus: the opening has to land second.
+        if open {
+            let mut pair = sides;
+            pair[side] = None;
+            // A number typed into the other side goes with it, as the click
+            // would have sent it. That box hears it has lost the caret after
+            // this, and is not to send this side back.
+            let other = with(path, 1 - side);
+            if let Some(held) = state.editing.as_mut().filter(|editing| editing.path == other && !editing.sent) {
+                pair[1 - side] = Some(held.value);
+                held.sent = true;
+            }
+            send(edit(pair));
+        }
+    }
+    numbers
 }
 
 /// A checkbox, sent on the click. There is no half-made state to hold on to the
@@ -351,7 +418,9 @@ mod tests {
     #[test]
     fn a_number_entered_is_sent_once_and_kept() {
         let path = [Step::from("relations"), Step::from(1usize), Step::from("params"), Step::from("x")];
-        let field = |ui: &mut egui::Ui, state: &mut PanelState| number(ui, Some(0.5), &path, state).rect.center();
+        let field = |ui: &mut egui::Ui, state: &mut PanelState| {
+            number(ui, Some(0.5), &path, state, |shown| set(&path, Value::Number(shown))).rect.center()
+        };
         let mut panel = Panel::new();
         let at = panel.frame(vec![], field);
         panel.frame(click(at), field);
@@ -367,12 +436,32 @@ mod tests {
         assert_eq!(kept, Some((0.25, true)));
     }
 
+    /// A number typed over an unset one's dash is the number sent.
+    #[test]
+    fn a_number_typed_over_the_dash_is_sent() {
+        let path = [Step::from("relations"), Step::from(1usize), Step::from("params"), Step::from("x")];
+        let field = |ui: &mut egui::Ui, state: &mut PanelState| {
+            number(ui, None, &path, state, |shown| set(&path, Value::Number(shown))).rect.center()
+        };
+        let mut panel = Panel::new();
+        let at = panel.frame(vec![], field);
+        panel.frame(click(at), field);
+        panel.frame(vec![egui::Event::Text("0.1".into())], field);
+        panel.frame(key(egui::Key::Enter), field);
+        for _ in 0..3 {
+            panel.frame(vec![], field);
+        }
+        assert_eq!(sent(), [set(&path, Value::Number(0.1))]);
+    }
+
     /// Escape out of a number sends nothing — not even a frame later, when
     /// egui reports the lost focus again and `DragValue` still holds the text.
     #[test]
     fn a_number_escaped_from_is_not_sent() {
         let path = [Step::from("relations"), Step::from(1usize), Step::from("params"), Step::from("x")];
-        let field = |ui: &mut egui::Ui, state: &mut PanelState| number(ui, None, &path, state).rect.center();
+        let field = |ui: &mut egui::Ui, state: &mut PanelState| {
+            number(ui, None, &path, state, |shown| set(&path, Value::Number(shown))).rect.center()
+        };
         let mut panel = Panel::new();
         let at = panel.frame(vec![], field);
         panel.frame(click(at), field);
@@ -383,5 +472,63 @@ mod tests {
         }
         assert_eq!(sent(), []);
         assert!(panel.state.editing.is_none(), "the escaped value is still shown");
+    }
+
+    /// A side typed into goes as the whole pair, the other side as the spec
+    /// has it: an open one stays open.
+    #[test]
+    fn a_side_of_a_range_is_sent_as_the_pair() {
+        let path = [Step::from("relations"), Step::from(1usize), Step::from("params"), Step::from("x_limits")];
+        let value = Value::range([None, Some(0.4)]);
+        let field = |ui: &mut egui::Ui, state: &mut PanelState| range(ui, &value, &path, state)[0].rect.center();
+        let mut panel = Panel::new();
+        let at = panel.frame(vec![], field);
+        panel.frame(click(at), field);
+        panel.frame(vec![egui::Event::Text("0.1".into())], field);
+        panel.frame(key(egui::Key::Enter), field);
+        for _ in 0..3 {
+            panel.frame(vec![], field);
+        }
+        assert_eq!(sent(), [set(&path, Value::range([Some(0.1), Some(0.4)]))]);
+    }
+
+    /// Opening a side while a number is still being typed into the other
+    /// sends both at once, and only once: the typed box hears it has lost the
+    /// caret a frame later, and does not send the opened side back.
+    #[test]
+    fn opening_a_side_takes_what_the_other_was_typed() {
+        let path = [Step::from("relations"), Step::from(1usize), Step::from("params"), Step::from("x_limits")];
+        let value = Value::range([Some(0.1), Some(0.4)]);
+        let field = |ui: &mut egui::Ui, state: &mut PanelState| {
+            let numbers = range(ui, &value, &path, state);
+            // The min's cross is at the far end of its half, past its number.
+            let cross = numbers[0].rect.right_center() + egui::vec2(ui.spacing().item_spacing.x + 5.0, 0.0);
+            (cross, numbers[1].rect.center())
+        };
+        let mut panel = Panel::new();
+        let (cross, max) = panel.frame(vec![], field);
+        panel.frame(click(max), field);
+        panel.frame(vec![egui::Event::Text("0.5".into())], field);
+        panel.frame(click(cross), field);
+        for _ in 0..3 {
+            panel.frame(vec![], field);
+        }
+        assert_eq!(sent(), [set(&path, Value::range([None, Some(0.5)]))]);
+    }
+
+    /// Opening the one side set drops the pair, which hands it back to the
+    /// kind's default, open both ways.
+    #[test]
+    fn opening_the_last_set_side_drops_the_pair() {
+        let path = [Step::from("relations"), Step::from(1usize), Step::from("params"), Step::from("z_limits")];
+        let value = Value::range([Some(0.8), None]);
+        let field = |ui: &mut egui::Ui, _: &mut PanelState| {
+            let numbers = range(ui, &value, &path, &mut PanelState::default());
+            numbers[0].rect.right_center() + egui::vec2(ui.spacing().item_spacing.x + 5.0, 0.0)
+        };
+        let mut panel = Panel::new();
+        let cross = panel.frame(vec![], field);
+        panel.frame(click(cross), field);
+        assert_eq!(sent(), [Request::Remove { path: path.to_vec() }]);
     }
 }

@@ -216,7 +216,9 @@ Two rules there are documented at their functions: the reported box already carr
 A number being dragged is previewed before it is sent. `PanelState::editing` holds the value and
 its spec path, and `form::pending` lays it over the relation the gizmos are built from, so the
 shape follows the drag while the object stays where the last solve left it. The edit goes out once,
-when the drag ends.
+when the drag ends. A side of a `range`, such as `position_limits_box`'s `x_limits`, is held at its
+index under the param's path and sent as the whole pair, the one leaf a spec without it can take;
+`controls::range` has the rest.
 
 ## Picking in the view
 

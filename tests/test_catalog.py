@@ -97,6 +97,16 @@ def test_a_kind_lists_the_params_no_control_edits_and_whether_arena_vetted_it():
     assert "pick_up_object" not in by_name["PickAndPlaceTask"].other_params, "a field was listed twice"
 
 
+def test_a_limit_either_side_of_which_may_be_open_is_a_range():
+    """position_limits_box takes each axis as a [min, max] pair, None for an open side: a field
+    of its own. A tuple whose sides cannot be None, such as `target_x_range`, is not one."""
+    box = next(kind for kind in catalog.relations() if kind.name == "position_limits_box")
+    fields = {field.name: field for field in box.fields}
+    assert [fields[name].kind for name in ("x_limits", "y_limits", "z_limits")] == ["range"] * 3
+    assert (fields["x_limits"].default, fields["x_limits"].optional) == ([None, None], False)
+    assert not box.other_params
+
+
 def test_a_task_param_naming_a_node_says_the_class_it_needs():
     """The task asserts the class as Arena builds it, once Isaac Sim has
     started. Told only `node_ref`, agents opened a banana as a door."""

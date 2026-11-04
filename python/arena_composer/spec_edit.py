@@ -44,6 +44,7 @@ from typing import Any, NamedTuple
 
 import yaml
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.representer import RoundTripRepresenter
 
 #: Key through which a task spec includes its scene.
@@ -695,10 +696,31 @@ def _relation_problems(spec: Any) -> list[str]:
         kind, params = relation.get("kind"), relation.get("params")
         if not isinstance(kind, str) or not registry.is_registered(kind):
             continue
-        cls = registry.get_object_relation_by_name(kind)
+        cls, params = registry.get_object_relation_by_name(kind), params if isinstance(params, dict) else {}
         # A binary relation's first argument is the reference, which Arena passes.
         given = () if cls.is_unary() else tuple(name for name in inspect.signature(cls.__init__).parameters)[1:2]
-        errors += _binding(f"relations.{index}.params", kind, cls, params if isinstance(params, dict) else {}, given)
+        errors += _binding(f"relations.{index}.params", kind, cls, params, given)
+        errors += _range_problems(f"relations.{index}.params", kind, params)
+    return errors
+
+
+def _range_problems(where: str, kind: str, params: dict[str, Any]) -> list[str]:
+    """The `range` params of relation `kind` against what `params` holds: a
+    `[min, max]`, each side a number or null, the min below the max. Arena's
+    constructor asserts both, naming the axis but not the relation."""
+    from arena_composer import catalog
+
+    fields = next((found.fields for found in catalog.relations() if found.name == kind), ())
+    errors = []
+    for name in (each.name for each in fields if each.kind == "range" and each.name in params):
+        value = params[name]
+        if not isinstance(value, list) or len(value) != 2 or not all(side is None or _number(side) for side in value):
+            errors.append(f"{where}.{name}: {kind} takes [min, max] here, each a number or null for an open side")
+        elif None not in value and value[0] >= value[1]:
+            errors.append(
+                f"{where}.{name}: {kind} reads it as [min, max], and {value[0]} is not below {value[1]}, so nothing"
+                " is ever in it"
+            )
     return errors
 
 
@@ -1130,6 +1152,12 @@ def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: t
     taken = [name for name in inspect.signature(cls.__init__).parameters if name not in ("self", *given)]
     unexpected = catalog.unexpected_params(cls, params)
     for name in unexpected:
+        # An axis's two bounds, which Arena now takes as one pair: difflib
+        # finds `x_limits` for `x_min` but not for `x_max`.
+        stem, _, end = str(name).rpartition("_")
+        if end in ("min", "max") and (pair := f"{stem}_limits") in taken:
+            errors.append(f"{where}.{name}: {label} takes no {name!r}; write {pair}: [min, max], null for an open side")
+            continue
         close = difflib.get_close_matches(str(name), taken, n=1)
         errors.append(f"{where}.{name}: {label} takes no {name!r}" + (f"; did you mean {close[0]!r}?" if close else ""))
     # Arena passes these whatever the params hold, so the build gets one twice.
@@ -1368,12 +1396,17 @@ _KEY_ORDER = (
 
 
 def _ordered(value: Any) -> Any:
-    """A mapping in the order a spec reads best.
+    """A value as a spec reads best: a mapping in a fixed key order, and a run
+    of numbers on one line, ``[0.5, null]``, as Arena's own specs write one.
 
     An edit arrives over MessagePack, where a mapping has whatever order the
     sender's map iterated in. These files are read by people, so a written
     entry gets a fixed key order instead of a fresh one each time.
     """
+    if isinstance(value, list) and value and all(item is None or _number(item) for item in value):
+        numbers = CommentedSeq(value)
+        numbers.fa.set_flow_style()
+        return numbers
     if not isinstance(value, dict):
         return value
     rank = {key: index for index, key in enumerate(_KEY_ORDER)}

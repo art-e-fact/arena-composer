@@ -121,7 +121,8 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
             }
         }
         "at_position" => at_position(&mut draw, &args, origin, reach(bounds)),
-        "position_limits_box" => limits_box(&mut draw, &args, extent(placed)),
+        // `position_limits` is Arena's older name for the same relation.
+        "position_limits_box" | "position_limits" => limits_box(&mut draw, &args, extent(placed)),
         "position_limits_cylindrical" => limits_cylinder(&mut draw, &args, origin),
         "rotate_around_solution" => {
             heading(&mut draw, subject, bounds);
@@ -218,6 +219,13 @@ impl Args<'_> {
 
     fn number(&self, name: &str) -> Option<f32> {
         self.get(name)?.as_number().map(|value| value as f32)
+    }
+
+    /// A `range` param's sides, `None` an open one, as is a value that is no
+    /// pair.
+    fn range(&self, name: &str) -> [Option<f32>; 2] {
+        let sides = self.get(name).and_then(Value::as_range).unwrap_or_default();
+        sides.map(|side| side.map(|value| value as f32))
     }
 
     fn text(&self, name: &str) -> Option<&str> {
@@ -335,14 +343,14 @@ fn at_position(draw: &mut Draw, args: &Args, origin: Vec3, reach: f32) {
 /// grey frame out to the edge of the layout, where an unset bound leaves it
 /// open. The origin, not the bounds — an object can still poke out of it.
 fn limits_box(draw: &mut Draw, args: &Args, (mut min, mut max): Aabb) {
-    let names = [["x_min", "x_max"], ["y_min", "y_max"], ["z_min", "z_max"]];
     let mut walls = Vec::new();
-    for (axis, [low, high]) in names.into_iter().enumerate() {
-        if let Some(value) = args.number(low) {
+    for (axis, name) in ["x_limits", "y_limits", "z_limits"].into_iter().enumerate() {
+        let [low, high] = args.range(name);
+        if let Some(value) = low {
             min[axis] = value;
             walls.push((axis, value));
         }
-        if let Some(value) = args.number(high) {
+        if let Some(value) = high {
             max[axis] = value;
             walls.push((axis, value));
         }
@@ -501,6 +509,27 @@ mod tests {
         assert_eq!(args(&params, Some(&kind)).number("edge_margin_m"), Some(0.1));
         params.insert("edge_margin_m".into(), Value::Null);
         assert_eq!(args(&params, Some(&kind)).number("edge_margin_m"), None);
+    }
+
+    /// A range is its two sides, the kind's default where the spec says
+    /// nothing, and open where a side is null or the value is no pair.
+    #[test]
+    fn a_range_is_two_sides_either_of_which_may_be_open() {
+        let kind = Kind {
+            fields: vec![Field {
+                name: "x_limits".into(),
+                kind: "range".into(),
+                default: Value::range([None, None]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut params = Params::new();
+        assert_eq!(args(&params, Some(&kind)).range("x_limits"), [None, None]);
+        params.insert("x_limits".into(), Value::range([Some(0.5), None]));
+        assert_eq!(args(&params, Some(&kind)).range("x_limits"), [Some(0.5), None]);
+        params.insert("x_limits".into(), Value::Number(0.5));
+        assert_eq!(args(&params, Some(&kind)).range("x_limits"), [None, None]);
     }
 
     /// The `on` support is the parent's top inset by the margin, whole when

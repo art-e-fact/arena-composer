@@ -132,6 +132,11 @@ impl Value {
     pub fn text(value: impl Into<String>) -> Self {
         Value::Text(value.into())
     }
+
+    /// A `range` param, `null` on an open side.
+    pub fn range(sides: [Option<f64>; 2]) -> Self {
+        Value::List(sides.map(|side| side.map_or(Value::Null, Value::Number)).to_vec())
+    }
 }
 
 impl Value {
@@ -145,6 +150,23 @@ impl Value {
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Value::Text(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// A `range` param's `[min, max]`, `None` on an open side; `None` for a
+    /// value that is no such pair.
+    pub fn as_range(&self) -> Option<[Option<f64>; 2]> {
+        let side = |value: &Value| match value {
+            Value::Null => Some(None),
+            Value::Number(value) => Some(Some(*value)),
+            _ => None,
+        };
+        match self {
+            Value::List(sides) => match sides.as_slice() {
+                [min, max] => Some([side(min)?, side(max)?]),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -365,7 +387,7 @@ mod tests {
                 "kind": "position_limits_box",
                 "subject": "cube",
                 "reference": null,
-                "params": {"x_min": 0.55, "z_min": null, "side": "positive_x"},
+                "params": {"x_limits": [0.55, null], "z_limits": null, "relation_loss_weight": 2.0},
             }],
         }))
         .unwrap();
@@ -373,9 +395,10 @@ mod tests {
         let spec: Spec = rmp_serde::from_slice(&packed).unwrap();
         let params = &spec.relations[0].params;
         assert!(spec.relations[0].reference.is_none());
-        assert_eq!(params["x_min"].as_number(), Some(0.55));
-        assert_eq!(params["side"].as_text(), Some("positive_x"));
-        assert_eq!(params["z_min"], Value::Null);
+        assert_eq!(params["x_limits"].as_range(), Some([Some(0.55), None]));
+        assert_eq!(params["relation_loss_weight"].as_number(), Some(2.0));
+        assert_eq!(params["z_limits"], Value::Null);
+        assert_eq!(params["z_limits"].as_range(), None);
     }
 
     /// Python describes a kind with more than the form needs — whether Arena

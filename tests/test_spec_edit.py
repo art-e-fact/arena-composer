@@ -1252,6 +1252,32 @@ def test_a_tuple_param_holds_its_numbers_and_a_range_its_order(spec: Path):
     ]
 
 
+def test_a_limit_is_a_min_and_a_max_either_side_of_which_may_be_open(spec: Path):
+    """position_limits_box takes each axis as [min, max], null for an open side. The panel sets the
+    pair whole, and it is written on one line, as Arena's specs write it. Arena asserts its length
+    and order naming the axis but not the relation, so they are checked here."""
+    limits = {"kind": "position_limits_box", "subject": "banana", "params": {"x_limits": [0.5, None]}}
+    assert spec_edit.apply(spec, "insert", ["relations"], limits).ok
+    assert "x_limits: [0.5, null]" in scene_of(spec).read_text()
+
+    at = ["relations", 3, "params", "y_limits"]
+    assert spec_edit.apply(spec, "set", at, [-0.1, 0.1]).ok
+    assert "y_limits: [-0.1, 0.1]" in scene_of(spec).read_text()
+    assert spec_edit.apply(spec, "set", at, [0.4, 0.1]).errors == [
+        "../scenes/scene.yaml: relations.3.params.y_limits: position_limits_box reads it as [min, max], and 0.4"
+        " is not below 0.1, so nothing is ever in it"
+    ]
+    assert spec_edit.apply(spec, "set", at, [0.4]).errors == [
+        "../scenes/scene.yaml: relations.3.params.y_limits: position_limits_box takes [min, max] here, each a"
+        " number or null for an open side"
+    ]
+    # The bounds it took before Arena paired them name the pair to write.
+    assert spec_edit.apply(spec, "set", ["relations", 3, "params", "z_max"], 1.0).errors == [
+        "../scenes/scene.yaml: relations.3.params.z_max: position_limits_box takes no 'z_max'; write z_limits:"
+        " [min, max], null for an open side"
+    ]
+
+
 def test_a_lift_is_given_the_initial_pose_it_reads_before_placement(spec: Path):
     """A lift task sets its goal off its object's initial pose as it is
     built, before any solve; Arena gives one only to the anchor."""

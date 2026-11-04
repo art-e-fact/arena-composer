@@ -671,9 +671,10 @@ def list_kinds() -> dict[str, Any]:
 
     `relations` and `tasks` carry one entry per registered kind: its `name` as
     the spec writes it, a `summary`, and `fields` — each param with its
-    `kind` (`number`, `int`, `bool`, `text`, `enum` with `options`, or
-    `node_ref`, which names another entry's id), whether it is `required`, and
-    its `default`. `other_params` lists the params with a shape no field
+    `kind` (`number`, `int`, `bool`, `text`, `enum` with `options`,
+    `node_ref`, which names another entry's id, or `range`, a `[min, max]`
+    either side of which may be `null` for an open side), whether it is
+    `required`, and its `default`. `other_params` lists the params with a shape no field
     covers — a tuple range, a list of ids — by their annotated type.
     `agent_ready` marks the kinds Arena vetted for its own agent; the rest are
     registered all the same. A `unary` relation takes no `reference`.
