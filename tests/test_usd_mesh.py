@@ -145,6 +145,44 @@ def test_a_non_numeric_primvar_falls_back_to_the_attribute(tmp_path: Path) -> No
     assert surface.normals.tolist() == [[1, 0, 0]] * 4, "the token[] primvar is ignored"
 
 
+# A floor and the wall on its far edge, sharing two points: the room of Isaac's replicator
+# kitchens, which author a normal per face corner and leave the interpolation at USD's
+# default, `vertex` (beside the `token[]` primvar the test above covers). Read per point,
+# half of each floor and wall faced away from the light.
+ROOM_CORNER = """#usda 1.0
+(
+    defaultPrim = "Asset"
+    upAxis = "Z"
+    metersPerUnit = 1
+)
+
+def Xform "Asset"
+{
+    def Mesh "Room"
+    {
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (1, 1, 1), (0, 1, 1)]
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 2, 3, 3, 2, 4, 5]
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)]
+        uniform token subdivisionScheme = "none"
+    }
+}
+"""
+
+
+def test_a_normal_per_face_corner_is_read_per_corner_whatever_the_interpolation(tmp_path: Path) -> None:
+    """Eight normals on six points fit no interpolation but one per face corner.
+
+    Read per point, as the default `vertex` says, the wall took the floor's
+    normal at the two points they share.
+    """
+    usda = tmp_path / "asset.usda"
+    usda.write_text(ROOM_CORNER, encoding="utf-8")
+    normals = extract(open_stage(str(usda)))[0].surface.normals
+
+    assert normals.tolist() == [[0, 0, 1]] * 4 + [[0, -1, 0]] * 4
+
+
 # Two triangles folded 90 degrees along the edge from vertex 0 to vertex 1, authoring no
 # normals, as Fourier's GR1T2 does for every mesh. USD's default subdivision scheme is
 # `catmullClark`, so the fold is a smooth surface unless the scheme says `none`.

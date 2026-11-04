@@ -68,8 +68,9 @@ def read_mesh(prim: Any) -> Surface | None:
     if mesh.GetOrientationAttr().Get() == UsdGeom.Tokens.leftHanded:
         triangles = triangles[:, ::-1]
 
-    normals = _corner_values(_normals(prim, mesh), counts, indices, width=3)
-    if normals is None and mesh.GetSubdivisionSchemeAttr().Get() != UsdGeom.Tokens.none:
+    polygonal = mesh.GetSubdivisionSchemeAttr().Get() == UsdGeom.Tokens.none
+    normals = _corner_values(_normals(prim, mesh), counts, indices, width=3, polygonal=polygonal)
+    if normals is None and not polygonal:
         normals = _smooth_normals(points, indices, triangles)
 
     return Surface(
@@ -131,7 +132,7 @@ def _fan_triangulate(counts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _corner_values(
-    source: tuple[Any, str] | None, counts: np.ndarray, indices: np.ndarray, width: int
+    source: tuple[Any, str] | None, counts: np.ndarray, indices: np.ndarray, width: int, polygonal: bool = False
 ) -> np.ndarray | None:
     """Expand a (values, interpolation) pair to one value per face corner."""
     if source is None:
@@ -148,6 +149,15 @@ def _corner_values(
     elif interpolation == UsdGeom.Tokens.uniform and len(values) == len(counts):
         expanded = np.repeat(values, counts, axis=0)
     elif interpolation == UsdGeom.Tokens.faceVarying and len(values) == corners:
+        expanded = values
+    elif polygonal and len(values) == corners != int(indices.max()) + 1:
+        # As many values as face corners, on a polygon mesh with fewer points,
+        # can only be one per corner, whatever the interpolation says. The
+        # replicator kitchens' rooms author their normals so under USD's
+        # default, `vertex`: read per point, they turned half a floor dark. A
+        # subdivision surface's normals are its scheme's to define, and Isaac's
+        # robot stand authors some that fit neither reading: per corner, it drew
+        # nearly black where RTX draws it silver.
         expanded = values
     elif len(values) > int(indices.max()):  # vertex or varying
         expanded = values[indices]
