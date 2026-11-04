@@ -20,7 +20,9 @@ def test_every_named_file_is_copied_and_renamed_and_a_missing_one_dropped(tmp_pa
     (cache / "wood.png").write_bytes(b"wood")
     (cache / "basket.usd.png").write_bytes(b"basket")
     scene = {
-        "geometries": [[{"positions": b"\x00\x01", "textures": {"base_color": str(cache / "wood.png"), "normal": "/gone.png"}}]],
+        "geometries": [
+            {"id": "a1", "nodes": [{"positions": b"\x00\x01", "textures": {"base_color": str(cache / "wood.png"), "normal": "/gone.png"}}]}
+        ],
         "vocabulary": {"assets": [{"thumbnail": ""}]},
         "remote": [{"thumbnail": str(cache / "basket.usd.png")}, {"thumbnail": "/gone.png"}],
     }
@@ -31,7 +33,7 @@ def test_every_named_file_is_copied_and_renamed_and_a_missing_one_dropped(tmp_pa
     exported = export.export(payload, out)
     sent = msgpack.unpackb(exported.read_bytes(), raw=False)
 
-    node = sent["geometries"][0][0]
+    node = sent["geometries"][0]["nodes"][0]
     assert list(node["textures"]) == ["base_color"], "a missing texture keeps its slot"
     assert (out / "assets" / node["textures"]["base_color"]).read_bytes() == b"wood"
     assert node["positions"] == b"\x00\x01", "a blob came back as something else"

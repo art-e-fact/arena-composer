@@ -24,12 +24,13 @@ import random
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 import msgpack
 import yaml
 
 from arena_composer import catalog, cli, simready, spec_edit, viewer_process
-from arena_composer.payload import encode, encode_spec
+from arena_composer.payload import build_payload, encode_spec, pack
 from arena_composer.resolve_layout import resolve_layout_from_yaml
 
 # A spec is one or two small files, so they are polled rather than watched
@@ -82,21 +83,23 @@ def main(argv: list[str] | None = None) -> int:
     payload = _resolve(args.spec, args.seed, args.samples, remote=True)
 
     if args.payload:
-        args.payload.write_bytes(payload)
+        args.payload.write_bytes(pack(payload))
 
     return asyncio.run(_view(args.spec, args.seed, args.samples, payload, stamps))
 
 
-def _resolve(spec: Path, seed: int | None, samples: int, remote: bool = False) -> bytes:
-    """Resolve `spec` into a packed scene of `samples` layouts. Seconds of work."""
+def _resolve(spec: Path, seed: int | None, samples: int, remote: bool = False) -> dict[str, Any]:
+    """Resolve `spec` into a payload of `samples` layouts, built but not packed:
+    what goes into the pipe depends on what the window holds (`_send_layout`).
+    Seconds of work."""
     # Arena and the solver print progress to stdout; keep it off stdout so a
     # caller can still pipe this command's own output somewhere.
     with contextlib.redirect_stdout(sys.stderr):
-        return encode(resolve_layout_from_yaml(spec, seed=seed, samples=samples), remote=remote)
+        return build_payload(resolve_layout_from_yaml(spec, seed=seed, samples=samples), remote=remote)
 
 
 async def _view(
-    spec: Path, seed: int | None, samples: int, payload: bytes, stamps: dict[Path, int | None]
+    spec: Path, seed: int | None, samples: int, payload: dict[str, Any], stamps: dict[Path, int | None]
 ) -> int:
     """Draw `payload`, reloading it from `spec` until the window closes.
     `stamps` is the files as they stood when `payload` was solved from them."""
@@ -124,7 +127,9 @@ async def _view(
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop)
 
-    await _send(proc, payload)
+    # The geometry the window holds, by id: see `_send_layout`.
+    held: set[str] = set()
+    await _send_layout(proc, payload, held)
     # One solver, asked by the panel's edits and by changes on disk alike: two
     # solves at once could land out of order and leave the older layout drawn.
     # The files are stamped as `payload` was solved from them, and the panel
@@ -132,7 +137,7 @@ async def _view(
     # time. `reseed` asks the next solve to draw from a new seed.
     asked, reseed = asyncio.Event(), asyncio.Event()
     running = [
-        asyncio.create_task(_solve_when_asked(spec, seed, samples, proc, asked, reseed)),
+        asyncio.create_task(_solve_when_asked(spec, seed, samples, proc, asked, reseed, held)),
         asyncio.create_task(_reload_on_change(spec, proc, stamps, asked)),
         asyncio.create_task(_serve_requests(spec, proc, stamps, asked, reseed)),
         asyncio.create_task(_catch_up_on_pictures(spec, proc)),
@@ -158,6 +163,20 @@ async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
     assert proc.stdin is not None
     proc.stdin.write(viewer_process.pack_scene(payload))
     await proc.stdin.drain()
+
+
+async def _send_layout(proc: asyncio.subprocess.Process, payload: dict[str, Any], held: set[str]) -> None:
+    """Send a layout, naming by id alone the geometry the window holds, and
+    bring `held` up to what it holds after: this layout's geometry.
+
+    The window's reader keeps the geometry of the last layout it read and no
+    other (`src/wire.rs`), and every layout goes out through here, one at a
+    time — the opening one, then each solve's — so `held` is what it has. An
+    edit that leaves an asset alone sends its geometry as an id, not megabytes.
+    """
+    await _send(proc, pack(payload, held))
+    held.clear()
+    held.update(geometry["id"] for geometry in payload["geometries"])
 
 
 async def _serve_requests(
@@ -328,6 +347,7 @@ async def _solve_when_asked(
     proc: asyncio.subprocess.Process,
     asked: asyncio.Event,
     reseed: asyncio.Event,
+    held: set[str],
 ) -> None:
     """Re-resolve `spec` whenever `asked` — by an edit from the panel, a change
     on disk, or the panel asking for new layouts — and draw what comes out.
@@ -359,10 +379,10 @@ async def _solve_when_asked(
         # `asked` set again means the edits that arrived during this solve have
         # one of their own coming, so the panel goes on saying the view is
         # behind rather than blinking off and on.
-        await _draw(proc, spec, layout, errors, solving=asked.is_set())
+        await _draw(proc, spec, layout, held, errors, solving=asked.is_set())
 
 
-def _solved(spec: Path, seed: int | None, samples: int) -> tuple[bytes | None, list[str]]:
+def _solved(spec: Path, seed: int | None, samples: int) -> tuple[dict[str, Any] | None, list[str]]:
     """The scene `spec` resolves to, and what stopped it where it does not."""
     try:
         return _resolve(spec, seed, samples), []
@@ -378,11 +398,13 @@ def _solved(spec: Path, seed: int | None, samples: int) -> tuple[bytes | None, l
 async def _draw(
     proc: asyncio.subprocess.Process,
     spec: Path,
-    layout: bytes | None,
+    layout: dict[str, Any] | None,
+    held: set[str],
     errors: list[str] | None = None,
     solving: bool = False,
 ) -> None:
     """Send a layout, and behind it the spec as the file reads at this moment.
+    `held` is the geometry the window holds, as `_send_layout` keeps it.
 
     Two messages, because the spec a layout carries is the one its own solve
     began from, and an edit made during those seconds leaves that copy behind.
@@ -395,7 +417,7 @@ async def _draw(
     `_reload_on_change` asks for another solve once it reads again.
     """
     if layout is not None:
-        await _send(proc, layout)
+        await _send_layout(proc, layout, held)
     with contextlib.suppress(Exception):
         await _send(proc, encode_spec(spec, errors or [], solving=solving))
 

@@ -11,9 +11,9 @@ use bevy::image::ImageLoaderSettings;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::scene::Node;
+use crate::scene::{Geometry, Node, Scene};
 
 /// The prim a node was projected from, kept so a picked entity can be named.
 #[derive(Component)]
@@ -87,18 +87,54 @@ fn narrow(image: &mut Image, srgb: bool) {
     };
 }
 
-/// Spawn one entity per node, parented under `placement`, and return them by
-/// node: `None` for a node with nothing to draw.
+/// The mesh and material built for each node of a geometry, by the geometry's
+/// id: `None` for a node with nothing to draw.
+///
+/// A layout drawing a geometry again — another page of the same solve, the
+/// next solve, a second asset from the same USD — spawns from these rather than
+/// building and uploading it again. The handles here are what keep those
+/// assets alive between layouts, so the window lets go of the geometry a new
+/// solve does not draw ([`Built::keep_only`]).
+#[derive(Resource, Default)]
+pub struct Built(HashMap<String, Vec<Piece>>);
+
+/// What one node builds to.
+type Piece = Option<(Handle<Mesh>, Handle<StandardMaterial>)>;
+
+impl Built {
+    /// Drop what was built for any geometry `scene` does not draw.
+    pub fn keep_only(&mut self, scene: &Scene) {
+        self.0.retain(|id, _| scene.geometries.iter().any(|geometry| geometry.id == *id));
+    }
+}
+
+/// Spawn one entity per node of `geometry`, parented under `placement`, and
+/// return them by node: `None` for a node with nothing to draw. Built the first
+/// time a geometry is drawn, and taken from [`Built`] after that.
 ///
 /// `placement` keeps its own `Transform` — the solved pose, in Arena's frame —
 /// and the nodes need none of their own.
-pub fn spawn_geometry(world: &mut World, nodes: &[Node], placement: Entity) -> Vec<Option<Entity>> {
-    nodes
+pub fn spawn_geometry(world: &mut World, geometry: &Geometry, placement: Entity) -> Vec<Option<Entity>> {
+    let built = world.get_resource_or_init::<Built>().0.get(&geometry.id).cloned();
+    let built = built.unwrap_or_else(|| {
+        let built: Vec<_> = geometry
+            .nodes()
+            .iter()
+            .map(|node| {
+                let mesh = build_mesh(node)?;
+                let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
+                Some((mesh, build_material(node, world)))
+            })
+            .collect();
+        world.resource_mut::<Built>().0.insert(geometry.id.clone(), built.clone());
+        built
+    });
+    geometry
+        .nodes()
         .iter()
-        .map(|node| {
-            let mesh = build_mesh(node)?;
-            let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-            let material = build_material(node, world);
+        .zip(built)
+        .map(|(node, piece)| {
+            let (mesh, material) = piece?;
             let piece = world.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
@@ -305,12 +341,11 @@ mod tests {
 
         let mut drawn = 0;
         for asset in scene.assets() {
-            let nodes = scene.geometry_of(asset);
-            if nodes.is_empty() {
+            let Some(geometry) = scene.geometry(asset).filter(|geometry| !geometry.nodes().is_empty()) else {
                 continue;
-            }
+            };
             let placement = app.world_mut().spawn(asset.transform()).id();
-            spawn_geometry(app.world_mut(), nodes, placement);
+            spawn_geometry(app.world_mut(), geometry, placement);
             drawn += 1;
         }
         assert!(drawn > 0, "the payload placed nothing");

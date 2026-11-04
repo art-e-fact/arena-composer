@@ -23,15 +23,16 @@ use crate::scene::Scene;
 /// touches the interpreter and other threads in the host keep running.
 #[pyfunction]
 fn run_viewer_stdin(py: Python<'_>) -> PyResult<()> {
+    // One reader for the first scene and every one after, since a later
+    // layout names the geometry the first drew by its id alone.
+    let mut reader = crate::wire::SceneReader::new(std::io::stdin());
     let first = py
-        .detach(|| crate::wire::read_scene(&mut std::io::stdin()))
+        .detach(|| reader.read())
         .map_err(|e| PyValueError::new_err(format!("{e:#}")))?
         .ok_or_else(|| PyValueError::new_err("no scene arrived on stdin"))?;
 
-    // `std::io::stdin()` is one shared buffered handle, so the reader thread
-    // picks up exactly where the read above left off.
     let (sender, updates) = std::sync::mpsc::channel();
-    std::thread::spawn(move || crate::wire::forward_scenes(std::io::stdin(), sender));
+    std::thread::spawn(move || reader.forward(sender));
 
     py.detach(|| crate::viewer::run(first, updates));
     Ok(())

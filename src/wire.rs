@@ -9,45 +9,97 @@
 //! `arena_composer.view` to serve. stdout is free for this because Bevy logs
 //! to stderr — keep it that way, since one stray `println!` in the viewer
 //! would land mid-message and desynchronise the reader.
+//!
+//! A layout is most of a message's bytes, and most of those are the geometry
+//! the layout before it drew too. So `arena_composer.view._send_layout` names
+//! that by its id alone, and the reader fills it back in: [`SceneReader`].
 
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
+use anyhow::Context;
 use bevy::log::error;
 
-use crate::scene::Scene;
+use crate::scene::{Node, Scene};
 use crate::spec::Request;
 
-/// Read one scene, or `None` once the stream has ended.
-pub fn read_scene(stream: &mut impl Read) -> anyhow::Result<Option<Scene>> {
-    let mut length = [0u8; 4];
-    match stream.read_exact(&mut length) {
-        Ok(()) => {}
-        // A closed pipe reads as EOF, as does a scene cut short; both end it.
-        Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
-        Err(error) => return Err(error.into()),
-    }
-    let mut payload = vec![0; u32::from_be_bytes(length) as usize];
-    stream.read_exact(&mut payload)?;
-    Ok(Some(Scene::from_msgpack(&payload)?))
+/// Reads scenes off a stream, giving back the geometry a layout names by id
+/// alone from the layout before it.
+///
+/// It keeps the geometry of the last layout it read and no other, which is
+/// what `_send_layout` takes it to hold: a message carrying no layout, as an
+/// edit's first answer does, leaves that alone. Past the reader, every
+/// geometry carries its nodes.
+pub struct SceneReader<R> {
+    stream: R,
+    held: HashMap<String, Arc<Vec<Node>>>,
 }
 
-/// Send on every scene in `stream` until it ends.
-///
-/// Dropping `scenes` on the way out is the signal that no more are coming —
-/// the viewer closes its window on it.
-pub fn forward_scenes(mut stream: impl Read, scenes: Sender<Scene>) {
-    loop {
-        match read_scene(&mut stream) {
-            Ok(Some(scene)) => {
-                // An error here is the window being gone: nobody to draw for.
-                if scenes.send(scene).is_err() {
-                    return;
+impl<R: Read> SceneReader<R> {
+    pub fn new(stream: R) -> Self {
+        Self {
+            stream,
+            held: HashMap::new(),
+        }
+    }
+
+    /// Read one scene, or `None` once the stream has ended.
+    pub fn read(&mut self) -> anyhow::Result<Option<Scene>> {
+        let mut length = [0u8; 4];
+        match self.stream.read_exact(&mut length) {
+            Ok(()) => {}
+            // A closed pipe reads as EOF, as does a scene cut short; both end it.
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let mut payload = vec![0; u32::from_be_bytes(length) as usize];
+        self.stream.read_exact(&mut payload)?;
+        let mut scene = Scene::from_msgpack(&payload)?;
+        if scene.assets.is_some() {
+            self.fill(&mut scene)?;
+        }
+        Ok(Some(scene))
+    }
+
+    /// Give each of a layout's geometries its nodes, and keep them for the
+    /// next layout to name.
+    fn fill(&mut self, scene: &mut Scene) -> anyhow::Result<()> {
+        let mut held = HashMap::new();
+        for geometry in &mut scene.geometries {
+            let nodes = match geometry.nodes.take() {
+                Some(nodes) => nodes,
+                None => self.held.get(&geometry.id).cloned().with_context(|| {
+                    format!("geometry {} is named by its id, and the last layout did not draw it", geometry.id)
+                })?,
+            };
+            held.insert(geometry.id.clone(), nodes.clone());
+            geometry.nodes = Some(nodes);
+        }
+        self.held = held;
+        Ok(())
+    }
+
+    /// Send on every scene in the stream until it ends.
+    ///
+    /// Dropping `scenes` on the way out is the signal that no more are coming —
+    /// the viewer closes its window on it.
+    pub fn forward(mut self, scenes: Sender<Scene>) {
+        loop {
+            match self.read() {
+                Ok(Some(scene)) => {
+                    // An error here is the window being gone: nobody to draw for.
+                    if scenes.send(scene).is_err() {
+                        return;
+                    }
                 }
+                Ok(None) => return,
+                // A malformed scene leaves no way to find where the next
+                // starts, and a geometry named by an id the reader does not
+                // hold means the two ends no longer agree on what it holds.
+                Err(error) => return error!("scene stream: {error:#}"),
             }
-            Ok(None) => return,
-            // A malformed scene leaves no way to find where the next starts.
-            Err(error) => return error!("scene stream: {error:#}"),
         }
     }
 }
@@ -73,21 +125,55 @@ mod tests {
 
     /// The smallest scene there is, framed for the pipe.
     fn packed(env_name: &str) -> Vec<u8> {
-        let payload = rmp_serde::to_vec_named(&BTreeMap::from([("env_name", env_name)])).unwrap();
+        framed(&BTreeMap::from([("env_name", env_name)]))
+    }
+
+    fn framed(scene: &impl serde::Serialize) -> Vec<u8> {
+        let payload = rmp_serde::to_vec_named(scene).unwrap();
         [&(payload.len() as u32).to_be_bytes()[..], &payload].concat()
     }
 
     /// Two scenes written back to back come back as two.
     #[test]
     fn scenes_are_read_one_at_a_time() {
-        let mut stream = Cursor::new([packed("first"), packed("second")].concat());
-        assert_eq!(read_scene(&mut stream).unwrap().unwrap().env_name, "first");
-        assert_eq!(read_scene(&mut stream).unwrap().unwrap().env_name, "second");
-        assert!(read_scene(&mut stream).unwrap().is_none());
+        let mut reader = SceneReader::new(Cursor::new([packed("first"), packed("second")].concat()));
+        assert_eq!(reader.read().unwrap().unwrap().env_name, "first");
+        assert_eq!(reader.read().unwrap().unwrap().env_name, "second");
+        assert!(reader.read().unwrap().is_none());
+    }
+
+    /// A layout names what the layout before it drew by its id alone, and
+    /// gets it back whole — the same nodes, not a copy. What the reader keeps
+    /// is the last layout's and no other, and a message with no layout, an
+    /// edit's answer, keeps it as it was.
+    #[test]
+    fn a_layout_gets_back_what_the_one_before_drew() {
+        use serde_json::json;
+
+        let whole = |id: &str| json!({"id": id, "nodes": [{"path": format!("/{id}")}]});
+        let layout = |geometries: Vec<serde_json::Value>| framed(&json!({"assets": [], "geometries": geometries}));
+        let stream = [
+            layout(vec![whole("table"), whole("robot")]),
+            framed(&json!({"spec": {"env_name": "edited"}})),
+            layout(vec![json!({"id": "table"}), whole("bowl")]),
+            layout(vec![json!({"id": "robot"})]),
+        ];
+        let mut reader = SceneReader::new(Cursor::new(stream.concat()));
+
+        let opening = reader.read().unwrap().unwrap();
+        assert!(reader.read().unwrap().unwrap().geometries.is_empty());
+        let edited = reader.read().unwrap().unwrap();
+        let paths: Vec<&str> = edited.geometries.iter().map(|geometry| geometry.nodes()[0].path.as_str()).collect();
+        assert_eq!(paths, ["/table", "/bowl"]);
+        let shared = |scene: &Scene| scene.geometries[0].nodes.clone().unwrap();
+        assert!(Arc::ptr_eq(&shared(&opening), &shared(&edited)), "the table was decoded again");
+
+        let error = reader.read().expect_err("the robot was let go of a layout back");
+        assert!(format!("{error:#}").contains("geometry robot"), "{error:#}");
     }
 
     /// A request goes out framed the same way a scene comes in, so the reader
-    /// on the other end can be the mirror of `read_scene`.
+    /// on the other end can be the mirror of [`SceneReader::read`].
     #[test]
     fn a_request_is_framed_by_its_length() {
         use crate::spec::{Step, Value};
@@ -130,7 +216,7 @@ mod tests {
     #[test]
     fn the_channel_ends_with_the_stream() {
         let (sender, scenes) = std::sync::mpsc::channel();
-        forward_scenes(Cursor::new(packed("only")), sender);
+        SceneReader::new(Cursor::new(packed("only"))).forward(sender);
         assert_eq!(scenes.recv().unwrap().env_name, "only");
         assert!(scenes.recv().is_err());
     }

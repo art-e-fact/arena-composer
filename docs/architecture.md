@@ -103,6 +103,23 @@ the stream closes the window.
   `Regenerate`, a solve from a new seed, answered as an accepted edit is but with nothing written.
   The child's stdout is this channel and nothing else: Bevy logs to stderr.
 
+### Geometry, sent once
+
+A kitchen's layout is ~90 MB, nearly all of it geometry, and an edit seldom changes more than an
+asset's worth. So each geometry carries an id, a SHA-256 of its packed nodes (`payload._geometry`),
+and `view._send_layout` sends whole only what the last layout it sent did not draw; the rest go as
+`{"id": …}` alone. The viewer's reader (`wire::SceneReader`) fills those back in, so past it every
+geometry has its nodes. The two ends agree on one rule and nothing else: the window holds the last
+layout's geometry, which each layout replaces and a message without one leaves alone. So every
+layout bound for the window goes through `_send_layout`, the one place that rule is kept on this
+side: one sent any other way would change what the window holds behind its back. A geometry named by
+an id the reader does not hold ends the stream rather than drawing nothing.
+
+The window keeps the meshes and materials it built, by id (`spawn::Built`), and lets go of what a
+new solve does not draw. A page turn, or a solve that left an asset alone, builds and uploads
+nothing again. Every other payload — a render's, a `--payload` file, the web page's — goes whole
+(`payload.encode`).
+
 ### Two answers per edit
 
 Writing the YAML takes milliseconds and solving the layout takes seconds, so an edit is answered

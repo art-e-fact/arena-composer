@@ -18,8 +18,9 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::layout::{ArenaRoot, AssetId, Placed, View, framing, sky, spawn_lighting, spawn_scene};
-use crate::scene::{Asset, Scene};
+use crate::layout::{ArenaRoot, View, framing, sky, spawn_lighting, spawn_scene};
+use crate::scene::Scene;
+use crate::spawn::Built;
 
 /// The scene the app was launched with, kept so `setup` can read it.
 #[derive(Resource)]
@@ -225,6 +226,9 @@ fn apply_updates(world: &mut World) {
     if let Some(newest) = received.iter().rposition(|scene| scene.assets.is_some()) {
         let scene = received.swap_remove(newest);
         info!("drawing {} ({} assets)", scene.env_name, scene.assets().len());
+        // Let go of the geometry this solve does not draw. The layout still on
+        // screen holds its own handles until `turn_page` takes it down.
+        world.get_resource_or_init::<Built>().keep_only(&scene);
         world.insert_resource(Solved { scene, shown: None });
     }
     turn_page(world);
@@ -237,11 +241,11 @@ fn apply_updates(world: &mut World) {
 /// Draw the layout the panel's pager is on, where it is not the one drawn: a
 /// page turned, or a new solve landed.
 ///
-/// Another layout of the same solve stands the same pieces somewhere else,
-/// wherever each asset draws what it drew before, so those are moved rather
-/// than built again and a page turns at once, however heavy the scene. A new
-/// solve is drawn afresh, and so is a layout whose object set draws another
-/// member.
+/// Each is spawned afresh, from what was built for each geometry before
+/// ([`Built`]): another page of the same solve, or a solve that left an asset
+/// alone, builds and uploads nothing again, so a page turns at once, however
+/// heavy the scene. Only a geometry no layout drew before is built — an object
+/// set's other member, an asset the edit added.
 fn turn_page(world: &mut World) {
     let page = world.get_resource::<crate::editor::Form>().map_or(0, |form| form.page);
     let Some(solved) = world.get_resource::<Solved>() else {
@@ -255,39 +259,23 @@ fn turn_page(world: &mut World) {
     }
     world.resource_scope(|world, mut solved: Mut<Solved>| {
         let Solved { scene, shown } = &mut *solved;
-        let moved = match scene.layouts.get(page) {
-            Some(layout) => {
-                let moved = shown.is_some() && same_pieces(scene.assets(), &layout.assets);
-                scene.assets = Some(layout.assets.clone());
-                moved
-            }
-            None => false,
-        };
+        if let Some(layout) = scene.layouts.get(page) {
+            scene.assets = Some(layout.assets.clone());
+        }
         let scene = &*scene;
-        if moved {
-            let mut placements = world.query::<(&AssetId, &mut Transform)>();
-            for (id, mut transform) in placements.iter_mut(world) {
-                if let Some(asset) = scene.assets().iter().find(|asset| asset.id == id.0) {
-                    *transform = asset.transform();
-                }
-            }
-            world.insert_resource(Placed(scene.assets().to_vec()));
-        } else {
-            // The new root goes up before the old one comes down: textures are
-            // shared by path, so the overlap is what keeps them off the disk.
-            // Mesh and material assets are rebuilt either way — `Assets::add`
-            // mints a new one per call — and the old ones are freed with their
-            // handles.
-            let root = spawn_scene(world, scene, &[]);
-            let stale: Vec<Entity> = world
-                .query_filtered::<Entity, With<ArenaRoot>>()
-                .iter(world)
-                .filter(|entity| *entity != root)
-                .collect();
-            for entity in stale {
-                // Children go with their parent.
-                world.entity_mut(entity).despawn();
-            }
+        // The new root goes up before the old one comes down: a texture is
+        // shared by path, so a new geometry's that the old layout drew too is
+        // still loaded when its material asks for it.
+        let root = spawn_scene(world, scene, &[]);
+        let stale: Vec<Entity> = world
+            .query_filtered::<Entity, With<ArenaRoot>>()
+            .iter(world)
+            .filter(|entity| *entity != root)
+            .collect();
+        for entity in stale {
+            // Children go with their parent, and with them the last hold on
+            // whatever `Built` let go of.
+            world.entity_mut(entity).despawn();
         }
         if let Ok(mut text) = world
             .query_filtered::<&mut Text, With<Hud>>()
@@ -297,12 +285,6 @@ fn turn_page(world: &mut World) {
         }
         *shown = Some(page);
     });
-}
-
-/// Whether `to` draws the pieces `from` does, each asset its own, so that
-/// moving them is all it takes to go from one to the other.
-fn same_pieces(from: &[Asset], to: &[Asset]) -> bool {
-    from.len() == to.len() && from.iter().zip(to).all(|(a, b)| a.id == b.id && a.geometry == b.geometry)
 }
 
 fn spawn_camera(world: &mut World, scene: &Scene) {
@@ -357,8 +339,8 @@ fn hud_line(scene: &Scene) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::AssetId;
-    use crate::scene::{Asset, Node as GeometryNode};
+    use crate::layout::{AssetId, Placed};
+    use crate::scene::{Asset, Geometry, Node as GeometryNode};
 
     /// One asset at `position`, pointing at a geometry entry. The node itself
     /// is degenerate — no test here uploads a mesh.
@@ -372,7 +354,7 @@ mod tests {
                 geometry: Some(0),
                 ..default()
             }]),
-            geometries: vec![vec![GeometryNode::default()]],
+            geometries: vec![Geometry::new("a", vec![GeometryNode::default()])],
             ..default()
         }
     }
@@ -568,33 +550,54 @@ mod tests {
     }
 
     /// A solve of one asset drawing a layout at each of `xs`, along Arena's x,
-    /// each layout's asset drawing the geometry `pieces` gives it.
-    fn solved(xs: &[f32], pieces: &[usize]) -> Scene {
-        let layout = |x: f32, geometry: usize| crate::scene::Layout {
+    /// each layout's asset drawing the geometry `pieces` names. The table holds
+    /// what the layouts draw and nothing else, as a payload's does.
+    fn solved(xs: &[f32], pieces: &[&str]) -> Scene {
+        let mut names: Vec<&str> = Vec::new();
+        for name in pieces {
+            if !names.contains(name) {
+                names.push(name);
+            }
+        }
+        let layout = |x: f32, name: &str| crate::scene::Layout {
             assets: vec![Asset {
                 id: "a".into(),
                 role: "object".into(),
                 position_xyz: [x, 0.0, 0.0],
-                geometry: Some(geometry),
+                geometry: names.iter().position(|named| *named == name),
                 ..default()
             }],
             ..default()
         };
-        let layouts: Vec<_> = xs.iter().zip(pieces).map(|(&x, &geometry)| layout(x, geometry)).collect();
+        let layouts: Vec<_> = xs.iter().zip(pieces).map(|(&x, name)| layout(x, name)).collect();
         Scene {
             env_name: "t".into(),
             assets: Some(layouts[0].assets.clone()),
             layouts,
-            geometries: vec![vec![GeometryNode::default()], vec![GeometryNode::default()]],
+            geometries: names.iter().map(|name| Geometry::new(name, vec![triangle()])).collect(),
             ..default()
         }
     }
 
-    /// The window on `scene`, with a panel to page with.
+    /// A piece with something to build: one triangle.
+    fn triangle() -> GeometryNode {
+        GeometryNode {
+            positions: bytemuck::cast_slice(&[[0.0f32; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]).to_vec(),
+            indices: bytemuck::cast_slice(&[0u32, 1, 2]).to_vec(),
+            opacity: 1.0,
+            ..default()
+        }
+    }
+
+    /// The window on `scene`, with a panel to page with, and enough of an app
+    /// to build meshes and materials in; no renderer.
     fn paging(scene: Scene) -> (App, std::sync::mpsc::Sender<Scene>) {
         let (sender, updates) = std::sync::mpsc::channel();
         let mut app = App::new();
-        app.add_plugins(bevy::transform::TransformPlugin)
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default(), bevy::transform::TransformPlugin))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>()
             .init_resource::<crate::editor::Form>()
             .insert_resource(ResolvedScene(scene))
             .insert_resource(SceneUpdates(Mutex::new(updates)))
@@ -604,60 +607,89 @@ mod tests {
         (app, sender)
     }
 
-    /// Where the one asset stands, in Arena's x, and the root it hangs under.
-    fn drawn(app: &mut App) -> (f32, Entity) {
+    /// Where the one asset stands, in Arena's x.
+    fn drawn(app: &mut App) -> f32 {
         let world = app.world_mut();
-        let placed: Vec<(f32, Entity)> = world
-            .query_filtered::<(&GlobalTransform, &ChildOf), With<AssetId>>()
+        let placed: Vec<f32> = world
+            .query_filtered::<&GlobalTransform, With<AssetId>>()
             .iter(world)
-            .map(|(transform, parent)| (transform.translation().x, parent.parent()))
+            .map(|transform| transform.translation().x)
             .collect();
-        let [(x, root)] = placed.as_slice() else { panic!("expected one placement, got {placed:?}") };
+        let [x] = placed.as_slice() else { panic!("expected one placement, got {placed:?}") };
         let in_placed = world.resource::<Placed>().0[0].position_xyz[0];
         assert_eq!(in_placed, *x, "the relations are drawn against another layout");
-        (*x, *root)
+        *x
+    }
+
+    /// The meshes drawn, by id: holding none, so as not to keep them alive.
+    fn meshes(app: &mut App) -> Vec<bevy::asset::AssetId<Mesh>> {
+        let world = app.world_mut();
+        world.query::<&Mesh3d>().iter(world).map(|mesh| mesh.0.id()).collect()
     }
 
     /// A solve opens on its first layout, and the pager turns to the others.
-    /// They stand the same pieces elsewhere, so a turn moves what is drawn and
-    /// builds nothing.
+    /// They stand the same pieces elsewhere, so a turn builds nothing again.
     #[test]
-    fn a_page_turns_by_moving_what_is_drawn() {
-        let (mut app, _sender) = paging(solved(&[1.0, 2.0], &[0, 0]));
-        let (x, root) = drawn(&mut app);
-        assert_eq!(x, 1.0);
+    fn a_page_turns_without_building_again() {
+        let (mut app, _sender) = paging(solved(&[1.0, 2.0], &["crate", "crate"]));
+        assert_eq!(drawn(&mut app), 1.0);
+        let built = meshes(&mut app);
+        assert_eq!(built.len(), 1);
 
         app.world_mut().resource_mut::<crate::editor::Form>().page = 1;
         app.update();
-        assert_eq!(drawn(&mut app), (2.0, root), "the layout was built again to move it");
+        assert_eq!(drawn(&mut app), 2.0);
+        assert_eq!(meshes(&mut app), built, "the page turn built the crate again");
     }
 
     /// A layout whose object set draws another member draws other pieces, so
     /// turning to it builds them.
     #[test]
-    fn a_page_drawing_another_member_is_built_afresh() {
-        let (mut app, _sender) = paging(solved(&[1.0, 2.0], &[0, 1]));
-        let (_, root) = drawn(&mut app);
+    fn a_page_drawing_another_member_builds_it() {
+        let (mut app, _sender) = paging(solved(&[1.0, 2.0], &["crate", "bowl"]));
+        let built = meshes(&mut app);
 
         app.world_mut().resource_mut::<crate::editor::Form>().page = 1;
         app.update();
-        let (x, rebuilt) = drawn(&mut app);
-        assert_eq!(x, 2.0);
-        assert_ne!(rebuilt, root, "the other member was not drawn");
+        assert_eq!(drawn(&mut app), 2.0);
+        assert_ne!(meshes(&mut app), built, "the other member was not drawn");
     }
 
     /// An edit's solve keeps the page: the same env, solved again, moves only
     /// as far as the edit moved it.
     #[test]
     fn a_new_solve_stays_on_the_page() {
-        let (mut app, sender) = paging(solved(&[1.0, 2.0], &[0, 0]));
+        let (mut app, sender) = paging(solved(&[1.0, 2.0], &["crate", "crate"]));
         app.world_mut().resource_mut::<crate::editor::Form>().page = 1;
         app.update();
 
-        sender.send(solved(&[3.0, 4.0], &[0, 0])).expect("the viewer still listening");
+        sender.send(solved(&[3.0, 4.0], &["crate", "crate"])).expect("the viewer still listening");
         app.update();
-        assert_eq!(drawn(&mut app).0, 4.0);
+        assert_eq!(drawn(&mut app), 4.0);
         assert_eq!(app.world().resource::<crate::editor::Form>().page, 1);
+    }
+
+    /// A new solve builds only the geometry no layout drew before it: an asset
+    /// the edit left alone is drawn from what was built for it. What the solve
+    /// no longer draws is let go of, once nothing on screen holds it.
+    #[test]
+    fn a_new_solve_builds_only_what_was_not_drawn_before() {
+        let (mut app, sender) = paging(solved(&[1.0], &["crate"]));
+        let crate_mesh = meshes(&mut app);
+
+        sender.send(solved(&[3.0], &["crate"])).expect("the viewer still listening");
+        app.update();
+        assert_eq!(drawn(&mut app), 3.0);
+        assert_eq!(meshes(&mut app), crate_mesh, "an asset the edit left alone was built again");
+
+        sender.send(solved(&[3.0], &["bowl"])).expect("the viewer still listening");
+        app.update();
+        assert_ne!(meshes(&mut app), crate_mesh);
+        app.update();
+        assert!(
+            app.world().resource::<Assets<Mesh>>().get(crate_mesh[0]).is_none(),
+            "the crate is held after its last layout went"
+        );
     }
 
     /// A layout carries the spec its solve began from, so an edit made while it

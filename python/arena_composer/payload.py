@@ -29,13 +29,22 @@ last list it was sent.
 
 What is wrong with the spec rides with it, a line per problem at the entry it
 is about, for the panel to mark that entry's card — see :func:`_problems`.
+
+The geometry is most of the bytes, and an edit rarely changes much of it. So
+each geometry carries an id, a hash of its packed nodes, the same in every
+payload that draws the same thing, and `arena-view` sends a geometry's nodes
+once: a layout names by id alone what the layout before it drew (:func:`pack`),
+and the viewer's reader fills those back in from that one (``wire::SceneReader``).
+A file, a render and the web page get every geometry whole.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
+from collections.abc import Collection
 from dataclasses import asdict
 from functools import cache
 from pathlib import Path
@@ -87,7 +96,7 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
     written to a file is opened on its own by ``arena-viewer`` and has nothing
     else to fill the browser from; a viewer being fed already has the list.
     """
-    geometries: list[list[dict[str, Any]]] = []
+    geometries: list[dict[str, Any]] = []
     by_usd: dict[tuple[str, str], int] = {}
     boxes: dict[tuple[str, str], int] = {}
 
@@ -106,21 +115,20 @@ def build_payload(dump: dict[str, Any], remote: bool = True) -> dict[str, Any]:
             return None
         if not path:
             # The box it was placed by, once however many layouts stand it
-            # somewhere: the viewer moves a piece the next layout shares rather
-            # than building it again. It already carries the asset's scale, and
-            # the viewer applies that again.
+            # somewhere: one entry, so one id, sent and built once. It already
+            # carries the asset's scale, and the viewer applies that again.
             scale = asset.get("scale", [1.0, 1.0, 1.0])
             key = asset["id"], json.dumps([asset["bbox_min"], asset["bbox_max"], scale])
             if key not in boxes:
                 boxes[key] = len(geometries)
                 surface = box(np.divide(asset["bbox_min"], scale), np.divide(asset["bbox_max"], scale))
-                geometries.append([_encode_node(Node(asset["id"], surface, _STAND_IN))])
+                geometries.append(_geometry([_encode_node(Node(asset["id"], surface, _STAND_IN))]))
             return boxes[key]
         joint_pos = asset.get("joint_pos")
         key = path, json.dumps(joint_pos, sort_keys=True)
         if key not in by_usd:
             by_usd[key] = len(geometries)
-            geometries.append([_encode_node(node) for node in extract(open_stage(path), joint_pos)])
+            geometries.append(_geometry([_encode_node(node) for node in extract(open_stage(path), joint_pos)]))
         return by_usd[key]
 
     def placed(asset: dict[str, Any]) -> dict[str, Any]:
@@ -351,8 +359,19 @@ def _thumbnail(usd_path: str | None) -> str:
 
 
 def encode(dump: dict[str, Any], remote: bool = True) -> bytes:
-    """Build and serialize the payload."""
-    return msgpack.packb(build_payload(dump, remote), use_bin_type=True)
+    """Build and serialize the payload, every geometry whole."""
+    return pack(build_payload(dump, remote))
+
+
+def pack(payload: dict[str, Any], held: Collection[str] = ()) -> bytes:
+    """Serialize a built payload, naming each geometry in `held` by its id alone.
+
+    `held` is what the receiver kept of the last layout it was sent: the
+    geometry that layout drew, by id, and no other — see `arena-view`'s
+    ``_send_layout``. With nothing held, the payload stands on its own.
+    """
+    geometries = [{"id": geometry["id"]} if geometry["id"] in held else geometry for geometry in payload["geometries"]]
+    return msgpack.packb({**payload, "geometries": geometries}, use_bin_type=True)
 
 
 def encode_spec(
@@ -422,6 +441,13 @@ def encode_spec(
         },
         use_bin_type=True,
     )
+
+
+def _geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    """One asset's pieces, under an id hashed from their packed bytes: the same
+    in every payload that draws the same thing, in any process. Packing them to
+    hash costs under a tenth of a second for a kitchen's 90 MB."""
+    return {"id": hashlib.sha256(msgpack.packb(nodes, use_bin_type=True)).hexdigest(), "nodes": nodes}
 
 
 def _encode_node(node: Node) -> dict[str, Any]:

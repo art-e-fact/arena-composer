@@ -20,6 +20,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
+use std::sync::Arc;
 
 use crate::spec::{CatalogAsset, Problem, Spec, Vocabulary};
 
@@ -45,7 +46,7 @@ pub struct Scene {
     pub seed: Option<i64>,
     /// Extracted USD stages, shared by index — assets spawned from the same
     /// USD point at the same entry.
-    pub geometries: Vec<Vec<Node>>,
+    pub geometries: Vec<Geometry>,
     pub lighting: Lighting,
     pub viewer: Option<ViewerCfg>,
     /// The spec this message is about, for the editor panel to edit. See
@@ -96,12 +97,46 @@ impl Scene {
         self.assets.as_deref().unwrap_or_default()
     }
 
+    /// The geometry an asset draws, `None` when it draws none of its own.
+    pub fn geometry(&self, asset: &Asset) -> Option<&Geometry> {
+        asset.geometry.and_then(|index| self.geometries.get(index))
+    }
+
     /// The pieces to draw for an asset, empty when it contributes none.
     pub fn geometry_of(&self, asset: &Asset) -> &[Node] {
-        asset
-            .geometry
-            .and_then(|index| self.geometries.get(index))
-            .map_or(&[], Vec::as_slice)
+        self.geometry(asset).map_or(&[], Geometry::nodes)
+    }
+}
+
+/// One extracted USD stage: its pieces, under an id hashed from their bytes on
+/// the Python side, the same in every message that draws the same thing.
+///
+/// `arena-view` sends a geometry's nodes once. A layout names what the layout
+/// before it drew by its id alone, and [`crate::wire::SceneReader`] fills the
+/// nodes back in, so past the reader every geometry carries them. The window
+/// keeps what it built for each by id ([`crate::spawn::Built`]).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Geometry {
+    pub id: String,
+    /// Absent where the message named this geometry by its id alone. Shared,
+    /// because the reader keeps a layout's for the next to name.
+    pub nodes: Option<Arc<Vec<Node>>>,
+}
+
+impl Geometry {
+    /// The pieces, empty where the message named the geometry by id and
+    /// nothing has filled them in.
+    pub fn nodes(&self) -> &[Node] {
+        self.nodes.as_deref().map_or(&[], Vec::as_slice)
+    }
+
+    #[cfg(test)]
+    pub fn new(id: &str, nodes: Vec<Node>) -> Self {
+        Self {
+            id: id.into(),
+            nodes: Some(Arc::new(nodes)),
+        }
     }
 }
 

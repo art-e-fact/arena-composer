@@ -76,10 +76,10 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
     solving = threading.Event()
     solves: list[int] = []
 
-    def resolve(spec: Path, seed: int, samples: int) -> bytes:
+    def resolve(spec: Path, seed: int, samples: int) -> dict:
         solves.append(seed)
         assert solving.wait(timeout=5), "the test never released the solver"
-        return msgpack.packb({"assets": [], "spec": {"env_name": "solved"}}, use_bin_type=True)
+        return {"assets": [], "geometries": [], "spec": {"env_name": "solved"}}
 
     monkeypatch.setattr(view, "_resolve", resolve)
     monkeypatch.setattr(view.spec_edit, "apply", lambda *_: view.spec_edit.Result(ok=True, errors=[], changed=["set"]))
@@ -94,7 +94,7 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
     async def run() -> None:
         viewer = _Viewer()
         asked, reseed = asyncio.Event(), asyncio.Event()
-        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, 1, viewer, asked, reseed))
+        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, 1, viewer, asked, reseed, set()))
         reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked, reseed))
         for value in ("one", "two", "three"):
             viewer.edit(value)
@@ -123,9 +123,9 @@ def test_new_layouts_are_drawn_from_a_new_seed_that_later_solves_keep(monkeypatc
     would go back to the old seed's at the next edit."""
     solves: list[tuple[int, int]] = []
 
-    def resolve(spec: Path, seed: int, samples: int) -> bytes:
+    def resolve(spec: Path, seed: int, samples: int) -> dict:
         solves.append((seed, samples))
-        return msgpack.packb({"assets": [], "spec": {}}, use_bin_type=True)
+        return {"assets": [], "geometries": [], "spec": {}}
 
     monkeypatch.setattr(view, "_resolve", resolve)
     monkeypatch.setattr(view, "encode_spec", _packed)
@@ -135,7 +135,7 @@ def test_new_layouts_are_drawn_from_a_new_seed_that_later_solves_keep(monkeypatc
     async def run() -> None:
         viewer = _Viewer()
         asked, reseed = asyncio.Event(), asyncio.Event()
-        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, 5, viewer, asked, reseed))
+        solver = asyncio.create_task(view._solve_when_asked(tmp_path / "task.yaml", 42, 5, viewer, asked, reseed, set()))
         reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked, reseed))
 
         viewer.ask({"op": view.REGENERATE})
@@ -165,11 +165,11 @@ def test_a_layout_is_followed_by_the_spec_as_the_file_now_reads(monkeypatch, tmp
     )
     spec = tmp_path / "task.yaml"
     spec.write_text("current")
-    layout = msgpack.packb({"assets": [], "spec": {"env_name": "as the solve began"}}, use_bin_type=True)
+    layout = {"assets": [], "geometries": [], "spec": {"env_name": "as the solve began"}}
 
     async def run() -> None:
         viewer = _Viewer()
-        await view._draw(viewer, spec, layout, solving=True)
+        await view._draw(viewer, spec, layout, set(), solving=True)
         assert [a.get("assets") is not None for a in viewer.answers] == [True, False], "expected a layout, then a spec"
         assert viewer.answers[0]["spec"]["env_name"] == "as the solve began", "the layout was rewritten"
         assert viewer.answers[1]["spec"]["env_name"] == "current", "the file was not read again"
@@ -178,10 +178,32 @@ def test_a_layout_is_followed_by_the_spec_as_the_file_now_reads(monkeypatch, tmp
 
         # A solve that produced nothing still answers, with the reason.
         viewer.answers.clear()
-        await view._draw(viewer, spec, None, ["Exception: no layout"])
+        await view._draw(viewer, spec, None, set(), ["Exception: no layout"])
         assert [a["errors"] for a in viewer.answers] == [["Exception: no layout"]]
 
     asyncio.run(run())
+
+
+def test_a_layout_sends_whole_only_the_geometry_the_window_lacks(monkeypatch, tmp_path: Path):
+    """The window keeps the geometry of the last layout it was sent, so the
+    next names what that one drew by its id alone. What it keeps is that
+    layout's and no other: a geometry it drew two layouts back is sent whole."""
+    monkeypatch.setattr(view, "encode_spec", _packed)
+
+    def geometry(name: str) -> dict:
+        return {"id": name, "nodes": [{"path": f"/{name}"}]}
+
+    async def run() -> list[list[dict]]:
+        viewer, held = _Viewer(), set()
+        for names in (["table", "robot"], ["table", "bowl"], ["robot", "bowl"]):
+            layout = {"assets": [], "geometries": [geometry(name) for name in names]}
+            await view._draw(viewer, tmp_path / "task.yaml", layout, held)
+        return [answer["geometries"] for answer in viewer.answers if "geometries" in answer]
+
+    opening, edited, again = asyncio.run(run())
+    assert opening == [geometry("table"), geometry("robot")], "the opening layout has to stand on its own"
+    assert edited == [{"id": "table"}, geometry("bowl")]
+    assert again == [geometry("robot"), {"id": "bowl"}], "named by an id the window has let go of"
 
 
 def test_a_refused_edit_is_answered_without_a_solve(monkeypatch, tmp_path: Path):
@@ -222,12 +244,12 @@ def test_a_change_on_disk_that_will_not_build_says_why(monkeypatch, tmp_path: Pa
     solving = threading.Event()
     solves: list[str] = []
 
-    def resolve(path: Path, seed: int, samples: int) -> bytes:
+    def resolve(path: Path, seed: int, samples: int) -> dict:
         solves.append(path.read_text())
         assert solving.wait(timeout=5), "the test never released the solver"
         if "[" in solves[-1]:
             raise ValueError("while parsing a flow sequence")
-        return msgpack.packb({"assets": [], "spec": {}}, use_bin_type=True)
+        return {"assets": [], "geometries": [], "spec": {}}
 
     _watch_quickly(monkeypatch, resolve)
 
@@ -236,7 +258,7 @@ def test_a_change_on_disk_that_will_not_build_says_why(monkeypatch, tmp_path: Pa
         _write(spec, "env_name: first\n", 1)
         asked = asyncio.Event()
         running = [
-            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event())),
+            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event(), set())),
             asyncio.create_task(view._reload_on_change(spec, viewer, view._watched(spec), asked)),
         ]
         _write(spec, "env_name: [\n", 2)
@@ -274,7 +296,7 @@ def test_an_edit_from_the_panel_is_not_solved_again_as_a_change_on_disk(monkeypa
         time.sleep(0.03)
         return view.spec_edit.Result(ok=True, errors=[], changed=["set"])
 
-    def resolve(path: Path, seed: int, samples: int) -> bytes:
+    def resolve(path: Path, seed: int, samples: int) -> dict:
         solves.append(path.read_text())
         raise RuntimeError("placement failed")
 
@@ -286,7 +308,7 @@ def test_an_edit_from_the_panel_is_not_solved_again_as_a_change_on_disk(monkeypa
         _write(spec, "env_name: first\n", 1)
         stamps, asked = view._watched(spec), asyncio.Event()
         running = [
-            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event())),
+            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event(), set())),
             asyncio.create_task(view._reload_on_change(spec, viewer, stamps, asked)),
             asyncio.create_task(view._serve_requests(spec, viewer, stamps, asked, asyncio.Event())),
         ]
@@ -314,10 +336,10 @@ def test_a_change_on_disk_and_an_edit_from_the_panel_are_solved_in_turn(monkeypa
         _write(path, f"env_name: {value}\n", 3)
         return view.spec_edit.Result(ok=True, errors=[], changed=["set"])
 
-    def resolve(path: Path, seed: int, samples: int) -> bytes:
+    def resolve(path: Path, seed: int, samples: int) -> dict:
         solves.append(path.read_text())
         assert solving.wait(timeout=5), "the test never released the solver"
-        return msgpack.packb({"assets": [], "env_name": solves[-1]}, use_bin_type=True)
+        return {"assets": [], "geometries": [], "env_name": solves[-1]}
 
     _watch_quickly(monkeypatch, resolve)
     monkeypatch.setattr(view.spec_edit, "apply", apply)
@@ -327,7 +349,7 @@ def test_a_change_on_disk_and_an_edit_from_the_panel_are_solved_in_turn(monkeypa
         _write(spec, "env_name: first\n", 1)
         stamps, asked = view._watched(spec), asyncio.Event()
         running = [
-            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event())),
+            asyncio.create_task(view._solve_when_asked(spec, 42, 1, viewer, asked, asyncio.Event(), set())),
             asyncio.create_task(view._reload_on_change(spec, viewer, stamps, asked)),
             asyncio.create_task(view._serve_requests(spec, viewer, stamps, asked, asyncio.Event())),
         ]
