@@ -163,8 +163,10 @@ composer's, the pictures themselves and Isaac Sim's log under `<spec>/`, a `test
 
 A camera is scored by how far the composer's colours are from Isaac Sim's once exposure is matched:
 one gain per pair, then the mean difference in sRGB, 0–255, over 8×8-pixel blocks, leaving out the
-composer's backdrop, where Isaac Sim shows its sky. A camera Isaac Sim renders dark, which stands
-inside something, is skipped. A camera fails when its error rises more than 3 above the one
+composer's backdrop, where Isaac Sim shows its sky. A close-up that another object blocks, standing
+inside its box or behind it, turns about the vertical, 45° at a time, until it sees its own object
+([cameras.py](../parity/cameras.py)). A camera Isaac Sim still renders dark, inside something the
+objects' boxes miss, such as a kitchen's cabinets, is skipped. A camera fails when its error rises more than 3 above the one
 [parity/baseline.json](../parity/baseline.json) records, so a change that draws further from Isaac
 Sim fails a test. A change that draws closer lowers the error; record it with `--write-baseline`,
 and the next run holds it.

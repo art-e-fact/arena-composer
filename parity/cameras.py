@@ -2,7 +2,8 @@
 
 Shared by both sides, so numpy is all it needs: `compare.py` writes the recipes from the composer's
 solve, and `isaac_capture.py` places them inside Isaac Sim once physics has moved things, so a prop
-that rolled is still in its close-up. The composer then draws from the cameras Isaac reports.
+that rolled is still in its close-up, and a close-up another object blocks turns until it sees its
+own. The composer then draws from the cameras Isaac reports.
 """
 
 import math
@@ -11,6 +12,8 @@ import numpy as np
 
 HALF_FOV = math.radians(45) / 2
 CLOSE_UPS = 12
+#: The turns about the vertical a blocked close-up tries, in degrees, in order: 0 first, so a clear one stays put.
+TURNS = (0, 45, -45, 90, -90, 135, -135, 180)
 
 
 def recipes(dump: dict) -> dict:
@@ -43,19 +46,56 @@ def recipes(dump: dict) -> dict:
 
 
 def place(spec: dict, poses: dict) -> list[dict]:
-    """``spec``'s cameras as eye and look-at, each fitted to its boxes at ``poses``: id -> (pos, quat_xyzw)."""
+    """``spec``'s cameras as eye and look-at, each fitted to its boxes at ``poses``: id -> (pos, quat_xyzw).
+
+    A close-up another object blocks turns about the vertical, by the first of `TURNS` whose eye
+    stands outside every other object's box and whose sight line, up to where it enters its own
+    object's box, crosses none of them. One no turn clears keeps its direction. The background's
+    box holds everything and the robot's is mostly air, so neither blocks."""
+    world = {i: _world_box(box, *poses[i]) for i, box in spec["boxes"].items()}
     cams = []
     for cam in spec["cams"]:
         if "fit" not in cam:
             cams.append(cam)
             continue
-        corners = [_world_box(spec["boxes"][i], *poses[i]) for i in cam["fit"]]
-        lo, hi = np.min([c[0] for c in corners], 0), np.max([c[1] for c in corners], 0)
+        lo, hi = np.min([world[i][0] for i in cam["fit"]], 0), np.max([world[i][1] for i in cam["fit"]], 0)
         centre, radius = (lo + hi) / 2, max(np.linalg.norm(hi - lo) / 2, cam.get("min_radius", 0.15))
         direction = np.array(cam["dir"], float) / np.linalg.norm(cam["dir"])
-        eye = centre + direction * radius / math.sin(HALF_FOV) * 1.05
+        distance = radius / math.sin(HALF_FOV) * 1.05
+        eye = centre + direction * distance
+        if cam["name"].startswith("obj_"):
+            others = [world[i] for i, box in spec["boxes"].items()
+                      if i not in cam["fit"] and box["role"] in ("object", "object_set")]  # fmt: skip
+            turned = (centre + _turned(direction, degrees) * distance for degrees in TURNS)
+            eye = next((e for e in turned if _sees(e, lo, hi, others)), eye)
         cams.append({"name": cam["name"], "eye": eye.tolist(), "lookat": centre.tolist()})
     return cams
+
+
+def _sees(eye: np.ndarray, lo: np.ndarray, hi: np.ndarray, others: list) -> bool:
+    """Whether ``eye`` sees the box ``lo``-``hi`` past ``others``: it stands outside each, and its sight
+    line to the box's centre, up to where it enters the box, crosses none."""
+    near = eye + ((lo + hi) / 2 - eye) * _enters(lo, hi, eye, (lo + hi) / 2)
+    return all(_enters(*box, eye, near) is None for box in others)
+
+
+def _turned(v: np.ndarray, degrees: float) -> np.ndarray:
+    """``v`` turned about Arena's vertical, Z."""
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    return np.array([c * v[0] - s * v[1], s * v[0] + c * v[1], v[2]])
+
+
+def _enters(lo, hi, a, b) -> float | None:
+    """How far along ``a`` → ``b``, 0-1, the segment enters the box ``lo``-``hi``; None if it misses."""
+    near, far = 0.0, 1.0
+    for k in range(3):
+        if b[k] == a[k]:
+            if not lo[k] <= a[k] <= hi[k]:
+                return None
+            continue
+        u, v = (lo[k] - a[k]) / (b[k] - a[k]), (hi[k] - a[k]) / (b[k] - a[k])
+        near, far = max(near, min(u, v)), min(far, max(u, v))
+    return near if near <= far else None
 
 
 def _world_box(box: dict, pos, quat) -> tuple[np.ndarray, np.ndarray]:
