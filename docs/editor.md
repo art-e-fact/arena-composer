@@ -207,8 +207,9 @@ than shaded, and a UI node is drawn past the tonemapper, so both arrive exactly 
 ## Relation gizmos
 
 Hovering a relation draws its shape over the layout, and the eye toggle keeps it drawn. The shapes
-are the ones Arena's loss strategies score (`isaaclab_arena/relations/relation_loss_strategies.py`),
-rebuilt from the solved poses; see the module docs of [relations.rs](../src/editor/relations.rs).
+are the ones Arena's loss strategies score
+(`isaaclab_arena/relations/optimization/losses/relation_loss_strategies.py`), rebuilt from the
+solved poses; see the module docs of [relations.rs](../src/editor/relations.rs).
 Two rules there are documented at their functions: the reported box already carries `Object.scale`
 (`layout::world_aabb`), and a spec's params are read with the vocabulary's defaults behind them.
 

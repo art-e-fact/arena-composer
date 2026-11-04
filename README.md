@@ -145,7 +145,8 @@ Arena venv at its commit.
 | 0.6.0 | [f8c3e789b2](https://github.com/isaac-sim/IsaacLab-Arena/commit/f8c3e789b2) (2026-10-27), on Isaac Lab 3.0 |
 
 Release 0.5.0 is synced with [dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362)
-(2026-10-20). arena-composer's `main` is synced with the table's last row.
+(2026-10-20). arena-composer's `main` is synced with
+[1a73ce1d00](https://github.com/isaac-sim/IsaacLab-Arena/commit/1a73ce1d00) (2026-11-03).
 
 ## Developing
 

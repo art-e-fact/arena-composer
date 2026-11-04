@@ -43,11 +43,11 @@ from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import (
 )
 from isaaclab_arena.environment_spec.arena_env_graph_spec import ArenaEnvGraphSpec
 from isaaclab_arena.environment_spec.placer_params_cfg_override import build_placer_params_from_override
+from isaaclab_arena.relations.geometry.passive_collision_objects import get_placement_collision_objects
 from isaaclab_arena.relations.object_placer import ObjectPlacer
-from isaaclab_arena.relations.passive_collision_objects import get_placement_collision_objects
-from isaaclab_arena.relations.placement_poses import get_pose_from_layout
 from isaaclab_arena.relations.placement_result import PlacementResult
 from isaaclab_arena.relations.relations import AlignWith, ClutterOn, FaceTo, NextTo, NotNextTo, On
+from isaaclab_arena.relations.runtime.placement_poses import get_pose_from_layout
 from isaaclab_arena.relations.validation.types import PlacementCheck
 from isaaclab_arena.utils.bounding_box import AxisAlignedBoundingBox
 from isaaclab_arena.utils.pose import Pose, PosePerEnv, PoseRange
@@ -277,7 +277,10 @@ def warnings(spec: ArenaEnvGraphSpec, assets: dict[str, Any], entries: list[dict
             )
     background = assets[spec.background.id]
     grounded = any(_unplaceable(asset) == GroundPlaneCfg.__name__ for asset in assets.values())
-    if background.usd_path and not grounded and (body := _falling_root(background.usd_path)):
+    # Arena may spawn it held over what its USD authors, as it spawns RoboLab's table fixtures kinematic.
+    props = background.spawn_cfg_addon.get("rigid_props")
+    held = props is not None and (props.kinematic_enabled or props.rigid_body_enabled is False)
+    if background.usd_path and not grounded and not held and (body := _falling_root(background.usd_path)):
         lines.append(
             f"{spec.background.id}: {body}, its USD's default prim, is a dynamic rigid body, enabled and not"
             " kinematic, and nothing in the spec holds it up, so in the sim it falls and nothing on it settles"
@@ -290,8 +293,8 @@ def _falling_root(usd_path: str) -> str | None:
 
     Arena takes a background's root to be non-physical: a rigid one spawns as authored and falls,
     with whatever ground the file has beside it left out, since only the default prim is spawned.
-    `table_oak_robolab`'s fixture does both; `maple_table_robolab` wraps the same table in a scene
-    whose root holds the table and a ground.
+    `table_oak_robolab`'s fixture does both, so Arena spawns it kinematic; `maple_table_robolab` wraps
+    the same table in a scene whose root holds the table and a ground.
     """
     stage = Usd.Stage.Open(localize(usd_path))  # held: a prim of a stage that is gone is invalid
     root = stage.GetDefaultPrim()

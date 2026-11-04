@@ -3,7 +3,7 @@
 //! What a relation *means* is a piece of geometry — the surface `on` lands on,
 //! the side `next_to` picks, the point `at_position` pins — and the panel shows
 //! it while a relation is hovered or pinned. Each shape is the one Arena's loss
-//! strategy scores (`isaaclab_arena/relations/relation_loss_strategies.py`),
+//! strategy scores (`isaaclab_arena/relations/optimization/losses/relation_loss_strategies.py`),
 //! rebuilt from the poses and bounds the resolver reported, so what is drawn is
 //! what the solver saw.
 //!
