@@ -311,10 +311,17 @@ def test_a_scene_holding_a_rigid_table_and_a_ground_does_not_fall(tmp_path: Path
     assert _falling_root(str(path)) is None
 
 
-def scene(tmp_path: Path, table_box: tuple, background: str = TABLE_OAK.format(root=""), ground: bool = False):
+def scene(
+    tmp_path: Path,
+    table_box: tuple,
+    background: str = TABLE_OAK.format(root=""),
+    ground: bool = False,
+    addon: dict | None = None,
+):
     """table_oak_robolab as the trial met it: a DROID at the origin, the table's centre, and on the
     table a bowl, a banana no relation places, a plate fixed by its initial pose, and a pin on the
-    table, the anchor. `table_box` is the table's world box; `ground` adds a ground plane."""
+    table, the anchor. `table_box` is the table's world box; `ground` adds a ground plane; `addon` is
+    the table's `spawn_cfg_addon`."""
     from isaaclab_arena.assets.object_library import GroundPlane
     from isaaclab_arena.utils.pose import Pose
 
@@ -326,17 +333,18 @@ def scene(tmp_path: Path, table_box: tuple, background: str = TABLE_OAK.format(r
         SimpleNamespace(kind="on", subject="bowl"),
     ]
 
-    def node(relations=(), initial_pose=None, anchor=False, usd_path=None):
+    def node(relations=(), initial_pose=None, anchor=False, usd_path=None, spawn_cfg_addon=None):
         return SimpleNamespace(
             get_relations=lambda: list(relations),
             get_initial_pose=lambda: initial_pose,
             is_anchor=anchor,
             usd_path=usd_path,
+            spawn_cfg_addon=spawn_cfg_addon or {},
         )
 
     assets = {
         "droid": node(),
-        "table": node(relations[:2], Pose.identity(), anchor=True, usd_path=str(usd)),
+        "table": node(relations[:2], Pose.identity(), anchor=True, usd_path=str(usd), spawn_cfg_addon=addon),
         "bowl": node(relations[2:]),
         "banana": node(),
         "plate": node(initial_pose=Pose(position_xyz=(0.3, 0.0, 0.4))),
@@ -372,8 +380,11 @@ def test_the_warnings_name_what_passes_every_check_and_cannot_work(tmp_path: Pat
 
 def test_a_room_round_the_robot_and_a_ground_under_the_background_are_no_warning(tmp_path: Path):
     """A kitchen's box holds the robot standing in it, as a table's cannot. A ground plane in the
-    spec holds a rigid background up, and so does one in the background's own default prim. The
-    banana and the pin are still wrong."""
+    spec holds a rigid background up, and so do one in the background's own default prim and Arena
+    spawning it kinematic, as it spawns RoboLab's tables. The banana and the pin are still wrong."""
+    from isaaclab.sim import RigidBodyPropertiesCfg
+
     room = ([-5.0, -5.0, -1.4], [5.0, 5.0, 3.0])
-    for case in ({"ground": True}, {"background": MAPLE_TABLE}):
+    kinematic = {"rigid_props": RigidBodyPropertiesCfg(kinematic_enabled=True)}
+    for case in ({"ground": True}, {"background": MAPLE_TABLE}, {"addon": kinematic}):
         assert [line.split(":")[0] for line in warnings(*scene(tmp_path, room, **case))] == ["banana", "relations.1"]

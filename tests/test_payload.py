@@ -134,8 +134,8 @@ def test_an_asset_with_no_published_usd_is_never_asked_about(tmp_path: Path, mon
     the space blank rather than asking forever."""
     monkeypatch.setattr(usd_assets, "_cache_dir", tmp_path)
     composed = catalog.Asset(
-        registry_name="deformable_cube", role="object", tags=[], object_type="deformable",
-        name="deformable_cube",
+        registry_name="deformable_cube_physx", role="object", tags=[], object_type="deformable",
+        name="deformable_cube_physx",
     )
     assert payload._asset(composed)["usd_path"] == ""
     assert payload._asset(composed)["thumbnail"] == ""

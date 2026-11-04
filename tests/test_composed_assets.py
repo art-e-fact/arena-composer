@@ -17,7 +17,7 @@ from arena_composer.spec_edit import SpecError
 
 def test_a_deformable_cube_is_drawn_as_its_bounding_box():
     # One of the entries the asset browser offers; its spawner is a `MeshCuboidCfg`.
-    cube = AssetRegistry().get_asset_by_name("deformable_cube")()
+    cube = AssetRegistry().get_asset_by_name("deformable_cube_physx")()
     entry = _asset_entry("cube", cube, {"role": "object"}, layout=None)
     assert entry["usd_path"] is None
 

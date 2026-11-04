@@ -103,9 +103,9 @@ What currently doesn't draw. Check here before treating a render bug as new.
 - Lights authored inside an asset.
 - Mirroring transforms (a negative determinant). `_place` does not reverse their winding, so a mesh
   under one is culled from outside unless its material is double-sided. No cached asset authors one.
-- Deformable objects (`deformable_cube`, `deformable_surface`, `deformable_teddy_bear`). They spawn
-  from a spawner config rather than a `usd_path`, and `payload.build_payload` draws their bounding box
-  in flat blue instead.
+- Deformable objects (`deformable_cube_physx`, `deformable_surface_physx`, `deformable_teddy_bear_physx`,
+  each with a `_newton` twin). They spawn from a spawner config rather than a `usd_path`, and
+  `payload.build_payload` draws their bounding box in flat blue instead.
 - Objects spawned from a shape config instead of a USD (`procedural_cube`, `procedural_table`,
   `sphere`). Arena bounds them by the shape and the payload draws that box, so `sphere` is a cube. Lights and `ground_plane` spawn no shape: they keep their configured pose
   and an empty box, the payload draws nothing for them, and a relation naming one is refused.

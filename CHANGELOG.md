@@ -8,6 +8,16 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Changed
 
+- arena-composer runs on IsaacLab-Arena's `main` at 1a73ce1d00 and no longer on f8c3e789b2, where
+  Arena's placement modules sat elsewhere: install it into an Arena venv at that commit. Layouts can
+  differ from the ones f8c3e789b2 solved, from the same seed, as Arena now draws each candidate's
+  seed from the spec's seed by a hash.
+- `position_limits_box` takes each axis as a pair, `x_limits: [min, max]`, with `null` for an open
+  side, as Arena now does, and no longer `x_min` to `z_max`: a spec still naming them is refused,
+  saying which to write. Its card edits an axis as a min and a max side by side, each with its own
+  × to open it again. A pair the wrong way round, or not two long, is refused naming the relation,
+  where Arena's build names only the axis. One written as `position_limits`, Arena's older name for
+  it, draws its shape too.
 - After an edit, `arena-view`'s window builds only the assets the edit changed, and turning to
   another layout builds nothing: the rest is kept from the layout before, where the whole scene was
   sent and built again. For a kitchen, an edit's layout is a tenth of a megabyte rather than 90. A
@@ -25,6 +35,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- An object added from the panel or by `add_object` goes to the scene when another file the task
+  includes holds objects too, as every RoboLab task includes a file of the lights they all share.
+  It went to that file, and so into every task including it, while its `on` went to the scene. An
+  object added to a task that holds objects of its own, but nothing else of the scene, goes to the
+  scene too, with its `on`.
+- A background Arena spawns kinematic, as it now spawns RoboLab's `table_oak_robolab`,
+  `table_black_robolab` and `table_bamboo_robolab`, is no longer warned about as falling in the sim.
+- A number typed into a card's unset box, one showing —, is the number set, where it set 0.
 - Isaac Sim's five replicator kitchens, the `replicator_kitchen_*` backgrounds, drew half of each
   floor, wall and ceiling darker than the other half: their normals, written one per face corner,
   were read as one per point.

@@ -505,7 +505,8 @@ def add_object(
     """Add an object to a scene, resting on another asset.
 
     Writes to whichever of the spec and the files it includes holds
-    `objects`, the last of them where the includes split it. The edit is
+    `objects`; where several do, to the last of them holding more of the
+    scene, and not to a file of settings several tasks share. The edit is
     validated against the merged spec and every file is left untouched if it
     fails. A
     spec already broken is refused only for what this edit introduces, with
@@ -671,9 +672,10 @@ def list_kinds() -> dict[str, Any]:
 
     `relations` and `tasks` carry one entry per registered kind: its `name` as
     the spec writes it, a `summary`, and `fields` — each param with its
-    `kind` (`number`, `int`, `bool`, `text`, `enum` with `options`, or
-    `node_ref`, which names another entry's id), whether it is `required`, and
-    its `default`. `other_params` lists the params with a shape no field
+    `kind` (`number`, `int`, `bool`, `text`, `enum` with `options`,
+    `node_ref`, which names another entry's id, or `range`, a `[min, max]`
+    either side of which may be `null` for an open side), whether it is
+    `required`, and its `default`. `other_params` lists the params with a shape no field
     covers — a tuple range, a list of ids — by their annotated type.
     `agent_ready` marks the kinds Arena vetted for its own agent; the rest are
     registered all the same. A `unary` relation takes no `reference`.

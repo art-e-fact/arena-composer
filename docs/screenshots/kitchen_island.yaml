@@ -75,10 +75,8 @@ relations:
 - kind: position_limits_box
   subject: plate
   params:
-    x_min: 2.55
-    x_max: 2.75
-    y_min: -4.0
-    y_max: -3.7
+    x_limits: [2.55, 2.75]
+    y_limits: [-4.0, -3.7]
 - kind: 'on'
   subject: apple
   reference: plate
@@ -112,17 +110,13 @@ relations:
 - kind: position_limits_box
   subject: milk
   params:
-    x_min: 3.3
-    x_max: 3.4
-    y_min: -3.5
-    y_max: -3.35
+    x_limits: [3.3, 3.4]
+    y_limits: [-3.5, -3.35]
 - kind: position_limits_box
   subject: mug
   params:
-    x_min: 2.2
-    x_max: 2.3
-    y_min: -3.95
-    y_max: -3.8
+    x_limits: [2.2, 2.3]
+    y_limits: [-3.95, -3.8]
 - kind: not_next_to
   subject: milk
   reference: plate
