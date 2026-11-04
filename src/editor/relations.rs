@@ -63,10 +63,16 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
 
     let bounds = world_aabb(subject);
     let origin = Vec3::from(subject.position_xyz);
-    // The box the solver kept clear, and the origin that the limits and the
-    // keep-out zone are about.
+    // The box the solver kept clear; and where the relation holds the origin
+    // itself rather than the box — the limits, the pinned point and the
+    // keep-out zone — the origin, which is rarely the box's middle.
     draw.cuboid(bounds, SUBJECT);
-    draw.cross(origin, 0.02, SUBJECT);
+    if matches!(
+        relation.kind.as_str(),
+        "position_limits_box" | "position_limits_cylindrical" | "at_position" | "not_next_to"
+    ) {
+        draw.cross(origin, 0.02, SUBJECT);
+    }
 
     match relation.kind.as_str() {
         "on" => {
@@ -149,8 +155,9 @@ pub fn draw_surface(parent: &Asset, params: &Params, kind: Option<&Kind>, gizmos
     }
 }
 
-/// The box `asset` takes up, in the subject's colour: what hovering its node
-/// in the graph shows.
+/// The box `asset` takes up, in the subject's colour: what lighting up an
+/// object reference shows, since it draws nothing of its own to light
+/// ([`super::highlight`]).
 pub fn outline(asset: &Asset, gizmos: &mut Gizmos<RelationGizmos>) {
     let mut draw = Draw { gizmos, to_bevy: arena_to_bevy() };
     draw.cuboid(world_aabb(asset), SUBJECT);

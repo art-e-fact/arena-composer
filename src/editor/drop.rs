@@ -15,6 +15,7 @@ use bevy::picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
+use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::browser::{add, anchor, on_params};
 use super::relations::{self, RelationGizmos};
@@ -37,7 +38,7 @@ pub fn drop_onto_the_layout(
     placed: Res<Placed>,
     over_panel: Res<PointerOverPanel>,
     window: Single<&Window, With<PrimaryWindow>>,
-    camera: Single<(&Camera, &GlobalTransform)>,
+    camera: Single<(&Camera, &GlobalTransform), With<PanOrbitCamera>>,
     mut ray_cast: MeshRayCast,
     mut gizmos: Gizmos<RelationGizmos>,
 ) -> Result {

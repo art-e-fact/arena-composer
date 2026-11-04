@@ -8,6 +8,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Changed
 
+- Hovering an object in `arena-view`'s window, or its node in the graph, tints it and outlines its
+  silhouette, where it drew its box. The robot lights up whole, where the box held its stand alone,
+  and the outline shows through whatever stands in front. The background is outlined alone, and an
+  object reference, which draws nothing of its own, keeps its box.
+- A relation drawn over the layout marks its subject's origin with a + only where the relation
+  places the origin itself: `position_limits_box`, `position_limits_cylindrical`, `at_position` and
+  `not_next_to`. Elsewhere the mark is gone; it sat wherever the asset's origin happened to be,
+  often in the middle of a table.
 - After an edit, `arena-view`'s window builds only the assets the edit changed, and turning to
   another layout builds nothing: the rest is kept from the layout before, where the whole scene was
   sent and built again. For a kitchen, an edit's layout is a tenth of a megabyte rather than 90. A

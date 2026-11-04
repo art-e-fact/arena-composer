@@ -19,8 +19,9 @@ arena-view environments/tasks/banana_in_bowl.yaml
 ## The window
 
 - **The view.** Drag to orbit, right-drag to pan, scroll to zoom. Click something to pick it: its
-  card opens and its node in the graph is outlined. Hovering outlines what a click would pick, a
-  double-click turns the camera to it, and a click on the backdrop lets go. Right-click it for a
+  card opens and its node in the graph is outlined. Hovering lights up what a click would pick: it
+  is tinted, and outlined even where something stands in front of it. A double-click turns the
+  camera to it, and a click on the backdrop lets go. Right-click it for a
   menu: the relations naming it (hover one to draw it, click it to open its card), *+ relation* to
   add one with it as the subject, its kind and then what it is placed against picked from the
   submenus, and *remove*.
@@ -44,7 +45,10 @@ Every entry of the spec is a card, folded to one line or open to its fields:
 - **Fields are menus wherever they can be.** An id, a kind or an asset is picked from what exists, so
   a card cannot name something that is not there.
 - **A relation shows its shape.** Hover its card to draw it over the layout, and click its 👁 to keep
-  it drawn. Drag one of its numbers and the shape moves with you; the edit is sent when you let go.
+  it drawn. Its subject is boxed, the box the solver keeps clear. Where the relation places the
+  subject's origin rather than its box — `position_limits_box`, `position_limits_cylindrical`,
+  `at_position`, `not_next_to` — a **+** marks the origin, which is seldom the box's middle. Drag
+  one of its numbers and the shape moves with you; the edit is sent when you let go.
 - **⚠ marks an entry that is wrong.** Hover it to read what: red for what Arena would refuse to
   build, amber for what it builds but the sim will not do as meant, such as an object nothing
   places. It goes when the entry is fixed, however you fixed it.
@@ -86,7 +90,7 @@ relation, labelled with its kind. What a thing is placed against is drawn below 
 ends up along the foot. A relation on one object alone is a chip on its node.
 
 - **Click** a node, a chip or a label to open its card in the panel.
-- **Hover** one to show it in the view: an object's box, or a relation's shape.
+- **Hover** one to show it in the view: an object lit up, or a relation's shape.
 - **Drag** to pan, and **scroll** to zoom. *fit*, or a double-click on the background, shows the
   whole graph.
 

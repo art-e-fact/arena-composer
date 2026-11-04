@@ -40,7 +40,8 @@
 //! each keeps it drawn; see [`relations`]. The [`graph`] draws the spec's
 //! nodes and relations as a graph, and a click on one opens its card; so does
 //! a click on the object itself in the view ([`pick`]), and a right click
-//! there opens a menu of its relations ([`menu`]).
+//! there opens a menu of its relations ([`menu`]). Hovering an object, in
+//! either, lights it up in the view ([`highlight`]).
 
 mod browser;
 mod card;
@@ -49,6 +50,7 @@ mod dock;
 mod drop;
 mod form;
 mod graph;
+mod highlight;
 mod menu;
 mod pick;
 mod relations;
@@ -69,7 +71,7 @@ use crate::scene::{Layout, Scene as Payload};
 use crate::spec::{CatalogAsset, Node, Problem, Request, Spec, Step, Vocabulary};
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins(EguiPlugin::default())
+    app.add_plugins((EguiPlugin::default(), highlight::plugin))
         .init_resource::<Form>()
         .init_resource::<PointerOverPanel>()
         .init_resource::<Placed>()

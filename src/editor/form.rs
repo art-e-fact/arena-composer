@@ -131,6 +131,7 @@ pub fn draw(
     placed: Res<Placed>,
     files: Files,
     mut gizmos: Gizmos<RelationGizmos>,
+    mut highlight: ResMut<super::highlight::Highlight>,
     mut state: Local<PanelState>,
     // The pictures on hand, for the browser's tiles, the objects' cards and
     // their nodes in the graph.
@@ -202,7 +203,7 @@ pub fn draw(
         }
         Some(Item::Node(id)) => {
             if let Some(asset) = relations::find(&placed, &id) {
-                relations::outline(asset, &mut gizmos);
+                highlight.show(asset, &mut gizmos);
             }
         }
         None => {}
