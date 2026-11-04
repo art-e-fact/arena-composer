@@ -15,6 +15,13 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `arena-render`, `render_views` and `arena-view`'s window keep a scene's textures on the GPU
   alone, with no second copy in memory: a scene with large textures, such as a humanoid's or a
   workshop's, renders in 40–50% less memory, and about a third of a second sooner.
+- `arena-render`, `render_views` and `arena-view`'s window light a scene more as Isaac Sim's dome
+  light does: most of the light comes from the sky rather than the sun, and ambient occlusion
+  darkens creases, hollows and the ground around what stands on it. Drawn from the same cameras as
+  Isaac Sim 6.2, the pictures come about 12% closer to its renders. A scene draws a few percent
+  darker overall. A render takes up to a fifth of a second longer, and about a third longer on a
+  machine without a GPU. The viewer in a browser, whose WebGL2 has no ambient occlusion, draws as
+  before.
 
 ## [0.6.0] - 2026-10-28
 

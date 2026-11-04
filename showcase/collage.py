@@ -35,7 +35,7 @@ TILES = [
 ]
 COLUMNS = 3
 #: A tile's side. Each is drawn at twice that and scaled down, which smooths the
-#: edges more than the renderer's own multisampling does.
+#: edges more than the renderer's own anti-aliasing does.
 TILE = 600
 #: Between tiles, left transparent for the page behind to show through.
 GAP = 12
