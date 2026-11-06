@@ -29,6 +29,7 @@ import inspect
 import os
 import re
 import sys
+import threading
 import types
 import typing
 from dataclasses import dataclass, field
@@ -41,6 +42,18 @@ from urllib.parse import urlparse
 #: Modules every command imports before it reads a spec, separated by
 #: `os.pathsep`: a project's own assets and kinds, registered as a side effect.
 IMPORTS = "ARENA_COMPOSER_IMPORTS"
+
+#: Held around anything that solves or fills the registries, so one runs at a
+#: time in the process: `view._resolve`, and every MCP tool (`mcp_server._quiet`).
+#: Both run on worker threads, and `redirect_stdout` swaps the process's
+#: `sys.stdout`: two in there at once restore each other's, and the solver's
+#: prints from the one still running reach stdout. Arena's registries, filled on
+#: first use, are not safe to fill from two threads either. Re-entrant, since a
+#: tool's body calls into what takes it again.
+#: ponytail: one process-wide lock, so a long solve holds back a `check_spec`
+#: or another tab's solve; stdout redirected once for the life of the process
+#: and per-spec locks, if that wait matters.
+SOLVING = threading.RLock()
 
 
 @cache

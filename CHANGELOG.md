@@ -6,6 +6,14 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Added
+
+- A server can drive the editor in a browser tab as `arena-view` drives its window: the browser
+  build takes the scenes after its first through `push` and hands the panel's requests to the
+  page's `globalThis.arena_request`, and `view.serve` draws in any window that carries the same
+  messages. When one process runs both, a solve and an MCP tool wait for each other, and two edits
+  to one spec take turns rather than one writing over the other. `arena-view` itself is unchanged.
+
 ### Changed
 
 - A relation drawn over the layout lies on the surfaces its objects stand on, where it was lines in

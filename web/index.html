@@ -28,6 +28,11 @@
   addEventListener("error", (event) => stopped(event.error ?? event.message));
   addEventListener("unhandledrejection", (event) => stopped(event.reason));
 
+  // The panel's requests: nothing here answers them, so they are only logged. A page with a server
+  // behind it sends them on instead (`src/web.rs`). Copied, since the bytes are a view into the
+  // wasm memory that the next allocation may move.
+  globalThis.arena_request ??= (bytes) => console.debug("request", bytes.slice());
+
   const payload = new URLSearchParams(location.search).get("payload") ?? "scene.msgpack";
   try {
     status.textContent = `Loading ${payload}…`;

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -1357,3 +1359,29 @@ def test_a_whole_subtask_written_points_its_placeholders_at_nodes_of_their_class
     # A kind changed in the panel replaces the whole entry, placeholder and all.
     result = spec_edit.apply(spec, "set", ["task", "subtasks", 0], opens)
     assert result.ok and result.changed[1].startswith("set task.subtasks.0.params.openable_object to 'oven'"), result
+
+
+def test_two_writers_at_once_both_land(spec: Path, monkeypatch: pytest.MonkeyPatch):
+    """An edit reads the pair, validates, then writes it: a second edit that
+    reads in between writes over the first. One process may hold two writers,
+    a browser panel's and an MCP client's, so they take turns."""
+    writing, replace = threading.Event(), spec_edit._replace
+
+    def slow_replace(path: Path, text: str) -> None:
+        writing.set()
+        time.sleep(0.3)  # the first edit has read and not yet written
+        replace(path, text)
+
+    monkeypatch.setattr(spec_edit, "_replace", slow_replace)
+    results = {}
+    first = threading.Thread(
+        target=lambda: results.update(apple=spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE))
+    )
+    first.start()
+    assert writing.wait(60)
+    results["pear"] = spec_edit.add_object(spec, "pear", "apple_02_objaverse_robolab", on=TABLE)
+    first.join(60)
+
+    assert all(result.ok for result in results.values()), results
+    ids = [obj["id"] for obj in yaml.safe_load(scene_of(spec).read_text())["objects"]]
+    assert ids[-2:] == ["apple", "pear"]

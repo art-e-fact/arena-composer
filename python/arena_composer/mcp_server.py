@@ -25,7 +25,6 @@ import os
 import signal
 import sys
 import tempfile
-import threading
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -113,16 +112,6 @@ _READ_ONLY = ToolAnnotations(read_only_hint=True)
 #: replaces its picture rather than filling the disk with a history of them.
 _RENDERS = Path(tempfile.gettempdir()) / "arena-composer-renders"
 
-#: Held by `_quiet`, so one tool body runs at a time. The SDK runs each call on
-#: a worker thread, and `redirect_stdout` swaps the process's `sys.stdout`: two
-#: calls in there at once restore each other's, and the solver's prints from
-#: the one still running reach the wire. Arena's registries, filled on first
-#: use, are not safe to fill from two threads either.
-#: ponytail: a long solve holds back a `check_spec` sent beside it; a stdout
-#: redirected once for the life of the process, if that wait matters.
-_ONE_AT_A_TIME = threading.RLock()
-
-
 @contextlib.contextmanager
 def _quiet():
     """Keep Arena's chatter out of the protocol.
@@ -137,7 +126,8 @@ def _quiet():
     would wait for and the first tool pays for anyway. A module that does not
     import is a refusal the agent can read and pass on.
     """
-    with _ONE_AT_A_TIME, contextlib.redirect_stdout(sys.stderr):
+    # One tool body at a time, and none beside a solve: see `catalog.SOLVING`.
+    with catalog.SOLVING, contextlib.redirect_stdout(sys.stderr):
         try:
             catalog.load_extensions()
         except ImportError as error:

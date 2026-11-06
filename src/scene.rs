@@ -112,7 +112,7 @@ impl Scene {
 /// the Python side, the same in every message that draws the same thing.
 ///
 /// `arena-view` sends a geometry's nodes once. A layout names what the layout
-/// before it drew by its id alone, and [`crate::wire::SceneReader`] fills the
+/// before it drew by its id alone, and [`crate::wire::Decoder`] fills the
 /// nodes back in, so past the reader every geometry carries them. The window
 /// keeps what it built for each by id ([`crate::spawn::Built`]).
 #[derive(Debug, Clone, Default, Deserialize)]
