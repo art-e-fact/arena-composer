@@ -90,7 +90,7 @@ Central prop's details give the credit to keep with whatever you share that uses
 ## The spatial graph
 
 <!-- graph.png -->
-[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc)](https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc)
+[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/04919fec-fcbb-4987-86e7-54764d87026e)](https://github.com/user-attachments/assets/04919fec-fcbb-4987-86e7-54764d87026e)
 
 The graph draws the spec the way Arena's own review GUI does: a node per object, and an edge per
 relation, labelled with its kind. What a thing is placed against is drawn below it, so the anchor
