@@ -54,6 +54,7 @@ mod highlight;
 mod menu;
 mod pick;
 mod relations;
+mod shapes;
 mod thumbnails;
 
 use std::collections::HashMap;
@@ -71,7 +72,7 @@ use crate::scene::{Layout, Scene as Payload};
 use crate::spec::{CatalogAsset, Node, Problem, Request, Spec, Step, Vocabulary};
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((EguiPlugin::default(), highlight::plugin))
+    app.add_plugins((EguiPlugin::default(), highlight::plugin, shapes::plugin))
         .init_resource::<Form>()
         .init_resource::<PointerOverPanel>()
         .init_resource::<Placed>()

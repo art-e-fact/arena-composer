@@ -63,7 +63,7 @@ how a scene is drawn redraws its picture of the showcase: `python showcase/colla
 | [layout.rs](src/layout.rs) | putting a layout in a world and framing it; shared by the window and the renderer |
 | [spawn.rs](src/spawn.rs) | payload geometry → meshes and materials, built once per geometry and kept by its id |
 | [viewer.rs](src/viewer.rs) | the windowed app: applies incoming messages, draws the page the panel's header is on (`turn_page`) and the status line (`hud_line`) |
-| [editor/](src/editor/) | the panel: a card per spec entry, the dock with the asset browser and the spatial graph, drag-and-drop, picking, the hover highlight and a right-click menu in the view, relation gizmos |
+| [editor/](src/editor/) | the panel: a card per spec entry, the dock with the asset browser and the spatial graph, drag-and-drop, picking, the hover highlight and a right-click menu in the view, the relations drawn over the layout |
 | [render.rs](src/render.rs) | headless renders, a PNG per view |
 | [tour.rs](src/tour.rs), [record.rs](src/record.rs) | the README's video: a storyboard played with a pointer of its own, and recorded |
 | [python.rs](src/python.rs) | the PyO3 wrapper, behind the `python` feature |
@@ -91,7 +91,7 @@ AGENTS.md. Rules, the reasons for them and pointers into the code, as dense as t
 are read on GitHub, not on the site.
 
 - [docs/architecture.md](docs/architecture.md) — the split, the payload, the processes, the pipe, why geometry is sent once, and why an edit is answered twice
-- [docs/editor.md](docs/editor.md) — the panel; read before touching the camera gate, framing, backdrop, gizmos or drag-and-drop
+- [docs/editor.md](docs/editor.md) — the panel; read before touching the camera gate, framing, backdrop, the relation marks or drag-and-drop
 - [docs/assets.md](docs/assets.md) — SimReady props, the index, pictures, reindexing
 - [docs/mcp.md](docs/mcp.md) — rules for the MCP server, and `arena-composer init`
 - [docs/errors.md](docs/errors.md) — how a wrong spec is found, how an edit on one is judged, where
@@ -119,6 +119,11 @@ are read on GitHub, not on the site.
   the client shows the model. The [author-arena-spec](python/arena_composer/skills/author-arena-spec/SKILL.md)
   skill is procedure: it names tools and result fields but defines none. The guide's table of tools
   is drawn from each docstring's first paragraph, so a person reads that paragraph too.
+- **A window you drive never opens on the desktop.** A screenshot, a tour or a recording of the
+  viewer runs on an X server of its own that draws in memory, Xvfb, with lavapipe: see
+  [docs/development.md](docs/development.md#iterating-on-the-rust-side). The desktop's `DISPLAY`, or
+  Xephyr, whose screen is itself a window there, puts it in front of whoever is at the machine.
+  `docs/screenshots/shoot.sh` and `docs/video/record.sh` start their own.
 - **Bevy's default features stay off.** Its audio and gamepad support link libasound and libudev,
   which a manylinux wheel may not. Name each feature you need in [Cargo.toml](Cargo.toml).
 - **The `python` feature is off by default**, so plain `cargo check`/`clippy`/`test` never compile

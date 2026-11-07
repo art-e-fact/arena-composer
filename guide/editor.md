@@ -45,7 +45,11 @@ Every entry of the spec is a card, folded to one line or open to its fields:
 - **Fields are menus wherever they can be.** An id, a kind or an asset is picked from what exists, so
   a card cannot name something that is not there.
 - **A relation shows its shape.** Hover its card to draw it over the layout, and click its 👁 to keep
-  it drawn. Its subject is boxed, the box the solver keeps clear. Where the relation places the
+  it drawn. Its subject is lit and ringed in orange, and what it refers to is tinted aqua. What the
+  relation allows lies on the surface the objects stand on: an aqua patch, rimmed where the
+  relation bounds it and fading out where it leaves a side open, and red where nothing can stand,
+  as on a support narrower than its subject. A bound a position limit sets stands up as a glowing
+  wall, and chevrons march the way `next_to` and `face_to` lead. Where the relation places the
   subject's origin rather than its box — `position_limits_box`, `position_limits_cylindrical`,
   `at_position`, `not_next_to` — a **+** marks the origin, which is seldom the box's middle. Drag
   one of its numbers and the shape moves with you; the edit is sent when you let go.

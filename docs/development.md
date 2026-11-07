@@ -48,10 +48,22 @@ To see the window without a person at the keyboard:
 | `ARENA_VIEWER_SEARCH=basket` | open the asset browser filtered, with the first match picked | [browser.rs](../src/editor/browser.rs) `Browser` |
 | `ARENA_VIEWER_DOCK=graph` | open the dock on the spatial graph | [dock.rs](../src/editor/dock.rs) `Dock` |
 | `ARENA_VIEWER_DOCK_HEIGHT=420` | open the dock that tall | [dock.rs](../src/editor/dock.rs) `Dock` |
-| `ARENA_VIEWER_SHOW_RELATIONS=all` or `=2,5` | open with those relations' gizmos drawn | [form.rs](../src/editor/form.rs) `PanelState` |
+| `ARENA_VIEWER_SHOW_RELATIONS=all` or `=2,5` | open with those relations drawn | [form.rs](../src/editor/form.rs) `PanelState` |
 | `ARENA_VIEWER_PICK=bowl` or `=3` | open with that node, or the relation at that position, picked in the graph and its card open | [form.rs](../src/editor/form.rs) `PanelState` |
 | `ARENA_VIEWER_TOUR=tour.json` | play a storyboard with a pointer of the tour's own, and close the window after it | [tour.rs](../src/tour.rs) |
 | `ARENA_VIEWER_RECORD=raw.mp4` | record the tour, a video frame per update, with `ffmpeg` | [record.rs](../src/record.rs) |
+
+Each of these still opens the window, and on the desktop's display it pops up in front of whoever is
+at it. Give it an X server of its own that draws in memory instead, Xvfb (`sudo apt install xvfb`),
+and Mesa's software Vulkan (lavapipe), which needs no GPU and presents to it:
+
+```bash
+Xvfb :99 -screen 0 2880x1800x24 &
+DISPLAY=:99 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json ARENA_VIEWER_SCREENSHOT=shot.png \
+    cargo run --bin arena-viewer -- /tmp/scene.msgpack
+```
+
+Not Xephyr: it is a nested X server, and its screen is a window on the desktop.
 
 The screenshots the README and the guide show are taken this way, by
 [docs/screenshots/shoot.sh](screenshots/shoot.sh):

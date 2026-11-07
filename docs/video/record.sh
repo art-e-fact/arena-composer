@@ -8,7 +8,7 @@
 #
 # Defaults to tour.json beside this script and target/video/arena-composer.mp4.
 # Needs Arena's venv active and the network, since arena-view solves every edit
-# the tour makes; and cargo, Xephyr, Mesa's lavapipe and ffmpeg. Minutes: the
+# the tour makes; and cargo, Xvfb, Mesa's lavapipe and ffmpeg. Minutes: the
 # window is drawn in software, at whatever pace, and the video is timed by its
 # frames rather than by the clock.
 set -euo pipefail
@@ -19,7 +19,7 @@ out=$(realpath -m "${2:-$repo/target/video/arena-composer.mp4}")
 # The README's screenshots' scene, written to show the editor off.
 scene=$repo/docs/screenshots/kitchen_island.yaml
 mkdir -p "$(dirname "$out")"
-for tool in Xephyr ffmpeg ffprobe python; do
+for tool in Xvfb ffmpeg ffprobe python; do
     command -v $tool >/dev/null || { echo "record.sh needs $tool on PATH" >&2; exit 1; }
 done
 
@@ -36,15 +36,15 @@ fi
 
 # The tour edits the spec, so it gets a copy.
 work=$(mktemp -d)
-# A nested X server, so nothing lands on the desktop's display and the window
-# has the same scale on every machine. It says which display it took once it
+# An X server of its own, drawn in memory, so no window opens on the desktop
+# and the screen has the same size and scale on every machine. (Xephyr would
+# be one more window on the desktop.) It says which display it took once it
 # accepts connections.
-Xephyr -displayfd 3 -screen 2560x1440 -ac -br -noreset 3>"$work/display" 2>"$work/xephyr.log" &
-xephyr=$!
-trap 'kill $xephyr 2>/dev/null || true; rm -rf "$work"' EXIT
+Xvfb -displayfd 3 -screen 0 2560x1440x24 -ac -noreset 3>"$work/display" 2>"$work/xvfb.log" &
+xvfb=$!
+trap 'kill $xvfb 2>/dev/null || true; rm -rf "$work"' EXIT
 until [[ -s $work/display ]]; do
-    # It exits, rather than says, when there is no display to open its window on.
-    kill -0 $xephyr 2>/dev/null || { cat "$work/xephyr.log" >&2; exit 1; }
+    kill -0 $xvfb 2>/dev/null || { cat "$work/xvfb.log" >&2; exit 1; }
     sleep 0.1
 done
 cp "$scene" "$work/"

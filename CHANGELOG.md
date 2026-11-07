@@ -6,6 +6,17 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ## [Unreleased]
 
+### Changed
+
+- A relation drawn over the layout lies on the surfaces its objects stand on, where it was lines in
+  the air. What it allows is a tinted patch, rimmed where the relation bounds it and fading out
+  where it leaves a side open. A bound `position_limits_box` or `position_limits_cylindrical` sets
+  stands up as a glowing wall. `next_to` and `face_to` show their way as a string of chevrons
+  marching toward where the relation ends. The subject is lit and ringed in orange, where it was
+  boxed, and what the relation refers to is tinted aqua. The other kinds keep their lines.
+- `on` is drawn in red where its subject can never fit inside the margin, as Arena's placement
+  check finds: a banana on a bowl at the default 5 cm margin, say. It was drawn as if it fit.
+
 ## [0.7.0] - 2026-11-04
 
 ### Changed

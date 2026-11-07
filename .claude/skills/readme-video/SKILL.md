@@ -14,13 +14,13 @@ docs/video/record.sh
 ```
 
 It builds this checkout's Rust into the extension, opens a copy of the screenshots' scene
-(`docs/screenshots/kitchen_island.yaml`) in a real `arena-view` on a nested X server (Xephyr), drawn
+(`docs/screenshots/kitchen_island.yaml`) in a real `arena-view` on an X server of its own that draws in memory (Xvfb), drawn
 by Mesa's software Vulkan (lavapipe), and plays the storyboard `docs/video/tour.json` there with a
 pointer of its own. It writes `target/video/arena-composer.mp4` and, beside it,
 `arena-composer-sheet.png`: the frames at 0, 2, 4… seconds, four to a row. Minutes, not seconds.
 
 It needs Arena's venv active and the network — arena-view solves every edit the tour makes, and
-Lightwheel's SDK asks its server for the kitchen — and cargo, Xephyr, lavapipe and ffmpeg.
+Lightwheel's SDK asks its server for the kitchen — and cargo, Xvfb, lavapipe and ffmpeg.
 
 ## Re-record it
 

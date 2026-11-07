@@ -18,7 +18,8 @@ use bevy_egui::{EguiContexts, egui};
 use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::browser::{add, anchor, on_params};
-use super::relations::{self, RelationGizmos};
+use super::relations::{self, Painter};
+use super::shapes::Piece;
 use super::{Form, PointerOverPanel};
 use crate::layout::{Placed, world_aabb};
 use crate::scene::{Asset, arena_to_bevy};
@@ -40,7 +41,8 @@ pub fn drop_onto_the_layout(
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform), With<PanOrbitCamera>>,
     mut ray_cast: MeshRayCast,
-    mut gizmos: Gizmos<RelationGizmos>,
+    mut painter: Painter,
+    shapes: Query<(), With<Piece>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(asset) = egui::DragAndDrop::payload::<CatalogAsset>(ctx) else {
@@ -62,10 +64,13 @@ pub fn drop_onto_the_layout(
     }
 
     let (camera, transform) = *camera;
+    // Through the relation visuals' shapes, to what they are drawn over.
+    let through = |entity| !shapes.contains(entity);
+    let settings = MeshRayCastSettings::default().with_filter(&through);
     let hit = window
         .cursor_position()
         .and_then(|cursor| camera.viewport_to_world(transform, cursor).ok())
-        .and_then(|ray| ray_cast.cast_ray(ray, &MeshRayCastSettings::default()).first().map(|(_, hit)| hit.point));
+        .and_then(|ray| ray_cast.cast_ray(ray, &settings).first().map(|(_, hit)| hit.point));
     // The embodiment is never stood on.
     let target = hit
         .and_then(|point| target(&placed, arena_to_bevy().inverse() * point, |asset| asset.role != "embodiment"))
@@ -73,7 +78,7 @@ pub fn drop_onto_the_layout(
 
     if let Some(parent) = target {
         let params = on_params(&form.spec, &parent.id);
-        relations::draw_surface(parent, &params, form.vocabulary.relation("on"), &mut gizmos);
+        relations::draw_surface(parent, &params, form.vocabulary.relation("on"), &mut painter);
     }
     if ctx.input(|input| input.pointer.any_released()) {
         egui::DragAndDrop::clear_payload(ctx);
