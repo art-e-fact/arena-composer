@@ -5,9 +5,12 @@ description: Re-records the README's demo video of the visual editor with docs/v
 
 # README video
 
-The README's video is arena-view used by hand: a turn round the kitchen, a search over the assets
-and the SimReady props, a prop dragged onto the plate and solved into place, the spatial graph, a
-relation picked there and its distance dragged out until the bowl moves. One command records it:
+The README's video is arena-view used by hand: the kitchen, then a double-click in close over the
+island; a search over the assets and the SimReady props, and a prop dragged onto the plate, whose
+top lights up; the view's menu on the bowl, each relation drawn as it is hovered; the spatial
+graph, where the bowl's `next_to` is opened, kept drawn and sent round behind the plate; the
+plate's box widened from its card; and the pager turned through the five layouts with all three
+drawn. One command records it:
 
 ```bash
 docs/video/record.sh
@@ -67,14 +70,19 @@ The storyboard is the window (`size` in physical pixels, and `scale`, which enla
   (`panel`, `dock` or `view`), `near` another target, or `nth` in reading order; an entry of a menu
   just opened is the one `near` `{"pointer": true}`. `{"object": "plate"}` is the middle of an
   object's top, where a drop would stand it, and only while the view shows it; `{"in": "view"}`
-  alone is the middle of the view. `offset` moves any of them.
+  alone is the middle of the view. `offset` moves any of them. That middle is its box's: a prop
+  on another, the apple on the plate, can miss itself there and land on what is beside or under
+  it, so a step that needs one thing hit is checked by a scratch `move` onto it, since a hover
+  lights what a click would pick.
 - **An edit is two steps**: the action that makes it, then `{"until": "solved"}`, which shows
   `secs` (0.6) of the spinner and cuts the rest of the wait out of the video. It fails on an error.
   Edits persist: every later step sees them.
 - **The camera** turns about a point well behind the island, where Arena's framing puts it: a drag
   of 25 pixels across the view turns the island about 15°, and each wheel notch closes a fifth of
-  the distance to that point, so two put the camera over the island. An object turned out of the
-  view is no longer a target.
+  the distance to that point, so two put the camera over the island. A double-click on an object
+  brings the camera to it, about 0.8 m off however small it is, and the camera turns about it from
+  then on: from the bowl, two notches out and a 70-pixel drag down, which tilts the view by about
+  30°, look down on the island's middle. An object turned out of the view is no longer a target.
 - **Drag what moves under the pointer `by`**, not `to`: a number's text changes as it is dragged,
   and the view turns.
 - **The scene** is the screenshots' (`scene` in `record.sh`); the tour edits only its copy. An
