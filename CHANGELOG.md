@@ -17,6 +17,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 - `on` is drawn in red where its subject can never fit inside the margin, as Arena's placement
   check finds: a banana on a bowl at the default 5 cm margin, say. It was drawn as if it fit.
 
+### Fixed
+
+- A fresh install no longer takes huggingface-hub 2, which leaves out the `httpx` that fetching a
+  SimReady Central package needs.
+
 ## [0.7.0] - 2026-11-04
 
 ### Changed
