@@ -1,19 +1,19 @@
 ---
 name: readme-screenshots
-description: Retakes the README's screenshots of the visual editor (arena-view's window) with docs/screenshots/shoot.sh, and changes what they show — the demo scene, the dock tab, the search, the picked card, the relation gizmos. Use after a change to how the panel, the dock, the graph, the gizmos or the 3D view look, or when asked to update, retake or add a README or docs screenshot. Not for checking a layout (arena-render, or arena-mcp's render tool).
+description: Retakes the README's screenshots of the visual editor (arena-view's window) with docs/screenshots/shoot.sh, and changes what they show — the demo scene, the dock tab, the search, the picked card, the relations drawn over the layout. Use after a change to how the panel, the dock, the graph, the relation marks or the 3D view look, or when asked to update, retake or add a README or docs screenshot. Not for checking a layout (arena-render, or arena-mcp's render tool).
 ---
 
 # README screenshots
 
 The README shows the visual editor twice, side by side: `docs/screenshots/assets.png`, the asset
 browser searched and an object's card open, and `docs/screenshots/graph.png`, the spatial graph with
-a relation picked and gizmos drawn over the layout. Both are one command away:
+a relation picked and relations drawn over the layout. Both are one command away:
 
 ```bash
 docs/screenshots/shoot.sh
 ```
 
-It builds `arena-viewer`, starts a nested X server (Xephyr), and opens each shot's scene in the
+It builds `arena-viewer`, starts an X server of its own that draws in memory (Xvfb), and opens each shot's scene in the
 state its `shoot` line sets, drawn by Mesa's software Vulkan (lavapipe), writing the window to the
 PNG. A few seconds a shot. Arena's venv has to be active only when a scene has to be packed.
 
@@ -36,8 +36,8 @@ A shot is right when:
 - every tile in the browser's grid shows a picture rather than a box. Few of Arena's own assets have
   one, so search for SimReady props: a folder word like `kitchenware` matches them
 - the picked card is outlined and wholly on screen, and the graph lights the same entry
-- the gizmos drawn read against the layout, and none runs off the view (a `position_limits_box`
-  without z limits draws its edges to the sky)
+- the relations drawn read against the layout: their rims and chevrons show, and none is hidden
+  behind the panel or runs off the view. A screenshot holds the chevrons still, so retakes match
 - the graph's labels are legible, and nothing overlaps
 
 ## Change what a shot shows
@@ -73,6 +73,6 @@ frames has to last past them: `ARENA_VIEWER_PICK` dates its pick a second ahead,
 reveal ends before the panel has scrolled to it.
 
 What only a real pointer shows — a drag in flight, a hover — needs input sent to the window. Run
-`arena-viewer` on a Xephyr display, send motion and button events with `libXtst`'s
+`arena-viewer` on an Xvfb display, never the desktop's, send motion and button events with `libXtst`'s
 `XTestFakeMotionEvent` and `XTestFakeButtonEvent` through `ctypes` (there is no xdotool here), and
 grab the display with `ffmpeg -f x11grab -video_size <W>x<H> -i :<display> -frames:v 1 out.png`.

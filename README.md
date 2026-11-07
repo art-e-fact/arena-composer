@@ -23,7 +23,7 @@
     <!-- assets.png -->
     <td width="50%"><a href="https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce"><img src="https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce" alt="The visual editor with the asset browser searched"></a></td>
     <!-- graph.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc"><img src="https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/04919fec-fcbb-4987-86e7-54764d87026e"><img src="https://github.com/user-attachments/assets/04919fec-fcbb-4987-86e7-54764d87026e" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
@@ -32,7 +32,7 @@
 </table>
 
 <!-- arena-composer.mp4 -->
-https://github.com/user-attachments/assets/32325f26-05a9-4580-b7db-482eec159a10
+https://github.com/user-attachments/assets/0f62beee-68aa-44a6-93c6-3578065cf9da
 
 ## Contents
 

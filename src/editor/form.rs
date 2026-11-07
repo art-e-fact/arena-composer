@@ -19,7 +19,7 @@ use super::controls::{id_options, insert, menu, params, row, set, text_field, to
 use super::dock::{self, Dock};
 use super::graph::{Item, Pick};
 use super::pick::Clicked;
-use super::relations::{self, RelationGizmos};
+use super::relations::{self, Painter};
 use super::thumbnails::{Files, Images, Pictures, Thumbnails};
 use super::{Form, PointerOverPanel, in_the_view, send};
 use crate::layout::Placed;
@@ -130,8 +130,7 @@ pub fn draw(
     mut form: ResMut<Form>,
     placed: Res<Placed>,
     files: Files,
-    mut gizmos: Gizmos<RelationGizmos>,
-    mut highlight: ResMut<super::highlight::Highlight>,
+    mut painter: Painter,
     mut state: Local<PanelState>,
     // The pictures on hand, for the browser's tiles, the objects' cards and
     // their nodes in the graph.
@@ -203,7 +202,7 @@ pub fn draw(
         }
         Some(Item::Node(id)) => {
             if let Some(asset) = relations::find(&placed, &id) {
-                highlight.show(asset, &mut gizmos);
+                painter.light(asset);
             }
         }
         None => {}
@@ -214,7 +213,7 @@ pub fn draw(
             // says, so the view follows the number rather than the answer to it.
             let dragged = pending(relation, index, &state);
             let relation = dragged.as_ref().unwrap_or(relation);
-            relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut gizmos);
+            relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut painter);
         }
     }
 

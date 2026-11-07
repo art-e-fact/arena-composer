@@ -1,4 +1,4 @@
-//! Drawing a relation over the layout, with gizmos.
+//! Drawing a relation over the layout.
 //!
 //! What a relation *means* is a piece of geometry — the surface `on` lands on,
 //! the side `next_to` picks, the point `at_position` pins — and the panel shows
@@ -10,10 +10,18 @@
 //! Everything here is computed in Arena's frame — Z-up, metres — and [`Draw`]
 //! turns each shape onto Bevy's Y-up axes as it is drawn, with the rotation the
 //! scene root carries. Nothing here edits anything.
+//!
+//! [`marks`] lays the kinds it knows on the surfaces the objects stand on; the
+//! rest are drawn as lines, with gizmos.
 
 use bevy::color::palettes::css;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+use super::highlight::Highlight;
+use super::shapes::Shapes;
+
+mod marks;
 use crate::layout::{Placed, corners, world_aabb};
 use crate::scene::{Asset, arena_to_bevy};
 use crate::spec::{Kind, Params, Relation, Value};
@@ -31,6 +39,33 @@ pub fn configure(store: &mut GizmoConfigStore) {
     let (config, _) = store.config_mut::<RelationGizmos>();
     config.depth_bias = -1.0;
     config.line.width = 2.0;
+}
+
+/// What the relation visuals draw with: lines, solid shapes, and the objects
+/// themselves, lit.
+#[derive(SystemParam)]
+pub struct Painter<'w, 's> {
+    gizmos: Gizmos<'w, 's, RelationGizmos>,
+    shapes: ResMut<'w, Shapes>,
+    highlight: ResMut<'w, Highlight>,
+    /// What marching marks keep step to.
+    time: Res<'w, Time>,
+}
+
+impl<'w, 's> Painter<'w, 's> {
+    /// Light `asset` this frame — or, where it has no geometry of its own to
+    /// light, as an object reference has none, outline its box.
+    pub fn light(&mut self, asset: &Asset) {
+        if asset.geometry.is_none() {
+            self.draw().cuboid(world_aabb(asset), SUBJECT);
+        } else {
+            self.highlight.show(asset);
+        }
+    }
+
+    fn draw(&mut self) -> Draw<'_, 'w, 's> {
+        Draw { painter: self, to_bevy: arena_to_bevy() }
+    }
 }
 
 /// The relation's subject: its bounds, its heading. The graph lights what the
@@ -55,31 +90,28 @@ type Aabb = (Vec3, Vec3);
 
 /// Draw `relation` over the layout — or nothing, where its subject has yet to
 /// be placed: the form can be an edit ahead of the layout.
-pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &mut Gizmos<RelationGizmos>) {
+pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, painter: &mut Painter) {
     let Some(subject) = find(placed, &relation.subject) else { return };
     let reference = relation.reference.as_deref().and_then(|id| find(placed, id));
     let args = Args { params: &relation.params, kind };
-    let mut draw = Draw { gizmos, to_bevy: arena_to_bevy() };
+    let mut draw = painter.draw();
 
     let bounds = world_aabb(subject);
     let origin = Vec3::from(subject.position_xyz);
-    // The box the solver kept clear; and where the relation holds the origin
-    // itself rather than the box — the limits, the pinned point and the
-    // keep-out zone — the origin, which is rarely the box's middle.
-    draw.cuboid(bounds, SUBJECT);
-    if matches!(
+    // Where the relation holds the origin itself rather than the box — the
+    // limits, the pinned point and the keep-out zone — the origin is marked,
+    // since it is rarely the box's middle.
+    let holds_origin = matches!(
         relation.kind.as_str(),
         "position_limits_box" | "position_limits" | "position_limits_cylindrical" | "at_position" | "not_next_to"
-    ) {
-        draw.cross(origin, 0.02, SUBJECT);
+    );
+    let turns = matches!(relation.kind.as_str(), "face_to" | "rotate_around_solution");
+    marks::subject(&mut draw, subject, bounds, turns, holds_origin);
+    if marks::relation(&mut draw, &args, &relation.kind, subject, bounds, reference, placed) {
+        return;
     }
 
     match relation.kind.as_str() {
-        "on" => {
-            if let Some(support) = reference.map(world_aabb).and_then(|parent| support(&args, parent)) {
-                draw.face(support, 2, support.0.z, REGION);
-            }
-        }
         "clutter_on" => {
             // The release region's top, and `on`'s support over the region:
             // the floor the subject's bottom has to clear, which here bounds
@@ -89,13 +121,6 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
                 if let Some(floor) = support(&args, region) {
                     draw.face(floor, 2, floor.0.z, REGION);
                 }
-            }
-        }
-        "next_to" => {
-            let target = reference.and_then(|parent| next_to_target(&args, origin, bounds, world_aabb(parent)));
-            if let Some([line_from, line_to, gap_from, gap_to]) = target {
-                draw.line(line_from, line_to, REGION);
-                draw.arrow(gap_from, gap_to, REGION);
             }
         }
         "not_next_to" => {
@@ -120,16 +145,7 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
                 }
             }
         }
-        "face_to" => {
-            heading(&mut draw, subject, bounds);
-            if let Some(target) = reference {
-                draw.line(origin, center(world_aabb(target)), REGION);
-            }
-        }
         "at_position" => at_position(&mut draw, &args, origin, reach(bounds)),
-        // `position_limits` is Arena's older name for the same relation.
-        "position_limits_box" | "position_limits" => limits_box(&mut draw, &args, extent(placed)),
-        "position_limits_cylindrical" => limits_cylinder(&mut draw, &args, origin),
         "rotate_around_solution" => {
             heading(&mut draw, subject, bounds);
             rotate_around(&mut draw, &args, origin, reach(bounds));
@@ -147,21 +163,8 @@ pub fn draw(relation: &Relation, kind: Option<&Kind>, placed: &Placed, gizmos: &
 /// The surface an `on` with `params` would stand its subject on, over
 /// `parent` — what a drop shows before it is let go. The whole top in red
 /// where the margin has eaten it, since nothing can stand there.
-pub fn draw_surface(parent: &Asset, params: &Params, kind: Option<&Kind>, gizmos: &mut Gizmos<RelationGizmos>) {
-    let mut draw = Draw { gizmos, to_bevy: arena_to_bevy() };
-    let bounds = world_aabb(parent);
-    match support(&Args { params, kind }, bounds) {
-        Some(surface) => draw.face(surface, 2, surface.0.z, REGION),
-        None => draw.face(bounds, 2, bounds.1.z, FORBIDDEN),
-    }
-}
-
-/// The box `asset` takes up, in the subject's colour: what lighting up an
-/// object reference shows, since it draws nothing of its own to light
-/// ([`super::highlight`]).
-pub fn outline(asset: &Asset, gizmos: &mut Gizmos<RelationGizmos>) {
-    let mut draw = Draw { gizmos, to_bevy: arena_to_bevy() };
-    draw.cuboid(world_aabb(asset), SUBJECT);
+pub fn draw_surface(parent: &Asset, params: &Params, kind: Option<&Kind>, painter: &mut Painter) {
+    marks::surface(&mut painter.draw(), &Args { params, kind }, world_aabb(parent), None);
 }
 
 pub fn find<'a>(placed: &'a Placed, id: &str) -> Option<&'a Asset> {
@@ -256,6 +259,13 @@ fn support(args: &Args, (parent_min, parent_max): Aabb) -> Option<Aabb> {
     (min.x <= max.x && min.y <= max.y).then_some((min, max))
 }
 
+/// Whether a subject with bounds `subject` can stand on `support` at all, as
+/// Arena's `OnRelationValidator` asks: its footprint no wider or deeper than
+/// the support's, unless `overlap` asks only that the two touch.
+fn fits(args: &Args, (min, max): Aabb, (s_min, s_max): Aabb) -> bool {
+    args.flag("overlap") || (s_max - s_min).truncate().cmple((max - min).truncate()).all()
+}
+
 /// The region `clutter_on` releases its subject over: the parent's bounds with
 /// the footprint shrunk about its centre to `spread` of its width and depth.
 fn release_region(args: &Args, bounds: Aabb) -> Aabb {
@@ -346,42 +356,6 @@ fn at_position(draw: &mut Draw, args: &Args, origin: Vec3, reach: f32) {
     }
 }
 
-/// The box the origin must stay in: the set bounds as walls, and the rest as a
-/// grey frame out to the edge of the layout, where an unset bound leaves it
-/// open. The origin, not the bounds — an object can still poke out of it.
-fn limits_box(draw: &mut Draw, args: &Args, (mut min, mut max): Aabb) {
-    let mut walls = Vec::new();
-    for (axis, name) in ["x_limits", "y_limits", "z_limits"].into_iter().enumerate() {
-        let [low, high] = args.range(name);
-        if let Some(value) = low {
-            min[axis] = value;
-            walls.push((axis, value));
-        }
-        if let Some(value) = high {
-            max[axis] = value;
-            walls.push((axis, value));
-        }
-    }
-    // The walls before the frame, which shares their edges: first drawn wins.
-    for (axis, wall) in walls {
-        draw.face((min, max), axis, wall, REGION);
-    }
-    draw.cuboid((min, max), UNSET);
-}
-
-/// The radii the origin must stay between, around the fixed centre, drawn at
-/// the subject's height: the relation says nothing about Z.
-fn limits_cylinder(draw: &mut Draw, args: &Args, origin: Vec3) {
-    let (Some(x), Some(y)) = (args.number("center_x"), args.number("center_y")) else { return };
-    let center = Vec3::new(x, y, origin.z);
-    draw.cross(center, 0.02, REGION);
-    for name in ["radius_min", "radius_max"] {
-        if let Some(radius) = args.number(name) {
-            draw.circle(center, radius, REGION);
-        }
-    }
-}
-
 /// The rotation applied on top of the solution: an arc per non-zero angle,
 /// swung from the axis the angle turns away from — roll takes Y toward Z,
 /// pitch Z toward X, yaw X toward Y.
@@ -410,7 +384,7 @@ fn ring(draw: &mut Draw, (min, max): Aabb, color: Srgba) {
 /// Gizmo calls in Arena's frame: every point and rotation is turned onto
 /// Bevy's axes on the way through, so the shapes above never see the flip.
 struct Draw<'a, 'w, 's> {
-    gizmos: &'a mut Gizmos<'w, 's, RelationGizmos>,
+    painter: &'a mut Painter<'w, 's>,
     to_bevy: Quat,
 }
 
@@ -426,12 +400,12 @@ impl Draw<'_, '_, '_> {
 
     fn line(&mut self, from: Vec3, to: Vec3, color: Srgba) {
         let (from, to) = (self.point(from), self.point(to));
-        self.gizmos.line(from, to, color);
+        self.painter.gizmos.line(from, to, color);
     }
 
     fn arrow(&mut self, from: Vec3, to: Vec3, color: Srgba) {
         let (from, to) = (self.point(from), self.point(to));
-        self.gizmos.arrow(from, to, color);
+        self.painter.gizmos.arrow(from, to, color);
     }
 
     /// The outline of the face of a box that lies at `at` along `axis`. Plain
@@ -459,7 +433,7 @@ impl Draw<'_, '_, '_> {
     /// A circle in the XY plane.
     fn circle(&mut self, center: Vec3, radius: f32, color: Srgba) {
         let at = self.at(center);
-        self.gizmos.circle(at, radius, color);
+        self.painter.gizmos.circle(at, radius, color);
     }
 
     /// The twelve edges of a box, as plain lines for the reason [`Self::face`] is.
@@ -477,7 +451,7 @@ impl Draw<'_, '_, '_> {
 
     fn cross(&mut self, center: Vec3, half_size: f32, color: Srgba) {
         let at = self.at(center);
-        self.gizmos.cross(at, half_size, color);
+        self.painter.gizmos.cross(at, half_size, color);
     }
 
     /// An arc of `angle` swung about `axis`, starting from the direction `from`.
@@ -485,7 +459,7 @@ impl Draw<'_, '_, '_> {
         // A gizmo arc starts on its isometry's +X and turns about its +Y.
         let frame = Quat::from_mat3(&Mat3::from_cols(from, axis, from.cross(axis)));
         let at = Isometry3d::new(self.to_bevy * center, self.to_bevy * frame);
-        self.gizmos.arc_3d(angle, radius, at, color);
+        self.painter.gizmos.arc_3d(angle, radius, at, color);
     }
 }
 
@@ -559,6 +533,20 @@ mod tests {
         params.insert("overlap".into(), Value::Bool(false));
         params.insert("edge_margin_m".into(), Value::Number(0.6));
         assert!(support(&args(&params, None), parent).is_none());
+    }
+
+    /// A subject fits on the support while its footprint is no wider or
+    /// deeper, and always where `overlap` asks only that they touch.
+    #[test]
+    fn a_subject_wider_than_the_support_does_not_fit() {
+        let support = (Vec3::ZERO, Vec3::new(0.2, 0.3, 0.8));
+        let banana = (Vec3::new(5.0, 5.0, 0.8), Vec3::new(5.18, 5.05, 0.85));
+        let mut params = Params::new();
+        assert!(fits(&args(&params, None), support, banana));
+        let wide = (banana.0, banana.1 + Vec3::X * 0.05);
+        assert!(!fits(&args(&params, None), support, wide));
+        params.insert("overlap".into(), Value::Bool(true));
+        assert!(fits(&args(&params, None), support, wide));
     }
 
     /// `clutter_on` releases over the middle of the parent's footprint, the

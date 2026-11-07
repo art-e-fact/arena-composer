@@ -29,7 +29,7 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::EguiPostUpdateSet;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraSystemSet};
 
-use super::relations::{self, RelationGizmos, SUBJECT};
+use super::relations::SUBJECT;
 use crate::layout::AssetId;
 use crate::scene::Asset;
 
@@ -65,8 +65,8 @@ pub fn plugin(app: &mut App) {
 
 #[derive(Resource, Default)]
 pub struct Highlight {
-    /// Asked for this frame, by id, and whether to tint it.
-    wanted: HashMap<String, bool>,
+    /// Asked for this frame, by id.
+    wanted: HashMap<String, Look>,
     /// The pieces lit now, and what each was before.
     lit: HashMap<Entity, Before>,
     mask: Option<Mask>,
@@ -75,6 +75,14 @@ pub struct Highlight {
 struct Before {
     material: Handle<StandardMaterial>,
     layers: Option<RenderLayers>,
+    look: Look,
+}
+
+/// How a piece is lit: tinted towards a colour, traced, or both.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Look {
+    tint: Option<Srgba>,
+    trace: bool,
 }
 
 /// The camera that draws the lit pieces alone, the image it draws them into,
@@ -87,12 +95,18 @@ struct Mask {
 }
 
 impl Highlight {
-    /// Light `asset` this frame.
-    pub fn show(&mut self, asset: &Asset, gizmos: &mut Gizmos<RelationGizmos>) {
-        if asset.geometry.is_none() {
-            relations::outline(asset, gizmos);
-        } else {
-            self.wanted.insert(asset.id.clone(), asset.role != "background");
+    /// Light `asset` this frame. One with no geometry of its own has nothing
+    /// to light: [`super::relations::Painter::light`] draws its box instead.
+    pub fn show(&mut self, asset: &Asset) {
+        let tint = (asset.role != "background").then_some(SUBJECT);
+        self.wanted.insert(asset.id.clone(), Look { tint, trace: true });
+    }
+
+    /// Tint `asset` towards `color` this frame, untraced — unless it is lit
+    /// already, which wins.
+    pub fn tint(&mut self, asset: &Asset, color: Srgba) {
+        if asset.geometry.is_some() && asset.role != "background" {
+            self.wanted.entry(asset.id.clone()).or_insert(Look { tint: Some(color), trace: false });
         }
     }
 }
@@ -132,40 +146,55 @@ fn apply(
     mut commands: Commands,
 ) {
     let highlight = &mut *highlight;
-    let wanted: HashMap<Entity, bool> = placements
+    let wanted: HashMap<Entity, Look> = placements
         .iter()
         .filter_map(|(id, children)| Some((children, *highlight.wanted.get(&id.0)?)))
-        .flat_map(|(children, tint)| children.iter().map(move |piece| (piece, tint)))
+        .flat_map(|(children, look)| children.iter().map(move |piece| (piece, look)))
         .filter(|(piece, _)| pieces.contains(*piece))
         .collect();
     highlight.wanted.clear();
 
-    // Put back what is no longer asked for. A piece despawned with its layout
-    // has nothing to put back.
-    let gone: Vec<Entity> = highlight.lit.keys().filter(|piece| !wanted.contains_key(piece)).copied().collect();
+    // Put back what is no longer asked for, or asked for in another look. A
+    // piece despawned with its layout has nothing to put back.
+    let gone: Vec<Entity> = highlight
+        .lit
+        .iter()
+        .filter(|(piece, before)| wanted.get(piece) != Some(&before.look))
+        .map(|(piece, _)| *piece)
+        .collect();
+    // What each had before it was lit, for one lit again in another look below:
+    // its layers are put back by a command, still to land when they are read.
+    let mut put_back = HashMap::new();
     for piece in gone {
         let before = highlight.lit.remove(&piece).expect("a lit piece");
         if let Ok((mut material, _)) = pieces.get_mut(piece) {
             material.0 = before.material;
-            match before.layers {
-                Some(layers) => commands.entity(piece).try_insert(layers),
+            match &before.layers {
+                Some(layers) => commands.entity(piece).try_insert(layers.clone()),
                 None => commands.entity(piece).try_remove::<RenderLayers>(),
             };
         }
+        put_back.insert(piece, before.layers);
     }
-    for (&piece, &tint) in &wanted {
+    for (&piece, &look) in &wanted {
         if highlight.lit.contains_key(&piece) {
             continue;
         }
         let Ok((mut material, layers)) = pieces.get_mut(piece) else { continue };
-        let before = Before { material: material.0.clone(), layers: layers.cloned() };
-        if tint && let Some(original) = materials.get(&material.0) {
+        let layers = put_back.remove(&piece).unwrap_or_else(|| layers.cloned());
+        let before = Before { material: material.0.clone(), layers, look };
+        if let Some(color) = look.tint
+            && let Some(original) = materials.get(&material.0)
+        {
             let mut tinted = original.clone();
-            tinted.base_color = tinted.base_color.mix(&SUBJECT.into(), TINT);
-            tinted.emissive += LinearRgba::from(SUBJECT) * GLOW;
+            // The tint's alpha is how strongly: a reference is tinted lighter.
+            tinted.base_color = tinted.base_color.mix(&color.with_alpha(1.0).into(), TINT * color.alpha);
+            tinted.emissive += LinearRgba::from(color.with_alpha(1.0)) * GLOW * color.alpha;
             material.0 = materials.add(tinted);
         }
-        commands.entity(piece).try_insert(before.layers.clone().unwrap_or_default().with(MASK));
+        if look.trace {
+            commands.entity(piece).try_insert(before.layers.clone().unwrap_or_default().with(MASK));
+        }
         highlight.lit.insert(piece, before);
     }
 
@@ -212,8 +241,8 @@ fn apply(
             silhouette.width.x = OUTLINE_PX * window.map_or(1.0, |window| window.scale_factor());
         }
     }
-    // Neither draws while nothing is lit.
-    let on = !highlight.lit.is_empty();
+    // Neither draws while nothing is traced.
+    let on = highlight.lit.values().any(|before| before.look.trace);
     if let Ok((mut mask_camera, mut mask_projection)) = cameras.get_mut(mask.camera) {
         mask_camera.is_active = on;
         mask_camera.sub_camera_view = camera.sub_camera_view;
@@ -254,8 +283,8 @@ mod tests {
         };
 
         let mut wanted = world.resource_mut::<Highlight>();
-        wanted.wanted.insert("bowl".into(), true);
-        wanted.wanted.insert("kitchen".into(), false);
+        wanted.wanted.insert("bowl".into(), Look { tint: Some(SUBJECT), trace: true });
+        wanted.wanted.insert("kitchen".into(), Look { tint: None, trace: true });
         world.run_system_once(apply).expect("apply runs");
         assert_eq!(lit(&world, bowl), (true, true), "the bowl is tinted and traced");
         assert_eq!(lit(&world, kitchen), (false, true), "the background is traced alone");
@@ -265,5 +294,17 @@ mod tests {
         world.run_system_once(apply).expect("apply runs");
         assert_eq!(lit(&world, bowl), (false, false), "the bowl is put back");
         assert_eq!(lit(&world, kitchen), (false, false), "the background is put back");
+
+        // Traced, then tinted alone, as a hovered reference is once the pointer
+        // leaves it, and then let go: the trace's layer goes with the first look.
+        let mut wanted = world.resource_mut::<Highlight>();
+        wanted.wanted.insert("bowl".into(), Look { tint: Some(SUBJECT), trace: true });
+        world.run_system_once(apply).expect("apply runs");
+        let mut wanted = world.resource_mut::<Highlight>();
+        wanted.wanted.insert("bowl".into(), Look { tint: Some(SUBJECT), trace: false });
+        world.run_system_once(apply).expect("apply runs");
+        assert_eq!(lit(&world, bowl), (true, false), "tinted, no longer traced");
+        world.run_system_once(apply).expect("apply runs");
+        assert_eq!(lit(&world, bowl), (false, false), "put back, untraced");
     }
 }
