@@ -45,6 +45,7 @@ To see the window without a person at the keyboard:
 | --- | --- | --- |
 | `ARENA_VIEWER_SCREENSHOT=shot.png` | draw a moment, write the window (only) to the file, quit | [viewer.rs](../src/viewer.rs) |
 | `ARENA_VIEWER_SIZE=1440x900` | open the window that size, in logical pixels | [viewer.rs](../src/viewer.rs) `resolution` |
+| `ARENA_VIEWER_CAMERA=2.78,-4.42,1.89,2.78,-3.62,0.93` | open with the camera at that eye, looking at that point, in Arena's frame, in place of the background's own | [viewer.rs](../src/viewer.rs) `camera` |
 | `ARENA_VIEWER_SEARCH=basket` | open the asset browser filtered, with the first match picked | [browser.rs](../src/editor/browser.rs) `Browser` |
 | `ARENA_VIEWER_DOCK=graph` | open the dock on the spatial graph | [dock.rs](../src/editor/dock.rs) `Dock` |
 | `ARENA_VIEWER_DOCK_HEIGHT=420` | open the dock that tall | [dock.rs](../src/editor/dock.rs) `Dock` |
