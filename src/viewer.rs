@@ -21,8 +21,8 @@ use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::layout::{ArenaRoot, View, framing, occlusion, sky, spawn_lighting, spawn_scene};
-use crate::scene::Scene;
+use crate::layout::{ArenaRoot, View, framing, looking, occlusion, sky, spawn_lighting, spawn_scene};
+use crate::scene::{Scene, ViewerCfg};
 use crate::spawn::Built;
 
 /// The scene the app was launched with, kept so `setup` can read it.
@@ -306,7 +306,7 @@ fn turn_page(world: &mut World) {
 }
 
 fn spawn_camera(world: &mut World, scene: &Scene) {
-    let framed = framing(View::Default, scene);
+    let framed = camera().map_or_else(|| framing(View::Default, scene), |viewer| looking(&viewer));
     let sky = sky(world);
     world.spawn((
         Camera3d::default(),
@@ -321,6 +321,24 @@ fn spawn_camera(world: &mut World, scene: &Scene) {
         sky,
         occlusion(),
     ));
+}
+
+/// `ARENA_VIEWER_CAMERA=2.95,-4.62,1.89,2.95,-3.82,0.93` stands the camera at the
+/// first three numbers and turns it to the last three, in Arena's frame, as a
+/// background suggests a camera: a screenshot's angle, where the background's
+/// is not the one wanted.
+fn camera() -> Option<ViewerCfg> {
+    let text = std::env::var("ARENA_VIEWER_CAMERA").ok()?;
+    let parsed = parse_camera(&text);
+    Some(parsed.unwrap_or_else(|| panic!("ARENA_VIEWER_CAMERA={text}: six numbers, the eye's x,y,z and the point's")))
+}
+
+fn parse_camera(text: &str) -> Option<ViewerCfg> {
+    let numbers = text.split(',').map(|number| number.trim().parse().ok()).collect::<Option<Vec<f32>>>()?;
+    let [x, y, z, at_x, at_y, at_z] = numbers[..] else {
+        return None;
+    };
+    Some(ViewerCfg { eye: [x, y, z], lookat: [at_x, at_y, at_z] })
 }
 
 /// The status line, in the window's top-left corner: the asset browser docks
@@ -360,6 +378,16 @@ mod tests {
     use super::*;
     use crate::layout::{AssetId, Placed};
     use crate::scene::{Asset, Geometry, Node as GeometryNode};
+
+    /// Six numbers are an eye and the point it looks at; anything else is not.
+    #[test]
+    fn a_camera_is_six_numbers() {
+        let viewer = parse_camera("2.75, -5.2, 2.3,2.75,-3.5,0.9").expect("six numbers");
+        assert_eq!((viewer.eye, viewer.lookat), ([2.75, -5.2, 2.3], [2.75, -3.5, 0.9]));
+        for wrong in ["", "1,2,3", "1,2,3,4,5,6,7", "1,2,3,4,5,x"] {
+            assert!(parse_camera(wrong).is_none(), "{wrong:?}");
+        }
+    }
 
     /// One asset at `position`, pointing at a geometry entry. The node itself
     /// is degenerate — no test here uploads a mesh.

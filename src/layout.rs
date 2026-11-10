@@ -12,7 +12,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
-use crate::scene::{Asset, Scene, arena_to_bevy};
+use crate::scene::{Asset, Scene, ViewerCfg, arena_to_bevy};
 use crate::spawn::spawn_geometry;
 
 /// Parent of everything in the layout; holds the Z-up → Y-up correction so
@@ -320,22 +320,25 @@ pub fn framing(view: View, scene: &Scene) -> Framing {
 /// view sized to the layout.
 fn perspective(scene: &Scene, focus: Vec3, size: Vec3) -> Framing {
     if let Some(viewer) = &scene.viewer {
-        let to_bevy = arena_to_bevy();
-        let (eye, lookat) = (
-            to_bevy * Vec3::from(viewer.eye),
-            to_bevy * Vec3::from(viewer.lookat),
-        );
-        return Framing {
-            transform: Transform::from_translation(eye).looking_at(lookat, Vec3::Y),
-            projection: Projection::default(),
-            focus: lookat,
-        };
+        return looking(viewer);
     }
     let eye = focus + Vec3::new(0.7, 0.55, 1.0).normalize() * fitting_distance(size);
     Framing {
         transform: Transform::from_translation(eye).looking_at(focus, Vec3::Y),
         projection: Projection::default(),
         focus,
+    }
+}
+
+/// The perspective camera at `viewer`'s eye, turned to its point: the one a
+/// background suggests, or the one a screenshot asks for (`ARENA_VIEWER_CAMERA`).
+pub fn looking(viewer: &ViewerCfg) -> Framing {
+    let to_bevy = arena_to_bevy();
+    let (eye, lookat) = (to_bevy * Vec3::from(viewer.eye), to_bevy * Vec3::from(viewer.lookat));
+    Framing {
+        transform: Transform::from_translation(eye).looking_at(lookat, Vec3::Y),
+        projection: Projection::default(),
+        focus: lookat,
     }
 }
 

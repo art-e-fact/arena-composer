@@ -80,7 +80,7 @@ relations:
   subject: plate
   params:
     x_limits: [2.55, 2.75]
-    y_limits: [-4.0, -3.7]
+    y_limits: [-3.92, -3.62]
 - kind: 'on'
   subject: apple
   reference: plate
@@ -116,12 +116,14 @@ relations:
   subject: milk
   params:
     x_limits: [3.3, 3.4]
-    y_limits: [-3.5, -3.35]
+    y_limits: [-3.42, -3.27]
 - kind: position_limits_box
   subject: mug
   params:
-    x_limits: [2.2, 2.3]
-    y_limits: [-3.95, -3.8]
+    # In front of the bowl, off the line from the plate to it: the mug's face_to and the bowl's
+    # next_to then come at the bowl from two sides, rather than as one run of chevrons.
+    x_limits: [3.05, 3.15]
+    y_limits: [-4.22, -4.12]
 - kind: not_next_to
   subject: milk
   reference: plate

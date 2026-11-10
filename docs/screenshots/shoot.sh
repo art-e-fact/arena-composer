@@ -46,4 +46,7 @@ shoot() {
 }
 
 shoot assets.png kitchen_island ARENA_VIEWER_SEARCH="kitchenware mug" ARENA_VIEWER_PICK=wooden_bowl
-shoot graph.png kitchen_island ARENA_VIEWER_DOCK=graph ARENA_VIEWER_DOCK_HEIGHT=400 ARENA_VIEWER_PICK=10 ARENA_VIEWER_SHOW_RELATIONS=7,10,12
+# From 1.25 m off and 50° above the island's objects, rather than the kitchen's own eye-level
+# camera, which sees the marks lying on the table almost edge-on.
+shoot graph.png kitchen_island ARENA_VIEWER_DOCK=graph ARENA_VIEWER_DOCK_HEIGHT=400 ARENA_VIEWER_PICK=10 ARENA_VIEWER_SHOW_RELATIONS=7,10,12 \
+    ARENA_VIEWER_CAMERA=2.95,-4.62,1.89,2.95,-3.82,0.93

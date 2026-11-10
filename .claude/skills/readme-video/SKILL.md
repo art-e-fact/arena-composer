@@ -7,7 +7,7 @@ description: Re-records the README's demo video of the visual editor with docs/v
 
 The README's video is arena-view used by hand: the kitchen, then a double-click in close over the
 island; a search over the assets and the SimReady props, and a prop dragged onto the plate, whose
-top lights up; the view's menu on the bowl, each relation drawn as it is hovered; the spatial
+top lights up; the view's menu on the mug, each relation drawn as it is hovered; the spatial
 graph, where the bowl's `next_to` is opened, kept drawn and sent round behind the plate; the
 plate's box widened from its card; and the pager turned through the five layouts with all three
 drawn. One command records it:
