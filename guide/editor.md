@@ -10,7 +10,7 @@ arena-view environments/tasks/banana_in_bowl.yaml
 ```
 
 <!-- assets.png -->
-[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/079ed9bc-5d23-46e6-a1be-1c7d11edd726)](https://github.com/user-attachments/assets/079ed9bc-5d23-46e6-a1be-1c7d11edd726)
+[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/33e51349-87b4-4560-90e6-fc65695e0f6f)](https://github.com/user-attachments/assets/33e51349-87b4-4560-90e6-fc65695e0f6f)
 
 > [!TIP]
 > Leave it open while you edit the YAML in your text editor, or while your agent works on it: the
@@ -90,7 +90,7 @@ Central prop's details give the credit to keep with whatever you share that uses
 ## The spatial graph
 
 <!-- graph.png -->
-[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/f4e7de5a-794b-4096-8536-d3cd6fc207e9)](https://github.com/user-attachments/assets/f4e7de5a-794b-4096-8536-d3cd6fc207e9)
+[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/1e155fc1-fa29-487d-a94d-c0e8f498b9aa)](https://github.com/user-attachments/assets/1e155fc1-fa29-487d-a94d-c0e8f498b9aa)
 
 The graph draws the spec the way Arena's own review GUI does: a node per object, and an edge per
 relation, labelled with its kind. What a thing is placed against is drawn below it, so the anchor
