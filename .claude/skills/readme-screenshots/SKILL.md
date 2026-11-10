@@ -53,8 +53,11 @@ Relations are named by position in the spec's `relations:` list, from 0, in both
 and `ARENA_VIEWER_SHOW_RELATIONS`. Editing that list moves them.
 
 The scene is an ordinary spec beside the script, `docs/screenshots/kitchen_island.yaml`, written to
-show the editor off. The kitchen fills the view from the background's own camera, which no spec can
-move, and position limits keep the objects inside it. `shoot.sh` packs `<scene>.msgpack` beside the
+show the editor off. In `assets.png` the kitchen fills the view from the background's own camera,
+which no spec can move, and position limits keep the objects inside it. `graph.png` sets a camera of
+its own with `ARENA_VIEWER_CAMERA`, higher and closer over the island, since the relation marks lie
+on the surfaces and the background's camera looks at them almost edge-on; it names points in the
+scene, so moving the objects moves what it should look at. `shoot.sh` packs `<scene>.msgpack` beside the
 spec whenever the spec is newer, with this checkout's packer. That needs:
 
 - Arena's venv active, and the network: Lightwheel's SDK asks its server for every kitchen, cached
