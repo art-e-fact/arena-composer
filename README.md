@@ -23,7 +23,7 @@
     <!-- assets.png -->
     <td width="50%"><a href="https://github.com/user-attachments/assets/079ed9bc-5d23-46e6-a1be-1c7d11edd726"><img src="https://github.com/user-attachments/assets/079ed9bc-5d23-46e6-a1be-1c7d11edd726" alt="The visual editor with the asset browser searched"></a></td>
     <!-- graph.png -->
-    <td width="50%"><a href="https://github.com/user-attachments/assets/67f4f903-6b2c-467b-85a2-62e47804d368"><img src="https://github.com/user-attachments/assets/67f4f903-6b2c-467b-85a2-62e47804d368" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
+    <td width="50%"><a href="https://github.com/user-attachments/assets/f4e7de5a-794b-4096-8536-d3cd6fc207e9"><img src="https://github.com/user-attachments/assets/f4e7de5a-794b-4096-8536-d3cd6fc207e9" alt="The visual editor with the spatial graph and a relation drawn over the layout"></a></td>
   </tr>
   <tr>
     <td>Search Arena's assets and NVIDIA's SimReady props, and drag one onto the layout. Every entry of the spec is a card in the panel.</td>
