@@ -10,7 +10,7 @@ arena-view environments/tasks/banana_in_bowl.yaml
 ```
 
 <!-- assets.png -->
-[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce)](https://github.com/user-attachments/assets/f66380f1-69a8-45f5-8a1a-6d8f177e56ce)
+[![The visual editor with the asset browser searched](https://github.com/user-attachments/assets/079ed9bc-5d23-46e6-a1be-1c7d11edd726)](https://github.com/user-attachments/assets/079ed9bc-5d23-46e6-a1be-1c7d11edd726)
 
 > [!TIP]
 > Leave it open while you edit the YAML in your text editor, or while your agent works on it: the
@@ -45,7 +45,11 @@ Every entry of the spec is a card, folded to one line or open to its fields:
 - **Fields are menus wherever they can be.** An id, a kind or an asset is picked from what exists, so
   a card cannot name something that is not there.
 - **A relation shows its shape.** Hover its card to draw it over the layout, and click its 👁 to keep
-  it drawn. Its subject is boxed, the box the solver keeps clear. Where the relation places the
+  it drawn. Its subject is lit and ringed in orange, and what it refers to is tinted aqua. What the
+  relation allows lies on the surface the objects stand on: an aqua patch, rimmed where the
+  relation bounds it and fading out where it leaves a side open, and red where nothing can stand,
+  as on a support narrower than its subject. A bound a position limit sets stands up as a glowing
+  wall, and chevrons march the way `next_to` and `face_to` lead. Where the relation places the
   subject's origin rather than its box — `position_limits_box`, `position_limits_cylindrical`,
   `at_position`, `not_next_to` — a **+** marks the origin, which is seldom the box's middle. Drag
   one of its numbers and the shape moves with you; the edit is sent when you let go.
@@ -86,7 +90,7 @@ Central prop's details give the credit to keep with whatever you share that uses
 ## The spatial graph
 
 <!-- graph.png -->
-[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc)](https://github.com/user-attachments/assets/728d2d51-15f2-4346-82ef-5d0565f75bfc)
+[![The visual editor with the spatial graph and a relation drawn over the layout](https://github.com/user-attachments/assets/67f4f903-6b2c-467b-85a2-62e47804d368)](https://github.com/user-attachments/assets/67f4f903-6b2c-467b-85a2-62e47804d368)
 
 The graph draws the spec the way Arena's own review GUI does: a node per object, and an edge per
 relation, labelled with its kind. What a thing is placed against is drawn below it, so the anchor

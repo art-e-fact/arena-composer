@@ -25,9 +25,9 @@ use bevy_panorbit_camera::PanOrbitCamera;
 
 use super::drop::target;
 use super::graph::Item;
-use super::highlight::Highlight;
 use super::menu;
-use super::relations::{self, RelationGizmos};
+use super::relations::{self, Painter};
+use super::shapes::Piece;
 use super::{Form, PointerOverPanel, pointer_in_the_view};
 use crate::layout::{AssetId, Placed, fitting_distance, world_aabb};
 use crate::scene::{Asset, arena_to_bevy};
@@ -55,8 +55,8 @@ pub fn pick_in_the_view(
     // From a piece of mesh to the placement it hangs under, and its id.
     parents: Query<&ChildOf>,
     ids: Query<&AssetId>,
-    mut gizmos: Gizmos<RelationGizmos>,
-    mut highlight: ResMut<Highlight>,
+    mut painter: Painter,
+    shapes: Query<(), With<Piece>>,
     mut clicked: MessageWriter<Clicked>,
     // What the pointer is over, by id, found when it last moved.
     mut under: Local<Option<String>>,
@@ -80,10 +80,13 @@ pub fn pick_in_the_view(
     if !in_view {
         *under = None;
     } else if settled || placed.is_changed() {
+        // Through the relation visuals' shapes, to what they are drawn over.
+        let through = |entity| !shapes.contains(entity);
+        let settings = MeshRayCastSettings::default().with_filter(&through);
         *under = window
             .cursor_position()
             .and_then(|cursor| camera.viewport_to_world(transform, cursor).ok())
-            .and_then(|ray| ray_cast.cast_ray(ray, &MeshRayCastSettings::default()).first().cloned())
+            .and_then(|ray| ray_cast.cast_ray(ray, &settings).first().cloned())
             .and_then(|(piece, hit)| {
                 let owner = ids.get(parents.get(piece).ok()?.parent()).ok()?;
                 picked(&placed, &form.spec, &owner.0, arena_to_bevy().inverse() * hit.point)
@@ -98,7 +101,7 @@ pub fn pick_in_the_view(
         *menu_on = asset.map(|asset| asset.id.clone());
     }
     if let Some(asset) = asset {
-        highlight.show(asset, &mut gizmos);
+        painter.light(asset);
         if double {
             let (min, max) = world_aabb(asset);
             orbit.target_focus = arena_to_bevy() * ((min + max) / 2.0);
@@ -116,10 +119,10 @@ pub fn pick_in_the_view(
     };
     // What the menu is about stays lit while the pointer is off it.
     if let Some(asset) = relations::find(&placed, &id) {
-        highlight.show(asset, &mut gizmos);
+        painter.light(asset);
     }
     if let Some(relation) = used.hovered.and_then(|index| form.spec.relations.get(index)) {
-        relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut gizmos);
+        relations::draw(relation, form.vocabulary.relation(&relation.kind), &placed, &mut painter);
     }
     if let Some(item) = used.picked {
         clicked.write(Clicked(Some(item)));

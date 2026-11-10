@@ -21,7 +21,9 @@ spec, every add picked from the vocabulary.
 | [pick.rs](../src/editor/pick.rs) | a click in the view: what it picks, and the double click that focuses the camera |
 | [highlight.rs](../src/editor/highlight.rs) | lighting up what is hovered: a tint, and a silhouette from a camera of its own |
 | [menu.rs](../src/editor/menu.rs) | the right-click menu in the view: an entry's relations, a relation to add, its removal |
-| [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout |
+| [relations.rs](../src/editor/relations.rs) | a relation's shape drawn over the layout, as lines where it has no marks |
+| [relations/marks.rs](../src/editor/relations/marks.rs) | the marks a relation lays on the surfaces: fills, walls, chevrons |
+| [shapes.rs](../src/editor/shapes.rs) | the meshes the marks are drawn with, a pool kept between frames |
 
 **Rust never writes YAML.** [spec_edit.py](../python/arena_composer/spec_edit.py) is the only writer:
 it knows which file a value belongs in, keeps comments, and quotes what YAML 1.1 would read
@@ -205,7 +207,7 @@ geometry arrives as the inverse of a curve this code does not own: an unlit dome
 landed at `#8b94a3`, with its whole ramp flattened. `ClearColor` is written into the target rather
 than shaded, and a UI node is drawn past the tonemapper, so both arrive exactly as authored.
 
-## Relation gizmos
+## Relation marks
 
 Hovering a relation draws its shape over the layout, and the eye toggle keeps it drawn. The shapes
 are the ones Arena's loss strategies score
@@ -214,10 +216,36 @@ solved poses; see the module docs of [relations.rs](../src/editor/relations.rs).
 Two rules there are documented at their functions: the reported box already carries `Object.scale`
 (`layout::world_aabb`), and a spec's params are read with the vocabulary's defaults behind them.
 
-Every shape boxes its subject: that box is what the solver keeps clear, so it stays a box whatever
-lights up a hovered object. A cross marks the subject's origin only for the kinds whose loss holds
-the origin itself — the position limits, `at_position`, `not_next_to` — where an object can stand
-half out of a limits box and still pass. Elsewhere the origin, seldom the box's middle, is noise.
+`on`, `next_to`, `face_to` and the two position limits lie on the surfaces the objects stand on
+([relations/marks.rs](../src/editor/relations/marks.rs)), a mark to a job: a rimmed fill is where
+the subject may go, a wall fading upward a bound the loss holds, marching chevrons the way the
+relation reads, and a thin gizmo line traces a mark through whatever stands on it. The other kinds
+keep their gizmo lines. The subject is lit as a hovered object is, and ringed; the reference is
+tinted at half strength and not traced (`Highlight::tint`). A cross marks the subject's origin only
+for the kinds whose loss holds the origin itself — the position limits, `at_position`,
+`not_next_to` — where an object can stand half out of a limits box and still pass. Elsewhere the
+origin, seldom the box's middle, is noise.
+
+The marks are meshes from a pool ([shapes.rs](../src/editor/shapes.rs)), asked for every frame as
+gizmos are and kept between frames, with a material per colour; so a fading chevron steps its alpha
+in eighths rather than minting a material a frame. **A ray cast into the view skips
+`shapes::Piece`**, or a pick or a drop lands on the mark under the pointer and not on what it is
+drawn over. The marks are blended and depth-tested, held off the surface under them by `LIFT`, so
+an object standing on one hides it: the gizmo traces are what show through, since `RelationGizmos`
+draws over everything.
+
+Chevrons march by `Time`, which costs nothing: the window redraws every frame anyway. A recording
+(`ARENA_VIEWER_RECORD`) steps the clock a frame at a time, so it comes out the same every run, and
+a screenshot (`ARENA_VIEWER_SCREENSHOT`) holds them still.
+
+`on` is red where nothing can stand: the margin has eaten the top, or the subject is wider or deeper
+than what is left, as Arena's `OnRelationValidator` finds (`relations::fits`). A drop has no subject
+yet, so it goes by the margin alone.
+
+Not done yet: the marks are sized in metres, so zoomed out to a whole kitchen their strokes fall
+under a pixel and only the traces are left. The trace of a `next_to` slot runs across the subject
+standing in it, where only its hidden part should show. And `on` with `overlap` keeps a closed rim,
+though the subject then only has to touch the support.
 
 A number being dragged is previewed before it is sent. `PanelState::editing` holds the value and
 its spec path, and `form::pending` lays it over the relation the gizmos are built from, so the
@@ -258,14 +286,15 @@ the window's camera draws into a window-sized image, and a full-window `UiMateri
 image's alpha, under the panels egui draws. So a mug inside a cabinet is traced, and the robot's
 stand under the table. The background is traced alone, since the pointer rests on it whenever it
 is on a wall or the floor, and an object reference, which draws nothing, keeps its box
-(`relations::outline`).
+(`relations::Painter::light`).
 
 Two rules follow. **Any query for the view's camera filters on `PanOrbitCamera`**: there are two
 `Camera3d` once something has been hovered, and a bare `Single<&Camera>` stops matching, which skips
 its system without a word. And the highlight is state, not a gizmo: the callers ask for it every
-frame (`Highlight::show`), and `apply` puts back whatever was not asked for again, so a caller that
-stops asking is all it takes to turn it off. The mask camera and the overlay are off while nothing
-is lit.
+frame (`Painter::light`, which goes on to `Highlight::show`, or `Highlight::tint` for a tint
+alone), and `apply` puts back whatever was not asked for again, so a caller that stops asking is
+all it takes to turn it off. A piece asked for in another look is put back and lit afresh, keeping
+what it had before the first. The mask camera and the overlay are off while nothing is traced.
 
 ## The menu in the view
 

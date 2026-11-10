@@ -2,23 +2,24 @@
 # Retakes the README's screenshots of the visual editor, one `shoot` line each
 # at the foot. How to change what they show: .claude/skills/readme-screenshots.
 #
-# Needs Xephyr, Mesa's lavapipe and cargo; and to pack a scene, Arena's venv
+# Needs Xvfb, Mesa's lavapipe and cargo; and to pack a scene, Arena's venv
 # and the network. A packed scene (`*.msgpack`, ~90 MB) names files in this
 # machine's asset cache, so it stays out of git, repacked when its spec is newer.
 set -euo pipefail
 cd "$(dirname "$0")"
 cargo build --quiet --bin arena-viewer
 
-# A nested X server, so nothing lands on the desktop's display and the window
-# has the same scale on every machine. It says which display it took once it
+# An X server of its own, drawn in memory, so no window opens on the desktop
+# and the screen has the same size and scale on every machine. (Xephyr would
+# be one more window on the desktop.) It says which display it took once it
 # accepts connections.
+command -v Xvfb >/dev/null || { echo "shoot.sh needs Xvfb: sudo apt install xvfb" >&2; exit 1; }
 logs=$(mktemp -d)
-Xephyr -displayfd 3 -screen 1600x1000 -ac -br -noreset 3>"$logs/display" 2>"$logs/xephyr.log" &
-xephyr=$!
-trap 'kill $xephyr 2>/dev/null || true; rm -rf "$logs"' EXIT
+Xvfb -displayfd 3 -screen 0 1600x1000x24 -ac -noreset 3>"$logs/display" 2>"$logs/xvfb.log" &
+xvfb=$!
+trap 'kill $xvfb 2>/dev/null || true; rm -rf "$logs"' EXIT
 until [[ -s $logs/display ]]; do
-    # It exits, rather than says, when there is no display to open its window on.
-    kill -0 $xephyr 2>/dev/null || { cat "$logs/xephyr.log" >&2; exit 1; }
+    kill -0 $xvfb 2>/dev/null || { cat "$logs/xvfb.log" >&2; exit 1; }
     sleep 0.1
 done
 display=:$(<"$logs/display")

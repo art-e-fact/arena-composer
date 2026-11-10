@@ -3,7 +3,8 @@
 # object reference, and relations of several kinds, unary ones among them for the graph's chips.
 # The position limits keep the objects inside that camera's frame. Relations are named by position
 # in shoot.sh: move one and update it there. The README's video plays in this scene too, and
-# docs/video/tour.json names its objects, and the next_to between the bowl and the plate.
+# docs/video/tour.json names its objects, the next_to between the bowl and the plate, the mug's
+# face_to, and the plate's position_limits_box by its x_limits.
 env_name: kitchen_island
 embodiment:
   id: droid
@@ -64,6 +65,9 @@ relations:
   reference: island_top
   params:
     side: positive_y
+    # The robot's stand is placed against the island's side: at the default 1 cm, about half the
+    # solver's candidates miss it, and a sample of the five can fail with an object added.
+    tolerance_m: 0.05
 - kind: rotate_around_solution
   subject: droid
   params:
@@ -94,7 +98,8 @@ relations:
   reference: plate
   params:
     side: positive_x
-    distance_m: 0.1
+    # Room for the video's pear: it adds one to the plate, then sends the bowl round behind it.
+    distance_m: 0.15
 - kind: 'on'
   subject: mug
   reference: island_top
