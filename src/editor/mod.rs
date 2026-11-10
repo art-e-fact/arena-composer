@@ -274,10 +274,24 @@ impl Form {
 /// write cannot block long enough to be worth getting off this thread.
 // ponytail: blocking write on the render thread; channel + thread if an intent
 // ever outruns Python.
-#[cfg(not(test))]
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
 fn send(request: Request) {
     if let Err(error) = crate::wire::write_request(&mut std::io::stdout().lock(), &request) {
         error!("request: {error:#}");
+    }
+}
+
+/// Hand one request to the page, packed as [`crate::wire::write_request`]
+/// packs one, minus the length: a WebSocket frame has its own.
+#[cfg(all(not(test), target_arch = "wasm32"))]
+fn send(request: Request) {
+    match rmp_serde::to_vec_named(&request) {
+        Ok(payload) => {
+            if let Err(error) = crate::web::arena_request(&payload) {
+                error!("request: {error:?}");
+            }
+        }
+        Err(error) => error!("request: {error:#}"),
     }
 }
 

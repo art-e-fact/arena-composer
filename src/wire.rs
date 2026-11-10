@@ -12,7 +12,7 @@
 //!
 //! A layout is most of a message's bytes, and most of those are the geometry
 //! the layout before it drew too. So `arena_composer.view._send_layout` names
-//! that by its id alone, and the reader fills it back in: [`SceneReader`].
+//! that by its id alone, and the reader fills it back in: [`Decoder`].
 
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -25,42 +25,30 @@ use bevy::log::error;
 use crate::scene::{Node, Scene};
 use crate::spec::Request;
 
-/// Reads scenes off a stream, giving back the geometry a layout names by id
-/// alone from the layout before it.
+/// Decodes scenes, giving back the geometry a layout names by id alone from
+/// the layout before it.
 ///
-/// It keeps the geometry of the last layout it read and no other, which is
+/// It keeps the geometry of the last layout it decoded and no other, which is
 /// what `_send_layout` takes it to hold: a message carrying no layout, as an
-/// edit's first answer does, leaves that alone. Past the reader, every
+/// edit's first answer does, leaves that alone. Past the decoder, every
 /// geometry carries its nodes.
-pub struct SceneReader<R> {
-    stream: R,
+///
+/// Apart from [`SceneReader`] because the pipe is one transport of two: the
+/// browser's messages arrive whole, one per WebSocket frame, with no stream to
+/// frame (`crate::web`).
+#[derive(Default)]
+pub struct Decoder {
     held: HashMap<String, Arc<Vec<Node>>>,
 }
 
-impl<R: Read> SceneReader<R> {
-    pub fn new(stream: R) -> Self {
-        Self {
-            stream,
-            held: HashMap::new(),
-        }
-    }
-
-    /// Read one scene, or `None` once the stream has ended.
-    pub fn read(&mut self) -> anyhow::Result<Option<Scene>> {
-        let mut length = [0u8; 4];
-        match self.stream.read_exact(&mut length) {
-            Ok(()) => {}
-            // A closed pipe reads as EOF, as does a scene cut short; both end it.
-            Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
-            Err(error) => return Err(error.into()),
-        }
-        let mut payload = vec![0; u32::from_be_bytes(length) as usize];
-        self.stream.read_exact(&mut payload)?;
-        let mut scene = Scene::from_msgpack(&payload)?;
+impl Decoder {
+    /// Decode one message.
+    pub fn decode(&mut self, payload: &[u8]) -> anyhow::Result<Scene> {
+        let mut scene = Scene::from_msgpack(payload)?;
         if scene.assets.is_some() {
             self.fill(&mut scene)?;
         }
-        Ok(Some(scene))
+        Ok(scene)
     }
 
     /// Give each of a layout's geometries its nodes, and keep them for the
@@ -79,6 +67,36 @@ impl<R: Read> SceneReader<R> {
         }
         self.held = held;
         Ok(())
+    }
+}
+
+/// Reads scenes off a stream, one length-prefixed message at a time, through
+/// a [`Decoder`].
+pub struct SceneReader<R> {
+    stream: R,
+    decoder: Decoder,
+}
+
+impl<R: Read> SceneReader<R> {
+    pub fn new(stream: R) -> Self {
+        Self {
+            stream,
+            decoder: Decoder::default(),
+        }
+    }
+
+    /// Read one scene, or `None` once the stream has ended.
+    pub fn read(&mut self) -> anyhow::Result<Option<Scene>> {
+        let mut length = [0u8; 4];
+        match self.stream.read_exact(&mut length) {
+            Ok(()) => {}
+            // A closed pipe reads as EOF, as does a scene cut short; both end it.
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let mut payload = vec![0; u32::from_be_bytes(length) as usize];
+        self.stream.read_exact(&mut payload)?;
+        self.decoder.decode(&payload).map(Some)
     }
 
     /// Send on every scene in the stream until it ends.

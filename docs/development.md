@@ -94,6 +94,11 @@ It needs rustup's wasm32 target and the `wasm-bindgen` CLI at the version `Cargo
 (`cargo install wasm-bindgen-cli --version <it>`). It draws through WebGL2. An edit in the panel
 stays in its card, as it does in `arena-viewer`.
 
+A page with a server behind it can carry what `arena-view`'s pipe does, unframed: `view` takes the
+opening payload, `push` each one after it, and the panel's requests go to the page's
+`globalThis.arena_request`. On the Python side, `view.serve` draws in any
+`viewer_process.Viewer`, not only the child process.
+
 ## Tests
 
 ```bash

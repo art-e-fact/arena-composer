@@ -13,6 +13,9 @@ viewer in this process would leave nothing to run beside it. As a child it gets
 that main thread, this one stays an ordinary asyncio program with a task per
 concern, and Arena stays imported between resolves — which is what makes a
 reload seconds rather than a restart.
+
+The child is one window of any: :func:`serve` draws in whatever carries the
+same messages (`viewer_process.Viewer`), as a server does a browser tab's.
 """
 
 from __future__ import annotations
@@ -85,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.payload:
         args.payload.write_bytes(pack(payload))
 
-    return asyncio.run(_view(args.spec, args.seed, args.samples, payload, stamps))
+    return asyncio.run(serve(args.spec, args.seed, args.samples, payload=payload, stamps=stamps))
 
 
 def _resolve(spec: Path, seed: int | None, samples: int, remote: bool = False) -> dict[str, Any]:
@@ -93,43 +96,48 @@ def _resolve(spec: Path, seed: int | None, samples: int, remote: bool = False) -
     what goes into the pipe depends on what the window holds (`_send_layout`).
     Seconds of work."""
     # Arena and the solver print progress to stdout; keep it off stdout so a
-    # caller can still pipe this command's own output somewhere.
-    with contextlib.redirect_stdout(sys.stderr):
+    # caller can still pipe this command's own output somewhere. One solve in
+    # the process at a time, an MCP tool's included: see `catalog.SOLVING`.
+    with catalog.SOLVING, contextlib.redirect_stdout(sys.stderr):
         return build_payload(resolve_layout_from_yaml(spec, seed=seed, samples=samples), remote=remote)
 
 
-async def _view(
-    spec: Path, seed: int | None, samples: int, payload: dict[str, Any], stamps: dict[Path, int | None]
+async def serve(
+    spec: Path,
+    seed: int | None,
+    samples: int,
+    viewer: viewer_process.Viewer | None = None,
+    payload: dict[str, Any] | None = None,
+    stamps: dict[Path, int | None] | None = None,
 ) -> int:
-    """Draw `payload`, reloading it from `spec` until the window closes.
-    `stamps` is the files as they stood when `payload` was solved from them."""
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        viewer_process.__name__,
-        stdin=asyncio.subprocess.PIPE,
-        # The editor's edits come back this way. Bevy logs to stderr, so
-        # stdout carries nothing else — see `src/wire.rs`.
-        stdout=asyncio.subprocess.PIPE,
-    )
+    """Draw `spec` in `viewer`, reloading it until the window closes, and serve
+    what its panel asks. Returns the window's exit status.
 
-    def stop() -> None:
-        """Close the window. Safe once it has closed itself."""
-        if proc.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                proc.terminate()
+    With no `viewer`, the window is a child process of this one, closed on
+    this process's SIGINT and SIGTERM. One handed in is its owner's to close.
 
-    # Signalling this process alone would strand the window: Arena installs a
-    # SIGINT handler here, so asyncio never sees a KeyboardInterrupt, and a
-    # default SIGTERM would kill us before `finally` runs. A terminal's Ctrl-C
-    # reaches the child too; a `kill` at this process does not.
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop)
+    `payload` is `spec` already solved, and `stamps` the files as they stood
+    when it was. With no `payload`, it is solved here first, off the loop.
+    """
+    if payload is None:
+        # Stamped before the solve, as `main` does.
+        stamps = _watched(spec)
+        payload = await asyncio.to_thread(_resolve, spec, seed, samples, remote=True)
+    assert stamps is not None, "a payload comes with the stamps it was solved at"
+
+    if viewer is None:
+        viewer = await viewer_process.ChildViewer.spawn()
+        # Signalling this process alone would strand the window: Arena installs
+        # a SIGINT handler here, so asyncio never sees a KeyboardInterrupt, and
+        # a default SIGTERM would kill us before `finally` runs. A terminal's
+        # Ctrl-C reaches the child too; a `kill` at this process does not.
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, viewer.terminate)
 
     # The geometry the window holds, by id: see `_send_layout`.
     held: set[str] = set()
-    await _send_layout(proc, payload, held)
+    await _send_layout(viewer, payload, held)
     # One solver, asked by the panel's edits and by changes on disk alike: two
     # solves at once could land out of order and leave the older layout drawn.
     # The files are stamped as `payload` was solved from them, and the panel
@@ -137,35 +145,23 @@ async def _view(
     # time. `reseed` asks the next solve to draw from a new seed.
     asked, reseed = asyncio.Event(), asyncio.Event()
     running = [
-        asyncio.create_task(_solve_when_asked(spec, seed, samples, proc, asked, reseed, held)),
-        asyncio.create_task(_reload_on_change(spec, proc, stamps, asked)),
-        asyncio.create_task(_serve_requests(spec, proc, stamps, asked, reseed)),
-        asyncio.create_task(_catch_up_on_pictures(spec, proc)),
+        asyncio.create_task(_solve_when_asked(spec, seed, samples, viewer, asked, reseed, held)),
+        asyncio.create_task(_reload_on_change(spec, viewer, stamps, asked)),
+        asyncio.create_task(_serve_requests(spec, viewer, stamps, asked, reseed)),
+        asyncio.create_task(_catch_up_on_pictures(spec, viewer)),
     ]
     try:
-        return await proc.wait()
+        return await viewer.wait()
     finally:
         for task in running:
             task.cancel()
         for task in running:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        stop()
+        viewer.terminate()
 
 
-async def _send(proc: asyncio.subprocess.Process, payload: bytes) -> None:
-    """Hand one packed message to the viewer. The pipe stays open for the next.
-
-    Safe to call from more than one task: the whole framed message goes into the
-    transport in a single `write`, so two senders cannot interleave a length
-    with somebody else's body.
-    """
-    assert proc.stdin is not None
-    proc.stdin.write(viewer_process.pack_scene(payload))
-    await proc.stdin.drain()
-
-
-async def _send_layout(proc: asyncio.subprocess.Process, payload: dict[str, Any], held: set[str]) -> None:
+async def _send_layout(viewer: viewer_process.Viewer, payload: dict[str, Any], held: set[str]) -> None:
     """Send a layout, naming by id alone the geometry the window holds, and
     bring `held` up to what it holds after: this layout's geometry.
 
@@ -174,14 +170,14 @@ async def _send_layout(proc: asyncio.subprocess.Process, payload: dict[str, Any]
     time — the opening one, then each solve's — so `held` is what it has. An
     edit that leaves an asset alone sends its geometry as an id, not megabytes.
     """
-    await _send(proc, pack(payload, held))
+    await viewer.send(pack(payload, held))
     held.clear()
     held.update(geometry["id"] for geometry in payload["geometries"])
 
 
 async def _serve_requests(
     spec: Path,
-    proc: asyncio.subprocess.Process,
+    viewer: viewer_process.Viewer,
     stamps: dict[Path, int | None],
     asked: asyncio.Event,
     reseed: asyncio.Event,
@@ -208,30 +204,30 @@ async def _serve_requests(
     :func:`_solve_when_asked` to draw from a new seed, and the answer says one
     is coming, as an accepted edit's does.
     """
-    assert proc.stdout is not None
     crawls: asyncio.Queue[None] = asyncio.Queue()
-    helpers = [asyncio.create_task(_serve_assets(spec, proc, crawls))]
+    helpers = [asyncio.create_task(_serve_assets(spec, viewer, crawls))]
     try:
-        while (request := await _read_request(proc.stdout)) is not None:
+        while (message := await viewer.recv()) is not None:
+            request = msgpack.unpackb(message)
             if (op := request.get("op", "")) == ASSET_REQUEST:
                 crawls.put_nowait(None)
                 # From here rather than from the worker, which may still be on
                 # the crawl before this one: the button has to stop taking
                 # clicks when one is asked for, not when one starts.
                 with contextlib.suppress(Exception):
-                    await _send(proc, encode_spec(spec, indexing=True))
+                    await viewer.send(encode_spec(spec, indexing=True))
                 continue
             if op == REGENERATE:
                 reseed.set()
                 asked.set()
                 with contextlib.suppress(Exception):
-                    await _send(proc, encode_spec(spec, solving=True))
+                    await viewer.send(encode_spec(spec, solving=True))
                 continue
 
             result = await asyncio.to_thread(
                 spec_edit.apply, spec, op, list(request.get("path", [])), request.get("value")
             )
-            if proc.returncode is not None:
+            if viewer.returncode is not None:
                 return  # the window closed while we were writing
 
             if result.ok:
@@ -246,13 +242,13 @@ async def _serve_requests(
                 print(f"{spec}: refused: {'; '.join(result.errors)}", file=sys.stderr)
             if result.remaining_errors:
                 print(f"{spec}: still wrong from before: {'; '.join(result.remaining_errors)}", file=sys.stderr)
-            await _send(proc, encode_spec(spec, result.errors, solving=result.ok))
+            await viewer.send(encode_spec(spec, result.errors, solving=result.ok))
     finally:
         for helper in helpers:
             helper.cancel()
 
 
-async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, crawls: asyncio.Queue[None]) -> None:
+async def _serve_assets(spec: Path, viewer: viewer_process.Viewer, crawls: asyncio.Queue[None]) -> None:
     """Crawl the bucket and SimReady Central as the browser asks, one crawl at
     a time.
 
@@ -281,15 +277,15 @@ async def _serve_assets(spec: Path, proc: asyncio.subprocess.Process, crawls: as
             errors = [f"{type(error).__name__}: {error}"]
             print(f"simready: {errors[0]}", file=sys.stderr)
 
-        if proc.returncode is not None:
+        if viewer.returncode is not None:
             return  # the window closed while we were fetching
         # A failed crawl still says it has stopped, or the button never comes
         # back; the reason is in `errors` beside it.
-        await _answer(proc, spec, errors, indexing=False)
+        await _answer(viewer, spec, errors, indexing=False)
 
 
 async def _answer(
-    proc: asyncio.subprocess.Process,
+    viewer: viewer_process.Viewer,
     spec: Path,
     errors: list[str] | None = None,
     indexing: bool | None = None,
@@ -305,7 +301,7 @@ async def _answer(
     """
     for attempt in range(ANSWER_TRIES):
         try:
-            await _send(proc, encode_spec(spec, errors, remote=True, indexing=indexing))
+            await viewer.send(encode_spec(spec, errors, remote=True, indexing=indexing))
             return
         except Exception as error:
             reason = error
@@ -313,7 +309,7 @@ async def _answer(
     print(f"{spec}: an asset request went unanswered: {reason}", file=sys.stderr)
 
 
-async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) -> None:
+async def _catch_up_on_pictures(spec: Path, viewer: viewer_process.Viewer) -> None:
     """Fetch whatever picture Arena's registered assets are missing, once, at
     startup.
 
@@ -336,15 +332,15 @@ async def _catch_up_on_pictures(spec: Path, proc: asyncio.subprocess.Process) ->
         print(f"simready: {type(error).__name__}: {error}", file=sys.stderr)
         return
     print(f"simready: fetched {fetched} thumbnail(s)", file=sys.stderr)
-    if fetched and proc.returncode is None:
-        await _answer(proc, spec)
+    if fetched and viewer.returncode is None:
+        await _answer(viewer, spec)
 
 
 async def _solve_when_asked(
     spec: Path,
     seed: int | None,
     samples: int,
-    proc: asyncio.subprocess.Process,
+    viewer: viewer_process.Viewer,
     asked: asyncio.Event,
     reseed: asyncio.Event,
     held: set[str],
@@ -374,12 +370,12 @@ async def _solve_when_asked(
             # Six digits, to read off the panel and pass back as --seed.
             seed = random.randrange(1_000_000)
         layout, errors = await asyncio.to_thread(_solved, spec, seed, samples)
-        if proc.returncode is not None:
+        if viewer.returncode is not None:
             return  # the window closed while we were resolving
         # `asked` set again means the edits that arrived during this solve have
         # one of their own coming, so the panel goes on saying the view is
         # behind rather than blinking off and on.
-        await _draw(proc, spec, layout, held, errors, solving=asked.is_set())
+        await _draw(viewer, spec, layout, held, errors, solving=asked.is_set())
 
 
 def _solved(spec: Path, seed: int | None, samples: int) -> tuple[dict[str, Any] | None, list[str]]:
@@ -396,7 +392,7 @@ def _solved(spec: Path, seed: int | None, samples: int) -> tuple[dict[str, Any] 
 
 
 async def _draw(
-    proc: asyncio.subprocess.Process,
+    viewer: viewer_process.Viewer,
     spec: Path,
     layout: dict[str, Any] | None,
     held: set[str],
@@ -417,22 +413,13 @@ async def _draw(
     `_reload_on_change` asks for another solve once it reads again.
     """
     if layout is not None:
-        await _send_layout(proc, layout, held)
+        await _send_layout(viewer, layout, held)
     with contextlib.suppress(Exception):
-        await _send(proc, encode_spec(spec, errors or [], solving=solving))
-
-
-async def _read_request(stream: asyncio.StreamReader) -> dict | None:
-    """One request off the viewer's stdout, or None once it has ended."""
-    try:
-        header = await stream.readexactly(viewer_process.HEADER)
-        return msgpack.unpackb(await stream.readexactly(int.from_bytes(header, "big")))
-    except asyncio.IncompleteReadError:
-        return None
+        await viewer.send(encode_spec(spec, errors or [], solving=solving))
 
 
 async def _reload_on_change(
-    spec: Path, proc: asyncio.subprocess.Process, stamps: dict[Path, int | None], asked: asyncio.Event
+    spec: Path, viewer: viewer_process.Viewer, stamps: dict[Path, int | None], asked: asyncio.Event
 ) -> None:
     """Ask for `spec` to be re-resolved on every write to it, or to the scene it
     includes. The SimReady index is watched from here too.
@@ -455,7 +442,7 @@ async def _reload_on_change(
         if (rebuilt := simready.index_stamp()) != index:
             index = rebuilt
             with contextlib.suppress(Exception):
-                await _send(proc, encode_spec(spec, remote=True))
+                await viewer.send(encode_spec(spec, remote=True))
             print(f"{simready.index_path()}: reloaded", file=sys.stderr)
         if _watched(spec) == stamps:
             continue

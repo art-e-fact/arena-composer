@@ -29,36 +29,50 @@ from types import SimpleNamespace
 import msgpack
 import pytest
 
-from arena_composer import view, viewer_process
+from arena_composer import view
 
 
 class _Viewer:
-    """Enough of the viewer process to talk to: edits go in through `stdout`,
-    answers come back through `stdin`, framed the way the pipe frames them.
-    `drain` is how long each answer takes to leave, as it does when the viewer
-    is still reading a layout."""
-
-    returncode = None
+    """Enough of a window to talk to (`viewer_process.Viewer`): edits go in
+    through `ask`, answers come back through `send`. `drain` is how long each
+    answer takes to leave, as it does when the viewer is still reading a
+    layout."""
 
     def __init__(self, drain: float = 0.0) -> None:
         self.drain = drain
         self.answers: list[dict] = []
-        self.stdout = asyncio.StreamReader()
-        self.stdin = SimpleNamespace(
-            # One `_send` is one `write` of one whole message.
-            write=lambda data: self.answers.append(msgpack.unpackb(data[viewer_process.HEADER :])),
-            drain=self._drained,
-        )
+        self.requests: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self.closed = asyncio.Event()
 
-    async def _drained(self) -> None:
+    @property
+    def returncode(self) -> int | None:
+        return 0 if self.closed.is_set() else None
+
+    async def send(self, message: bytes) -> None:
+        self.answers.append(msgpack.unpackb(message))
         if self.drain:
             await asyncio.sleep(self.drain)
 
+    async def recv(self) -> bytes | None:
+        return await self.requests.get()
+
+    def terminate(self) -> None:
+        self.closed.set()
+
+    async def wait(self) -> int:
+        await self.closed.wait()
+        return 0
+
     def ask(self, request: dict) -> None:
-        self.stdout.feed_data(viewer_process.pack_scene(msgpack.packb(request, use_bin_type=True)))
+        self.requests.put_nowait(msgpack.packb(request, use_bin_type=True))
 
     def edit(self, value: str) -> None:
         self.ask({"op": "set", "path": ["env_name"], "value": value})
+
+    def hang_up(self) -> None:
+        """End the requests, as a closing window does a moment before it is
+        gone: what was asked before still gets its answer."""
+        self.requests.put_nowait(None)
 
 
 async def _until(predicate) -> None:
@@ -109,7 +123,7 @@ def test_edits_are_answered_while_the_solver_is_still_busy(monkeypatch, tmp_path
         await asyncio.wait_for(_until(lambda: len(solves) == 2), timeout=5)
         await asyncio.wait_for(_until(lambda: any(a.get("assets") is not None for a in viewer.answers)), timeout=5)
 
-        viewer.stdout.feed_eof()
+        viewer.hang_up()
         await asyncio.wait_for(reading, timeout=5)
         solver.cancel()
 
@@ -145,11 +159,40 @@ def test_new_layouts_are_drawn_from_a_new_seed_that_later_solves_keep(monkeypatc
         await asyncio.wait_for(_until(lambda: len(solves) == 2), timeout=5)
         assert solves == [(7, 5), (7, 5)], "an edit went back to the old seed"
 
-        viewer.stdout.feed_eof()
+        viewer.hang_up()
         await asyncio.wait_for(reading, timeout=5)
         solver.cancel()
 
     asyncio.run(run())
+
+
+def test_a_viewer_handed_in_is_solved_for_and_served_until_it_closes(monkeypatch, tmp_path: Path):
+    """What a server does with a browser tab: `serve` solves the spec itself,
+    off the event loop, draws it in the window it was handed, and returns once
+    that window closes."""
+    spec = tmp_path / "task.yaml"
+    _write(spec, "env_name: first\n", 1)
+    solved_on: list[threading.Thread] = []
+
+    def resolve(path: Path, seed: int, samples: int, remote: bool = False) -> dict:
+        solved_on.append(threading.current_thread())
+        return {"assets": [], "geometries": [], "env_name": path.read_text()}
+
+    _watch_quickly(monkeypatch, resolve)
+    monkeypatch.setattr(view.catalog, "catalog", tuple)
+    monkeypatch.setattr(view.simready, "fetch_thumbnails", lambda paths: 0)
+
+    async def run() -> tuple[int, list[dict]]:
+        viewer = _Viewer()
+        serving = asyncio.create_task(view.serve(spec, 42, 1, viewer=viewer))
+        await asyncio.wait_for(_until(lambda: viewer.answers), timeout=5)
+        viewer.terminate()
+        return await asyncio.wait_for(serving, timeout=5), viewer.answers
+
+    status, answers = asyncio.run(run())
+    assert status == 0
+    assert answers[0]["env_name"] == "env_name: first\n", "the opening layout was not the spec's"
+    assert solved_on[0] is not threading.main_thread(), "the opening solve held up the event loop"
 
 
 def test_a_layout_is_followed_by_the_spec_as_the_file_now_reads(monkeypatch, tmp_path: Path):
@@ -224,7 +267,7 @@ def test_a_refused_edit_is_answered_without_a_solve(monkeypatch, tmp_path: Path)
         viewer = _Viewer()
         asked = asyncio.Event()
         viewer.edit("nope")
-        viewer.stdout.feed_eof()
+        viewer.hang_up()
         serving = view._serve_requests(tmp_path / "task.yaml", viewer, {}, asked, asyncio.Event())
         await asyncio.wait_for(serving, timeout=5)
         assert not asked.is_set(), "a refused edit asked for a solve"
@@ -411,7 +454,7 @@ def _served(monkeypatch, request: dict, tmp_path: Path) -> list[dict]:
         # The prop list is the last word on any of these, so waiting for one
         # waits for the request to be served through.
         await asyncio.wait_for(_until(lambda: any(a["remote"] for a in viewer.answers)), timeout=5)
-        viewer.stdout.feed_eof()
+        viewer.hang_up()
         await asyncio.wait_for(reading, timeout=5)
         return viewer.answers
 
@@ -485,7 +528,7 @@ def test_an_answer_outlives_a_spec_being_written(monkeypatch, tmp_path: Path):
         reading = asyncio.create_task(view._serve_requests(tmp_path / "task.yaml", viewer, {}, *unused))
         viewer.ask({"op": "reindex"})
         await asyncio.wait_for(_until(lambda: any(a["remote"] for a in viewer.answers)), timeout=5)
-        viewer.stdout.feed_eof()
+        viewer.hang_up()
         await asyncio.wait_for(reading, timeout=5)
         return viewer.answers
 

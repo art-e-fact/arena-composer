@@ -229,8 +229,9 @@ def build() -> tuple[list[RemoteAsset], dict[str, str]]:
             "multi_body": listed.multi_body,
         }
     # Written beside and renamed over: the viewer and the MCP server may both
-    # be reading, and neither can be handed half a file.
-    partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
+    # be reading, and neither can be handed half a file. Named by thread too,
+    # since one process may serve both and crawl from each.
+    partial = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.partial")
     partial.write_text(json.dumps(document, indent=1), encoding="utf-8")
     os.replace(partial, path)
     return [*bucket, *listed.assets], listed.notes

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import functools
 import inspect
 import io
 import os
@@ -36,6 +37,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import types
 import typing
 from collections import Counter
@@ -1201,6 +1203,26 @@ def _node_lists(kind: Any) -> set[str] | None:
     return {name for name, listed in found.items() if listed}
 
 
+#: Held by an edit from its read to its write. Without it, an edit that reads
+#: while another is validating writes over that one, and both are told they
+#: landed: one process can hold two writers, as a browser editor's panel beside
+#: its MCP tools. One lock, not one per file: two tasks can include one scene.
+# ponytail: in-process only; `arena-view` beside `arena-mcp` still races, which
+# a lock file beside the spec would close.
+_WRITING = threading.RLock()
+
+
+def _one_writer(edit: Any) -> Any:
+    """`edit` holding :data:`_WRITING`."""
+
+    @functools.wraps(edit)
+    def locked(*args: Any, **kwargs: Any) -> Any:
+        with _WRITING:
+            return edit(*args, **kwargs)
+
+    return locked
+
+
 def _files(path: Path) -> SpecFiles | Result:
     """`path` and its scene, or the refusal to make of a pair that does not read.
 
@@ -1228,6 +1250,7 @@ def _message(entry: dict[str, Any]) -> str:
     return f"{location}: {message}" if location else message
 
 
+@_one_writer
 def add_object(
     path: Path,
     node_id: str,
@@ -1275,6 +1298,7 @@ def add_object(
 _ID_SECTIONS = ("objects", "object_sets", "object_references")
 
 
+@_one_writer
 def apply(path: Path, op: str, steps: list[Any], value: Any = None) -> Result:
     """Apply one edit addressed at a path into the merged spec.
 
@@ -1774,6 +1798,7 @@ def _drop_params_not_taken(entry: Any, registry_name: Any) -> list[str]:
     return dropped
 
 
+@_one_writer
 def remove_object(path: Path, node_id: str) -> Result:
     """Remove an object from `path`'s scene, along with the relations naming it
     and the object references inside it, with theirs.
