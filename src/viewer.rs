@@ -323,7 +323,7 @@ fn spawn_camera(world: &mut World, scene: &Scene) {
     ));
 }
 
-/// `ARENA_VIEWER_CAMERA=2.78,-4.42,1.89,2.78,-3.62,0.93` stands the camera at the
+/// `ARENA_VIEWER_CAMERA=2.95,-4.62,1.89,2.95,-3.82,0.93` stands the camera at the
 /// first three numbers and turns it to the last three, in Arena's frame, as a
 /// background suggests a camera: a screenshot's angle, where the background's
 /// is not the one wanted.

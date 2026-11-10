@@ -12,14 +12,14 @@
      "click": "search name and tags"},
     {"type": "pear", "pause": 0.4},
     {"click": {"text": "SimReady", "in": "dock"}, "pause": 0.4},
-    {"note": "A prop dragged onto the plate: the plate's top lights up as where it would stand, and letting go adds it, `on` the plate. Aimed at the plate's front, clear of the fruit on it.",
-     "drag": {"text": "Pear_A01", "in": "dock"}, "to": {"object": "plate", "offset": [-20, 25]}, "secs": 1.3},
+    {"note": "A prop dragged onto the plate: the plate's top lights up as where it would stand, and letting go adds it, `on` the plate. Aimed at the plate's front, clear of the fruit on it: a hover lights what a drop there would stand it on.",
+     "drag": {"text": "Pear_A01", "in": "dock"}, "to": {"object": "plate", "offset": [10, 5]}, "secs": 1.3},
     {"until": "solved", "pause": 1.0},
 
-    {"note": "The view's menu on the bowl: what it takes part in, each relation drawn while it is hovered.",
-     "right_click": {"object": "wooden_bowl"}, "pause": 0.4},
-    {"move": {"text": "🔗 wooden_bowl next_to plate"}, "pause": 1.3},
+    {"note": "The view's menu on the mug: what it takes part in, each relation drawn while it is hovered. On the mug rather than the bowl, since the menu opens below and to the right of the pointer, where the mug stands.",
+     "right_click": {"object": "mug"}, "pause": 0.4},
     {"move": {"text": "🔗 mug face_to wooden_bowl"}, "pause": 1.3},
+    {"move": {"text": "🔗 mug on island_top"}, "pause": 1.3},
     {"key": "Escape", "pause": 0.2},
 
     {"note": "The spatial graph: a node per object, an edge per relation. A click on the bowl's next_to opens its card; 👁 keeps it drawn.",
@@ -31,10 +31,10 @@
     {"click": {"text": "positive_y", "near": {"pointer": true}}},
     {"until": "solved", "pause": 1.0},
 
-    {"note": "The plate's box, from its chip on the plate's node: kept drawn, then widened to the right. The wall follows the drag, and the solve the release.",
+    {"note": "The plate's box, from its chip on the plate's node: kept drawn, then widened to the left, onto the empty table. The wall follows the drag, and the solve the release.",
      "click": {"text": "position_limits_box", "in": "dock", "near": {"text": "plate", "in": "dock"}}, "pause": 0.4},
     {"click": {"text": "👁", "in": "panel", "near": {"text": "2.550", "in": "panel"}}, "pause": 0.3},
-    {"drag": {"text": "2.750", "in": "panel"}, "by": [40, 0], "secs": 1.3},
+    {"drag": {"text": "2.550", "in": "panel"}, "by": [-40, 0], "secs": 1.3},
     {"until": "solved", "pause": 1.0},
 
     {"note": "And the mug's face_to, from its edge, so the pages below show all three.",
