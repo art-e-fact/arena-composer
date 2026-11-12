@@ -80,6 +80,13 @@ nothing. A new one gets a sweep too, for warnings on specs that work.
   entry; the skill's playbook says what to fix. A union of the named params over the MRO's
   `__init__`s would move it here. It is left until it bites, and the CHANGELOG and `check_spec`'s
   docstring say what the check covers.
+- **An asset factory is a function.** `register_asset_factory` registers one in place of a class,
+  with the object type and tags it declares, and what it builds shows only when it is called. Its
+  params bind to the function's own (`catalog.parameters`), `_nodes` takes its declared type, and
+  an embodiment slot reads its tags, as Arena's catalogue does. Ask `_is`, not `issubclass`, of
+  anything the asset registry returns: it answers no for a factory. A check of what a node is or
+  holds — its class, a knob's levels, a lift's initial pose — leaves a factory's to the build: it
+  passes it, keeps an id naming it, and never offers it.
 - **Every group fails open.** One that cannot run — Arena moved one of the private names it
   imports — prints `arena-composer: <group> skipped: ...` on stderr and refuses nothing. A composer
   that refused a valid spec would cost more than one that left a problem to the build.

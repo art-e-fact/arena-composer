@@ -1361,6 +1361,78 @@ def test_a_whole_subtask_written_points_its_placeholders_at_nodes_of_their_class
     assert result.ok and result.changed[1].startswith("set task.subtasks.0.params.openable_object to 'oven'"), result
 
 
+@pytest.fixture
+def crate(monkeypatch: pytest.MonkeyPatch) -> str:
+    """The scene entry of `test_crate`, registered as `register_asset_factory` registers an asset: a
+    function, which says what it builds only in the object type and tags it declares. It goes in a
+    copy of the registry that only this test sees, beside `test_robot`, a robot by its tags."""
+    from isaaclab_arena.assets.object_type import ObjectType
+    from isaaclab_arena.assets.register import register_asset_factory
+    from isaaclab_arena.assets.registries import AssetRegistry
+
+    registry = AssetRegistry()
+    registry.get_all_keys()  # loads Arena's own assets, before the copy
+    monkeypatch.setattr(registry, "_components", dict(registry._components))
+
+    @register_asset_factory(registry_name="test_crate", object_type=ObjectType.ARTICULATION)
+    def crate(lid_angle, name="test_crate", initial_pose=None):
+        raise AssertionError("checking a spec builds nothing")
+
+    @register_asset_factory(registry_name="test_robot", object_type=ObjectType.ARTICULATION, tags=("embodiment",))
+    def robot(enable_cameras=False):
+        raise AssertionError("checking a spec builds nothing")
+
+    return "- id: crate\n  registry_name: test_crate\n  params: {lid_angle: 0.0}\n"
+
+
+def test_an_asset_factory_is_checked_by_its_params_and_what_it_declares(
+    spec: Path, crate: str, capsys: pytest.CaptureFixture[str]
+):
+    """Arena calls a factory with an entry's params, as it calls a class, so they bind to the
+    function's own. Its object type and tags say what it builds, where a class's bases do."""
+    typo = crate.replace("lid_angle", "lid_angel")
+    assert subtasks(spec, PICK, objects=typo) == [
+        "../scenes/scene.yaml: objects.3.params: test_crate needs lid_angle",
+        "../scenes/scene.yaml: objects.3.params.lid_angel: test_crate takes no 'lid_angel'; did you mean"
+        " 'lid_angle'?",
+    ]
+    into = PICK.replace("destination_location: bowl", "destination_location: crate")
+    assert subtasks(spec, into, objects=crate) == [
+        "task.yaml: task.subtasks.0.params.destination_location: PickAndPlaceTask filters its contact sensor against"
+        " 'crate', an articulation, where it needs a rigid body or a base; name an object reference to the part"
+        " to use, such as a tray, instead"
+    ]
+    result = switch_embodiment(spec, "test_crate")
+    assert "../scenes/scene.yaml: embodiment.registry_name: test_crate is not an embodiment" in result.errors, result
+    result = switch_embodiment(spec, "test_robot")
+    assert result.ok and yaml.safe_load(scene_of(spec).read_text())["embodiment"]["registry_name"] == "test_robot"
+    errors = broken(spec, f"registry_name: {TABLE}", "registry_name: test_crate")
+    assert "../scenes/scene.yaml: background.params: test_crate needs lid_angle" in errors, errors
+    assert "skipped" not in capsys.readouterr().err
+
+
+def test_what_an_asset_factory_builds_is_left_to_the_build(
+    spec: Path, crate: str, capsys: pytest.CaptureFixture[str]
+):
+    """Only calling a factory shows what it builds, and a check calls nothing: it passes a task
+    param that asks for a class, and is never offered for one. Nor is its pose read off params."""
+    assert subtasks(spec, "  - kind: OpenDoorTask\n    params: {openable_object: crate}\n", objects=crate) == []
+    assert subtasks(spec, PICK + LIFT.replace("lift_object: banana", "lift_object: crate"), "sequential", crate) == []
+    ketchup = "- id: ketchup\n  registry_name: ketchup_bottle_hope_robolab\n  params: {}\n"
+    upright = "  - kind: PlaceUprightTask\n    params: {placeable_object: ketchup}\n"
+    (line,) = subtasks(spec, upright, objects=crate + ketchup)
+    assert "'ketchup' is a ketchup_bottle_hope_robolab, which is not one; a Placeable is 'mug'" in line, line
+
+    # A whole subtask written naming it keeps it, beside an Openable it would be pointed at.
+    oven = "- id: oven\n  registry_name: microwave\n  params: {}\n"
+    spec.write_text(TASK)
+    scene_of(spec).write_text(SCENE.replace("relations:\n", f"{crate}{oven}relations:\n"))
+    opens = {"kind": "OpenDoorTask", "params": {"openable_object": "crate"}}
+    result = spec_edit.apply(spec, "insert", ["task", "subtasks"], opens)
+    assert result.ok and not [change for change in result.changed if "openable_object" in change], result
+    assert "skipped" not in capsys.readouterr().err
+
+
 def test_two_writers_at_once_both_land(spec: Path, monkeypatch: pytest.MonkeyPatch):
     """An edit reads the pair, validates, then writes it: a second edit that
     reads in between writes over the first. One process may hold two writers,

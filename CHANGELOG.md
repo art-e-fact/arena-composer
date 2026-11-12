@@ -29,6 +29,12 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 - A fresh install no longer takes huggingface-hub 2, which leaves out the `httpx` that fetching a
   SimReady Central package needs.
+- An asset registered with Arena's `register_asset_factory`, a function rather than a class, is
+  checked like any other: its params against the function's own, its object type and tags as it
+  declares them. What it builds shows only when it is built, so a task param that asks for a class,
+  such as an Openable, accepts it. Naming one stopped the checks of task params with
+  `TypeError: issubclass() arg 1 must be a class` on stderr, and so did a task param naming an id of
+  the wrong class, in any project that registers one.
 
 ## [0.7.0] - 2026-11-04
 
