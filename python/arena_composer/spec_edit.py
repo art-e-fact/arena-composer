@@ -657,14 +657,16 @@ def _asset_problems(spec: Any) -> list[str]:
         params = params if isinstance(params, dict) else {}
         # Arena fills an object's `name` from its id by `setdefault`, so one the params give is no
         # clash; a library background passes its own whatever the params hold. Nobody else is given one.
-        passes_name = where == "background" and issubclass(cls, LibraryBackground)
+        passes_name = where == "background" and _is(cls, LibraryBackground)
         given = ("name",) if passes_name or (where.startswith("objects.") and "name" not in params) else ()
         errors += _binding(f"{where}.params", name, cls, params, given)
         if "instance_name" in params and where != "embodiment":
             # The old spelling of `name`.
             fix = f"Arena passes {name} its 'name' itself; remove it" if passes_name else "Arena renamed it to 'name'"
             errors.append(f"{where}.params.instance_name: {fix}")
-        if where == "embodiment" and not issubclass(cls, EmbodimentBase):
+        # A factory says it builds a robot only in its tags, which Arena's catalogue reads too.
+        robot = issubclass(cls, EmbodimentBase) if isinstance(cls, type) else "embodiment" in getattr(cls, "tags", ())
+        if where == "embodiment" and not robot:
             errors.append(f"embodiment.registry_name: {name} is not an embodiment")
     return errors
 
@@ -844,7 +846,7 @@ def _value_problems(spec: Any) -> list[str]:
     initial pose a lift reads before placement solves one, and the numbers
     in a tuple param."""
     from isaaclab_arena.affordances.turnable import Turnable
-    from isaaclab_arena.assets.object import Object
+    from isaaclab_arena.assets.object_reference import ObjectReference
     from isaaclab_arena.assets.registries import TaskRegistry
     from isaaclab_arena.environment_spec.arena_env_graph_task_conversion_utils import (
         find_node_ref_params_in_signature,
@@ -876,7 +878,8 @@ def _value_problems(spec: Any) -> list[str]:
         for name in find_node_ref_params_in_signature(cls):
             needed = catalog.node_classes(hints[name])
             for node_id in _listed(params.get(name)):
-                if not (built := node(node_id)):
+                # What a factory builds shows once it is called, which the build does and a check does not.
+                if not (built := node(node_id)) or not isinstance(built.cls, type):
                     continue
                 if needed and not issubclass(built.cls, needed):
                     errors.append(_class_problem(f"{where}.{name}", kind, needed, node_id, built, nodes))
@@ -892,7 +895,7 @@ def _value_problems(spec: Any) -> list[str]:
                     )
                 off = node(off_id)
                 # A reference is filtered against by its prim path, whatever it is.
-                articulated = off and off.object_type == "articulation" and issubclass(off.cls, Object)
+                articulated = off and off.object_type == "articulation" and not _is(off.cls, ObjectReference)
                 if off and (articulated or off.object_type == "deformable"):
                     # An articulation's links are rigid bodies, and a reference to one names its prim.
                     fix = "; name an object reference to the part to use, such as a tray, instead"
@@ -903,7 +906,8 @@ def _value_problems(spec: Any) -> list[str]:
                     )
         lifted = params.get("lift_object") if issubclass(cls, LiftObjectTask) else None
         if (built := node(lifted)) and built.where.startswith(("objects.", "object_sets.")) and lifted not in anchors:
-            if built.params.get("initial_pose") is None:
+            # A factory may pose what it builds itself, which shows once it is called.
+            if built.params.get("initial_pose") is None and isinstance(built.cls, type):
                 errors.append(
                     f"{where}.lift_object: {kind} reads the initial pose of {lifted!r} as it is built, before"
                     f" placement solves one, and the spec gives it none; set {built.where}.params.initial_pose,"
@@ -916,10 +920,17 @@ def _listed(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
 
 
+def _is(cls: Any, bases: type | tuple[type, ...]) -> bool:
+    """`issubclass`, and False for an asset factory: a function, whose product shows only once it is
+    called."""
+    return isinstance(cls, type) and issubclass(cls, bases)
+
+
 class _Node(NamedTuple):
     """What Arena builds for an id, as far as a check needs it."""
 
-    cls: type
+    #: Its class, or the asset factory, a function, that builds it.
+    cls: Any
     #: Its object type, where its class says it without the USD being read.
     object_type: str | None
     #: What it is, as a line says it: `a banana_ycb_robolab`.
@@ -953,7 +964,7 @@ def _nodes(spec: Any) -> dict[str, _Node]:
             cls = registry.get_asset_by_name(name)
             # A background's type, and a prop's that names its USD, are set as it is built.
             declared = getattr(inspect.getattr_static(cls, "object_type", None), "value", None)
-            kind = "deformable" if issubclass(cls, DeformableObject) else declared
+            kind = "deformable" if _is(cls, DeformableObject) else declared
             nodes[entry["id"]] = _Node(cls, kind, f"a {name}", where, _params(entry))
     for index, entry in _indexed(spec, "object_sets"):
         if isinstance(entry.get("id"), str):
@@ -999,12 +1010,12 @@ def _class_problem(
     line = f"{where}: {kind} needs {wanted} here, and {node_id!r} is {node.label}, which is not one"
     joint = next((name for name, cls in _AFFORDANCE_REFERENCE_CLASSES.items() if issubclass(cls, needed)), None)
     give = f"give it params.{joint}" if joint and issubclass(node.cls, ObjectReference) else ""
-    if fits := [repr(other) for other, built in nodes.items() if issubclass(built.cls, needed)]:
+    if fits := [repr(other) for other, built in nodes.items() if _is(built.cls, needed)]:
         return f"{line}; did you mean {_either(fits)}" + (f", or to {give}?" if give else "?")
     if give:
         return f"{line}; {give}"
     registry = AssetRegistry()
-    registered = [name for name in registry.get_all_keys() if issubclass(registry.get_asset_by_name(name), needed)]
+    registered = [name for name in registry.get_all_keys() if _is(registry.get_asset_by_name(name), needed)]
     options = [repr(name) for name in sorted(registered)[:3]]
     options += [f"an object reference with params.{joint}"] if joint else []
     return f"{line}; {wanted} is {_either(options)}" if options else line
@@ -1162,7 +1173,7 @@ def _binding(where: str, label: str, cls: type, params: dict[str, Any], given: t
     errors = []
     if missing := catalog.missing_params(cls, params, given):
         errors.append(f"{where}: {label} needs {', '.join(missing)}")
-    taken = [name for name in inspect.signature(cls.__init__).parameters if name not in ("self", *given)]
+    taken = [param.name for param in catalog.parameters(cls) if param.name not in given]
     unexpected = catalog.unexpected_params(cls, params)
     for name in unexpected:
         # An axis's two bounds, which Arena now takes as one pair: difflib
@@ -1756,9 +1767,11 @@ def _fit_node_params(files: SpecFiles, where: str, subtask: Any) -> list[str]:
         changed = []
         for name, listed in find_node_ref_params_in_signature(cls).items():
             needed, value = catalog.node_classes(hints[name]), params.get(name)
-            fits = [node_id for node_id, node in nodes.items() if needed and issubclass(node.cls, needed)]
+            fits = [node_id for node_id, node in nodes.items() if needed and _is(node.cls, needed)]
             if listed or not fits or not isinstance(value, str) or value not in nodes or value in fits:
                 continue
+            if not isinstance(nodes[value].cls, type):
+                continue  # what a factory builds shows once it is called, so its id stays
             params[name] = fits[0]
             changed.append(
                 f"set {where}.params.{name} to {fits[0]!r}: {kind} needs {_a_class(needed)} there, and {value!r} is"

@@ -227,7 +227,7 @@ def missing_params(cls: type, params: dict[str, Any], given: Iterable[str] = ())
     """
     return [
         param.name
-        for param in _signature(cls)
+        for param in parameters(cls)
         if param.default is inspect.Parameter.empty
         and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
         and param.name not in params
@@ -239,14 +239,17 @@ def unexpected_params(cls: type, params: dict[str, Any]) -> list[str]:
     """Keys of `params` that `cls`'s constructor does not take — what an entry
     carries over from the asset it named before, or a typo, and what fails the
     build with a TypeError. None for a constructor that takes ``**kwargs``."""
-    taken = _signature(cls)
+    taken = parameters(cls)
     if any(param.kind is param.VAR_KEYWORD for param in taken):
         return []
     return [name for name in params if name not in {param.name for param in taken}]
 
 
-def _signature(cls: type) -> list[inspect.Parameter]:
-    return [param for param in inspect.signature(cls.__init__).parameters.values() if param.name != "self"]
+def parameters(cls: Any) -> list[inspect.Parameter]:
+    """What Arena calls `cls` with: a class's constructor parameters, or those of an asset factory,
+    the function `register_asset_factory` registers in place of a class."""
+    called = cls.__init__ if isinstance(cls, type) else cls
+    return [param for param in inspect.signature(called).parameters.values() if param.name != "self"]
 
 
 #: Already carried by the spec itself rather than by ``params``.
