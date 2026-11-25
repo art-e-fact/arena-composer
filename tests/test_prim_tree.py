@@ -18,6 +18,7 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from pxr import Usd, UsdGeom, UsdPhysics
 
 from arena_composer import mcp_server
+from arena_composer.resolve_layout import COLLIDERS_BOUNDED
 
 TABLE = "maple_table_robolab"
 SPEC = f"""\
@@ -37,6 +38,7 @@ task:
 CABINET = {"prim_path": "cabinet", "object_type": "articulation", "joint_names": ["hinge"]}
 BODY, DOOR = ({"prim_path": f"cabinet/{part}", "object_type": "rigid"} for part in ("body", "door"))
 CUBE = {"prim_path": "cube", "object_type": "base"}
+PROXY = {"prim_path": "Collisions/Cube", "object_type": "base"}
 
 
 @pytest.fixture
@@ -46,7 +48,8 @@ def usd(tmp_path: Path) -> Path:
     stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/World").GetPrim())
     UsdPhysics.CollisionAPI.Apply(UsdGeom.Cube.Define(stage, "/World/cube").GetPrim())
     UsdGeom.Cube.Define(stage, "/World/decor/mesh")
-    # The Seattle lab table's only collider: proxy purpose, which Arena does not bound.
+    # The Seattle lab table's only collider: proxy purpose, which Arena main bounds on the collider
+    # alone, and release/0.4.0 not at all.
     proxy = UsdGeom.Cube.Define(stage, "/World/Collisions/Cube")
     proxy.CreatePurposeAttr(UsdGeom.Tokens.proxy)
     UsdPhysics.CollisionAPI.Apply(proxy.GetPrim())
@@ -81,9 +84,11 @@ def _refusal(spec: Path, **arguments) -> str:
 
 
 def test_under_the_background_a_prim_is_named_relative_to_it(spec: Path):
-    """The visual-only Xform is not there: nothing could reference it. Nor is the proxy collider, or
-    the Xform holding it: neither has a box that a relation could place by."""
-    assert _tree(spec, node_id=TABLE) == {"total": 4, "matched": 4, "prims": [CABINET, BODY, DOOR, CUBE]}
+    """The visual-only Xform is not there: nothing could reference it. Nor is the Xform holding the
+    proxy collider, which has no box a relation could place by; the collider itself has one on Arena
+    main, and none on release/0.4.0."""
+    prims = [PROXY, CABINET, BODY, DOOR, CUBE] if COLLIDERS_BOUNDED else [CABINET, BODY, DOOR, CUBE]
+    assert _tree(spec, node_id=TABLE) == {"total": len(prims), "matched": len(prims), "prims": prims}
 
 
 def test_under_an_object_the_path_is_relative_too_and_arena_builds_a_reference_from_it(spec: Path, usd: Path):
@@ -97,8 +102,9 @@ def test_under_an_object_the_path_is_relative_too_and_arena_builds_a_reference_f
 
 
 def test_the_filters_and_the_limit_say_what_they_cut(spec: Path):
-    assert _tree(spec, node_id=TABLE, query="CAB", limit=2) == {"total": 4, "matched": 3, "prims": [CABINET, BODY]}
-    assert _tree(spec, node_id=TABLE, object_type="rigid") == {"total": 4, "matched": 2, "prims": [BODY, DOOR]}
+    total = 5 if COLLIDERS_BOUNDED else 4
+    assert _tree(spec, node_id=TABLE, query="CAB", limit=2) == {"total": total, "matched": 3, "prims": [CABINET, BODY]}
+    assert _tree(spec, node_id=TABLE, object_type="rigid") == {"total": total, "matched": 2, "prims": [BODY, DOOR]}
 
 
 def test_what_is_not_a_parent_or_not_a_filter_is_refused(spec: Path):

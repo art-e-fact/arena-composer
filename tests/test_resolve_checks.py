@@ -13,8 +13,10 @@ from types import SimpleNamespace
 import pytest
 
 from arena_composer.resolve_layout import (
+    COLLIDERS_BOUNDED,
     SpecError,
     _asset_entry,
+    _bounding_box,
     _falling_root,
     _placement_summary,
     check_reference_boxes,
@@ -66,9 +68,9 @@ def test_a_file_that_is_not_there_is_named(tmp_path: Path):
 
 
 def test_a_central_url_is_checked_by_arenas_loader_and_never_mirrored_here(monkeypatch: pytest.MonkeyPatch):
-    """Arena downloads a SimReady Central package into the Hugging Face cache itself, so it is not
-    mirrored into the composer's cache too, and what its loader asserts comes out naming the object:
-    an unpinned URL is refused before anything is downloaded."""
+    """A SimReady Central package goes into the Hugging Face cache, through Arena's own source, so it
+    is not mirrored into the composer's cache too, and what that source asserts comes out naming the
+    object: an unpinned URL is refused before anything is downloaded."""
     from arena_composer import resolve_layout
 
     monkeypatch.setattr(resolve_layout, "localize", lambda path: pytest.fail(f"mirrored {path}"))
@@ -84,9 +86,12 @@ def test_an_entry_without_a_usd_path_is_not_checked():
 
 def test_a_reference_the_solve_places_by_needs_geometry_arena_bounds(tmp_path: Path):
     """Isaac's Seattle lab table, `table`, draws its top in one mesh with the robot mount, and its
-    only collider, `Collisions/Cube`, is proxy purpose. Arena bounds default-purpose geometry alone,
-    so a reference to the collider has an empty box, and the solver stopped on "Non-finite solver
-    output" for one a relation names, or on an interval assert for one it avoids as an obstacle."""
+    only collider, `Collisions/Cube`, is proxy purpose. Arena main bounds a collider by its own purpose
+    and anything else by its default-purpose geometry, so the collider has a box and the Xform holding
+    it has none; Arena asserts on that, naming no entry of the spec. Release/0.4.0 bounds
+    default-purpose geometry alone and hands back an empty box for both. A decal drawn only at render
+    time holds no collider to name instead. A reference the solve never sees is drawn as an empty box
+    rather than stopping the resolve."""
     from isaaclab_arena.assets.object import Object
     from isaaclab_arena.assets.object_type import ObjectType
     from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import _instantiate_object_reference
@@ -101,12 +106,19 @@ def test_a_reference_the_solve_places_by_needs_geometry_arena_bounds(tmp_path: P
     collider.CreatePurposeAttr(UsdGeom.Tokens.proxy)
     UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
     UsdGeom.Xform.Define(stage, "/DemoTable/Empty")
+    UsdGeom.Cube.Define(stage, "/DemoTable/Decals/Logo").CreatePurposeAttr(UsdGeom.Tokens.render)
     stage.Save()
 
     table = Object(name="table", usd_path=str(path), object_type=ObjectType.BASE)
     references = [
         ObjectReferenceSpec(id=node_id, parent_id="table", prim_path=prim_path, object_type="base")
-        for node_id, prim_path in (("top", "Collisions/Cube"), ("legs", "Visuals/TableGeom"), ("none", "Empty"))
+        for node_id, prim_path in (
+            ("top", "Collisions/Cube"),
+            ("legs", "Visuals/TableGeom"),
+            ("none", "Empty"),
+            ("colliders", "Collisions"),
+            ("logo", "Decals/Logo"),
+        )
     ]
     assets = {ref.id: _instantiate_object_reference(ref, parent_asset=table) for ref in references}
 
@@ -121,13 +133,79 @@ def test_a_reference_the_solve_places_by_needs_geometry_arena_bounds(tmp_path: P
             return error.errors
         return []
 
-    assert refused(["top", "legs", "none"]) == [
-        "object_references.0.prim_path: Collisions/Cube holds only proxy-purpose geometry, and Arena bounds only"
-        " default-purpose geometry, so top has no box to place by",
-        "object_references.2.prim_path: Empty holds no geometry, so none has no box to place by",
-    ]
-    assert refused([], obstacles=["top"]) == refused(["top"]) != []
+    if COLLIDERS_BOUNDED:  # Arena main
+        assert refused(["top", "legs", "none", "colliders", "logo"]) == [
+            "object_references.2.prim_path: Empty holds no geometry, so none has no box to place by",
+            "object_references.3.prim_path: Collisions holds only proxy-purpose geometry, which Arena bounds only"
+            " where the prim is a collider itself; name the collider, so colliders has no box to place by",
+            "object_references.4.prim_path: Decals/Logo holds only render-purpose geometry, and Arena bounds only"
+            " default-purpose geometry, so logo has no box to place by",
+        ]
+    else:  # release/0.4.0 bounds default-purpose geometry alone, the collider's too
+        assert refused(["top", "legs", "none", "colliders", "logo"]) == [
+            "object_references.0.prim_path: Collisions/Cube holds only proxy-purpose geometry, and Arena bounds only"
+            " default-purpose geometry, so top has no box to place by",
+            "object_references.2.prim_path: Empty holds no geometry, so none has no box to place by",
+            "object_references.3.prim_path: Collisions holds only proxy-purpose geometry, and Arena bounds only"
+            " default-purpose geometry, so colliders has no box to place by",
+            "object_references.4.prim_path: Decals/Logo holds only render-purpose geometry, and Arena bounds only"
+            " default-purpose geometry, so logo has no box to place by",
+        ]
+    assert refused([], obstacles=["colliders"]) == refused(["colliders"]) != []
     assert refused([]) == [], "a box the solve never sees is no problem"
+    assert _bounding_box(assets["none"]).size.abs().sum() == 0, "drawn as nothing, not a crash"
+
+
+def test_a_link_holding_only_a_guide_collider_has_no_box_on_either_arena(tmp_path: Path):
+    """A cabinet's door link whose one collider is a guide has no box on either Arena: main asserts,
+    and release/0.4.0 turns the link's empty box to its joints' pose, which leaves it ±FLT_MAX across
+    rather than inside out. A link that is a guide collider itself, the shelf, has a box on main."""
+    from isaaclab_arena.assets.object import Object
+    from isaaclab_arena.assets.object_type import ObjectType
+    from isaaclab_arena.environment_spec.arena_env_graph_conversion_utils import _instantiate_object_reference
+    from isaaclab_arena.environment_spec.arena_env_graph_types import ObjectReferenceSpec
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "cabinet.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/Cabinet").GetPrim())
+    UsdPhysics.ArticulationRootAPI.Apply(stage.GetPrimAtPath("/Cabinet"))
+    for link in ("body", "door"):
+        UsdPhysics.RigidBodyAPI.Apply(UsdGeom.Xform.Define(stage, f"/Cabinet/{link}").GetPrim())
+    UsdGeom.Cube.Define(stage, "/Cabinet/body/mesh")
+    for collider in ("door/collider", "shelf"):
+        cube = UsdGeom.Cube.Define(stage, f"/Cabinet/{collider}")
+        cube.CreatePurposeAttr(UsdGeom.Tokens.guide)
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    UsdPhysics.RigidBodyAPI.Apply(stage.GetPrimAtPath("/Cabinet/shelf"))
+    hinge = UsdPhysics.RevoluteJoint.Define(stage, "/Cabinet/hinge")
+    hinge.CreateBody0Rel().SetTargets(["/Cabinet/body"])
+    hinge.CreateBody1Rel().SetTargets(["/Cabinet/door"])
+    hinge.CreateAxisAttr("Z")
+    stage.Save()
+
+    cabinet = Object(name="cabinet", usd_path=str(path), object_type=ObjectType.ARTICULATION)
+    references = [
+        ObjectReferenceSpec(id=link, parent_id="cabinet", prim_path=link, object_type="base")
+        for link in ("door", "shelf")
+    ]
+    assets = {ref.id: _instantiate_object_reference(ref, parent_asset=cabinet) for ref in references}
+    spec = SimpleNamespace(object_references=references, relations=[SimpleNamespace(subject="door", reference="shelf")])
+    with pytest.raises(SpecError) as refusal:
+        check_reference_boxes(spec, assets)
+
+    if COLLIDERS_BOUNDED:  # Arena main
+        assert refusal.value.errors == [
+            "object_references.0.prim_path: door holds only guide-purpose geometry, which Arena bounds only where"
+            " the prim is a collider itself; name the collider, so door has no box to place by",
+        ]
+    else:  # release/0.4.0
+        assert refusal.value.errors == [
+            f"object_references.{index}.prim_path: {link} holds only guide-purpose geometry, and Arena bounds only"
+            f" default-purpose geometry, so {link} has no box to place by"
+            for index, link in enumerate(("door", "shelf"))
+        ]
+    assert _bounding_box(assets["door"]).size.abs().sum() == 0, "drawn as nothing, not as all of space"
 
 
 Asset = namedtuple("Asset", "name")

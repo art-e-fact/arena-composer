@@ -49,7 +49,7 @@ def main() -> None:
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         spec = json.loads(Path(args.cams).read_text())
-        # The cameras are this script's own; an embodiment that carries none (kuka_allegro) refuses the flag.
+        # The cameras are this script's own; an embodiment that carries none refuses the flag.
         args.enable_cameras = False
         builder = get_arena_builder_from_cli(args, hydra_overrides=hydra)
         env_cfg, env_kwargs = builder.build_env_cfg()

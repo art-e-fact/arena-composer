@@ -475,7 +475,7 @@ def test_check_judges_the_bytes_on_disk_and_writes_nothing(spec: Path):
     before = spec.read_text(), scene_of(spec).read_text()
     result = spec_edit.check(spec)
     assert not result.ok
-    assert any("relations.1.kind" in error and "string" in error for error in result.errors), result.errors
+    assert any("relations.1.kind" in error and "quote it" in error for error in result.errors), result.errors
     assert (spec.read_text(), scene_of(spec).read_text()) == before
 
 
@@ -760,6 +760,24 @@ def test_removing_an_object_takes_the_references_inside_it(spec: Path):
     assert all("distractor_top" not in (r["subject"], r.get("reference")) for r in scene["relations"])
 
 
+def test_removing_an_object_takes_the_references_nested_inside_it(spec: Path):
+    """A reference's parent may be an earlier reference, as a drawer's is its cabinet, so the
+    cascade follows the chain down; a parent declared before is no dangling id either."""
+    knob = "- id: distractor_knob\n  parent_id: distractor_top\n  prim_path: knob\n  object_type: rigid\n"
+    scene_of(spec).write_text(
+        SCENE.replace("relations:\n", REFERENCES + knob + "relations:\n")
+        + TOP_RELATION.replace("distractor_top", "distractor_knob")
+    )
+    added = spec_edit.add_object(spec, "apple", "apple_01_objaverse_robolab", on=TABLE)
+    assert added.ok and not [line for line in added.remaining_errors if "parent_id" in line], added
+
+    result = spec_edit.remove_object(spec, "distractor")
+    assert result.ok, result.errors
+    scene = yaml.safe_load(scene_of(spec).read_text())
+    assert [reference["id"] for reference in scene["object_references"]] == ["table_top"]
+    assert all("distractor_knob" not in (r["subject"], r.get("reference")) for r in scene["relations"])
+
+
 def test_removing_the_last_entry_of_a_commented_list_still_parses(spec: Path):
     """ruamel writes a list emptied of a commented entry as a `[]` at column 0,
     which does not parse — the list version of the emptied-mapping trap. Both
@@ -978,8 +996,13 @@ def test_a_kind_and_an_id_come_with_the_closest_too(spec: Path):
 
 
 def test_a_bare_on_is_said_to_need_quoting(spec: Path):
+    """Arena explains it under `kind`, without the prefix pydantic puts on a `ValueError`; any other
+    string field gets the composer's note."""
     assert broken(spec, "- kind: 'on'\n  subject: distractor", "- kind: on\n  subject: distractor") == [
-        "../scenes/scene.yaml: relations.2.kind: Input should be a valid string;"
+        "../scenes/scene.yaml: relations.2.kind: YAML reads an unquoted 'on' as True; quote it: kind: 'on'"
+    ]
+    assert broken(spec, "- kind: on\n  subject: distractor", "- kind: 'on'\n  subject: no") == [
+        "../scenes/scene.yaml: relations.2.subject: Input should be a valid string;"
         " Arena reads YAML 1.1, where a bare on, off, yes or no is a boolean, so quote it"
     ]
 

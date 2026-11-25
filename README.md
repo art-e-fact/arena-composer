@@ -104,7 +104,7 @@ Arena's [Agentic Environment Generation](https://isaac-sim.github.io/IsaacLab-Ar
     <td>also where the solver put things, and renders</td></tr>
   <tr><th>An invalid spec</th><td>retried, then handed back with its errors</td>
     <td>refused; the files stay as they were</td></tr>
-  <tr><th>Tasks and relations</th><td>those Arena marks as agent-ready</td><td>every registered one</td></tr>
+  <tr><th>Tasks and relations</th><td>a list Arena picks: three tasks, six relations</td><td>every registered one</td></tr>
 </table>
 
 ## Install
@@ -136,17 +136,23 @@ sampled layout passing.
 
 ### Which Arena it runs on
 
-Each release is synced with one commit of IsaacLab-Arena's `main`. Arena's `main` changes with no
-new version number, so the install cannot check which one you have: install a release into an
-Arena venv at its commit.
+Each release is synced with one commit of IsaacLab-Arena's `main`, and runs on the Arena release
+its row names, if any. Arena changes with no new version number, on `main` and on its release
+branches alike, so the install cannot check which one you have: install a release into an Arena
+venv at a commit its row names.
 
-| arena-composer | IsaacLab-Arena `main` |
-| --- | --- |
-| 0.7.0 | [1a73ce1d00](https://github.com/isaac-sim/IsaacLab-Arena/commit/1a73ce1d00) (2026-11-03), on Isaac Lab 3.0 |
-| 0.6.0 | [f8c3e789b2](https://github.com/isaac-sim/IsaacLab-Arena/commit/f8c3e789b2) (2026-10-27), on Isaac Lab 3.0 |
+| arena-composer | IsaacLab-Arena `main` | IsaacLab-Arena release |
+| --- | --- | --- |
+| 0.7.0 | [1a73ce1d00](https://github.com/isaac-sim/IsaacLab-Arena/commit/1a73ce1d00) (2026-11-03), on Isaac Lab 3.0 | none |
+| 0.6.0 | [f8c3e789b2](https://github.com/isaac-sim/IsaacLab-Arena/commit/f8c3e789b2) (2026-10-27), on Isaac Lab 3.0 | none |
 
 Release 0.5.0 is synced with [dc77564](https://github.com/isaac-sim/IsaacLab-Arena/commit/dc77564362)
-(2026-10-20). arena-composer's `main` is synced with 0.7.0's commit.
+(2026-10-20). arena-composer's `main` is synced with
+[aab4c7fb4a](https://github.com/isaac-sim/IsaacLab-Arena/commit/aab4c7fb4a) (2026-11-25), and runs
+on [release/0.4.0](https://github.com/isaac-sim/IsaacLab-Arena/tree/release/0.4.0) too, tested at
+[a2f421e918](https://github.com/isaac-sim/IsaacLab-Arena/commit/a2f421e918) (2026-11-21). There, a
+collider authored as a proxy or a guide has no box to place by, so `get_prim_tree` leaves it out;
+Arena's `main` places by it.
 
 ## Developing
 

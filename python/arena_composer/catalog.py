@@ -148,12 +148,15 @@ def catalog() -> tuple[Asset, ...]:
 
 
 def _class_usd_path(cls: type) -> str | None:
-    """The USD a registered class spawns, where that is a plain attribute. Not
-    every class has one: some compose their USD at construction, some spawn
-    procedurally, and Lightwheel's resolve theirs on first read — a descriptor
-    that asks api.lightwheel.net every time, cached or not. Read statically, so
-    listing assets never touches the network and those six have no path."""
+    """The USD a registered class spawns, where that is a plain attribute, or
+    the URL of the SimReady Central prop its `usd_source` fetches. Not every
+    class has one: some compose their USD at construction, some spawn
+    procedurally, and Lightwheel's `usd_source` asks api.lightwheel.net for its
+    file when the asset is built. Read statically, so listing assets never
+    touches the network and those have no path."""
     usd_path = inspect.getattr_static(cls, "usd_path", None)
+    if not isinstance(usd_path, str) or not usd_path:
+        usd_path = getattr(inspect.getattr_static(cls, "usd_source", None), "url", None)
     return usd_path if isinstance(usd_path, str) and usd_path else None
 
 
@@ -287,9 +290,6 @@ class Kind:
     summary: str
     #: Relations only: a unary relation takes no `reference`.
     unary: bool | None = None
-    #: Marked by Arena as one its own spec-writing agent may use. The rest are
-    #: registered all the same, and a spec may name them.
-    agent_ready: bool = False
     #: The parameters no control edits — a tuple, a list of assets, a Literal,
     #: a callable — by name: their annotated `type`, whether one is `required`
     #: and the `default`, and for a list of ids the class each `needs`. A text
@@ -300,8 +300,7 @@ class Kind:
 
 @cache
 def relations() -> tuple[Kind, ...]:
-    """Every registered relation kind. Not just the ``agent_ready`` ones —
-    those are five of the twelve."""
+    """Every registered relation kind."""
     from isaaclab_arena.assets.registries import ObjectRelationLibraryRegistry
 
     registry = ObjectRelationLibraryRegistry()
@@ -362,7 +361,6 @@ def _kind(cls: type, name: str, unary: bool | None = None, refs: dict[str, bool]
         fields=tuple(fields),
         summary=_summary(cls),
         unary=unary,
-        agent_ready=bool(getattr(cls, "agent_ready", False)),
         other_params=other,
     )
 

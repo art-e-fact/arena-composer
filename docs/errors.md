@@ -23,7 +23,7 @@ A spec passes five gates in turn, drawn for someone writing one in the guide
 | the validator's fields | at once, all of them | a `registry_name` nothing registers; a wrong type; a missing key; a bare `on` read as `true`. And without a word: a key no field reads, which pydantic drops; a placement check nothing registers, which the placer leaves out |
 | the validator's asserts | once the fields they cover are right; the first to fail stops the rest | an id nothing declares; a duplicate id or `cli_override_specs` arg; a composition that does not fit its subtask count |
 | the build | minutes in, after Isaac Sim starts | a param the constructor lacks or does not take — `TypeError: object.__init__() takes exactly one argument`, naming no key; what a task's constructor asserts of the nodes it names — an Openable, a rigid body to sense contact with, an initial pose to lift from — and a `NoTask` among a composite's subtasks; an object reference that cannot be built; an `env_cfg_override` field nothing has |
-| the resolve | seconds in | a `usd_path` nothing is at, or that is not the single rigid body the sim would spawn; a relation on a light or a ground plane; an object reference the solve places by whose prim has no default-purpose geometry, the only kind Arena bounds |
+| the resolve | seconds in | a `usd_path` nothing is at, or that is not the single rigid body the sim would spawn; a relation on a light or a ground plane; an object reference the solve places by whose prim has nothing Arena bounds: default-purpose geometry, or on Arena's `main` a collider's own |
 
 `spec_edit.check`, and every edit before it writes, run the first four in milliseconds: the first
 two as Arena runs them, the fourth computed here, the third both ways. The fifth needs the assets,
@@ -38,8 +38,9 @@ nothing. A new one gets a sweep too, for warnings on specs that work.
 ## What is computed here, and why
 
 - **Arena's lines, where Arena gives them.** A field error comes out of pydantic as `path: message`
-  (`_message`), with the `Assertion failed, ` prefix dropped and, for a boolean where a string was
-  due, a note that YAML 1.1 reads a bare `on`, `off`, `yes` or `no` as one.
+  (`_message`), with the `Assertion failed, ` or `Value error, ` prefix dropped and, for a boolean
+  where a string was due, a note that YAML 1.1 reads a bare `on`, `off`, `yes` or `no` as one. Arena
+  explains a bare `on` under a relation's `kind` itself, so the note is for every other field.
 - **The asserts are computed off the merged dict.** pydantic runs them only once the fields are
   right, and the first to fail stops the rest, so fixing a field error surfaced the next assert as
   if the fix had introduced it — the deadlock the compare below exists for. `_dangling` finds every
