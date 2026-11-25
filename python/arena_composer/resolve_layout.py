@@ -59,6 +59,17 @@ from arena_composer import cli, spec_edit
 from arena_composer.spec_edit import DEFAULT_SEED, SpecError
 from arena_composer.usd_assets import localize, use_local_asset_cache
 
+try:  # Arena main bounds a collider by its own purpose, often a guide in a Lightwheel kitchen (#1723)
+    from isaaclab_arena.utils.usd.helpers import get_bounds_purpose
+
+    COLLIDERS_BOUNDED = True
+except ImportError:  # Arena release/0.4.0 bounds default-purpose geometry alone
+
+    def get_bounds_purpose(prim: Usd.Prim) -> str:
+        return UsdGeom.Tokens.default_
+
+    COLLIDERS_BOUNDED = False
+
 
 def resolve_layout(spec: ArenaEnvGraphSpec, seed: int | None = None, samples: int = 1) -> dict[str, Any]:
     """Return a JSON-serializable scene description: assets, USD paths, transforms, bounds.
@@ -141,19 +152,20 @@ def check_usd_params(objects: Iterable[Any]) -> None:
     from inside the solver, or not until the sim. The download this costs is
     the one the resolve was about to make anyway.
 
-    A SimReady Central URL — a Hugging Face dataset — is checked by Arena's
-    own loader, which downloads the package into the Hugging Face cache and
-    asserts it is pinned and one rigid body: the one copy, which Arena's build
-    reads too, and a failure named here rather than from inside it.
+    A SimReady Central URL — a Hugging Face dataset — is fetched by Arena's
+    own source, which asserts it is pinned: the one copy, in the Hugging Face
+    cache, which Arena's build reads too, and a failure named here rather than
+    from inside it.
 
     `objects` are the spec's object entries — anything with an `id`, a
     `registry_name` and `params`.
     """
-    from isaaclab_arena.assets.simready_central_asset_loader import (
-        download_and_wrap_central_asset,
-        is_central_asset_url,
+    from isaaclab_arena.assets.simready_constants import (
+        SIMREADY_CENTRAL_PHYSICS_VARIANTS,
+        SIMREADY_PHYSICS_VARIANTS,
+        SIMREADY_USD_OBJECT_REGISTRY_NAME,
     )
-    from isaaclab_arena.assets.simready_constants import SIMREADY_PHYSICS_VARIANTS, SIMREADY_USD_OBJECT_REGISTRY_NAME
+    from isaaclab_arena.assets.sources.simready_central import SimReadyCentralUsdSource, is_central_asset_url
     from isaaclab_arena.utils.usd.rigid_bodies import read_asset_rigid_body_paths
 
     errors = []
@@ -161,22 +173,25 @@ def check_usd_params(objects: Iterable[Any]) -> None:
         usd_path = obj.params.get("usd_path")
         if not usd_path:
             continue
+        variants = SIMREADY_PHYSICS_VARIANTS
         if obj.registry_name == SIMREADY_USD_OBJECT_REGISTRY_NAME and is_central_asset_url(usd_path):
             try:
-                download_and_wrap_central_asset(usd_path)
+                local = SimReadyCentralUsdSource(usd_path).to_local_usd_path()
             except Exception as error:
                 errors.append(f"{obj.id}: {type(error).__name__}: {error}")
-            continue
-        if "://" not in usd_path and not Path(usd_path).is_file():
+                continue
+            variants = SIMREADY_CENTRAL_PHYSICS_VARIANTS
+        elif "://" not in usd_path and not Path(usd_path).is_file():
             errors.append(f"{obj.id}: no file at {usd_path}")
             continue
-        try:
-            local = localize(usd_path)
-        except Exception as error:
-            errors.append(f"{obj.id}: {error}")
-            continue
+        else:
+            try:
+                local = localize(usd_path)
+            except Exception as error:
+                errors.append(f"{obj.id}: {error}")
+                continue
         if obj.registry_name == SIMREADY_USD_OBJECT_REGISTRY_NAME:
-            bodies = read_asset_rigid_body_paths(local, SIMREADY_PHYSICS_VARIANTS)
+            bodies = read_asset_rigid_body_paths(local, variants)
             if len(bodies) != 1:
                 errors.append(f"{obj.id}: {usd_path} has {len(bodies)} rigid bodies; the sim spawns it as exactly one")
     if errors:
@@ -204,10 +219,10 @@ def check_placeable(assets: dict[str, Any], relations: Iterable[Any] = ()) -> No
 def check_reference_boxes(spec: ArenaEnvGraphSpec, assets: dict[str, Any], obstacles: Iterable[Any] = ()) -> None:
     """Refuse an object reference the solve places by whose prim has nothing Arena bounds, by index.
 
-    Arena bounds a prim by its default-purpose geometry alone, so a reference to a collision proxy
-    or a guide has an empty box, and the solver stops on an assert that names neither. The solve
-    places by a reference's box when a relation names it, and as a fixed obstacle, one of
-    `obstacles`, when none does.
+    Arena bounds a prim by its default-purpose geometry, or, on main, a collider by its own purpose.
+    A prim with neither has no box: main asserts, naming no entry of the spec, and release/0.4.0
+    hands the solver an empty box. The solve places by a reference's box when a relation names it,
+    and as a fixed obstacle, one of `obstacles`, when none does.
     """
     named = {node_id for relation in spec.relations for node_id in (relation.subject, relation.reference)}
     obstacles = list(obstacles)
@@ -215,22 +230,37 @@ def check_reference_boxes(spec: ArenaEnvGraphSpec, assets: dict[str, Any], obsta
         f"object_references.{index}.prim_path: {reference.prim_path} {_unbounded(assets[reference.id])},"
         f" so {reference.id} has no box to place by"
         for index, reference in enumerate(spec.object_references or [])
-        if (reference.id in named or assets[reference.id] in obstacles)
-        and assets[reference.id].get_bounding_box().is_empty.any()
+        if (reference.id in named or assets[reference.id] in obstacles) and _reference_box(assets[reference.id]) is None
     ]
     if errors:
         raise SpecError(errors)
 
 
+def _reference_box(reference: ObjectReference) -> AxisAlignedBoundingBox | None:
+    """Arena's box for the reference, or None where its prim has nothing Arena bounds. Main asserts
+    on such a prim. Release/0.4.0 boxes USD's empty range, +FLT_MAX to -FLT_MAX: a box inside out,
+    or, for an articulation link, which it turns to its joints' pose, one ±FLT_MAX or inf across."""
+    try:
+        box = reference.get_bounding_box()
+    except AssertionError:  # main: "Prim '…' has no default-purpose geometry."
+        return None
+    return None if box.is_empty.any() or not (box.size.abs() < 1e30).all() else box
+
+
 def _unbounded(reference: ObjectReference) -> str:
-    """What the referenced prim holds in place of the default-purpose geometry Arena bounds."""
+    """What the referenced prim holds in place of the geometry Arena bounds."""
     stage = Usd.Stage.Open(localize(reference.parent_asset.usd_path))
     prims = Usd.PrimRange(stage.GetPrimAtPath(reference.prim_path_in_parent_usd), Usd.TraverseInstanceProxies())
-    purposes = {UsdGeom.Imageable(prim).ComputePurpose() for prim in prims if prim.IsA(UsdGeom.Gprim)}
-    purposes -= {UsdGeom.Tokens.default_}
+    gprims = [prim for prim in prims if prim.IsA(UsdGeom.Gprim)]
+    purposes = {UsdGeom.Imageable(prim).ComputePurpose() for prim in gprims} - {UsdGeom.Tokens.default_}
     if not purposes:
         return "holds no geometry"
     only = " and ".join(sorted(purposes))
+    if COLLIDERS_BOUNDED and any(prim.HasAPI(UsdPhysics.CollisionAPI) for prim in gprims):
+        return (
+            f"holds only {only}-purpose geometry, which Arena bounds only where the prim is a collider itself;"
+            " name the collider"
+        )
     return f"holds only {only}-purpose geometry, and Arena bounds only default-purpose geometry"
 
 
@@ -326,18 +356,24 @@ def prim_tree(path: str | Path, node_id: str) -> list[dict[str, Any]]:
     usd_path = localize(parents[node_id].resolve_usd_path())
     stage = Usd.Stage.Open(usd_path)
     root = stage.GetDefaultPrim().GetPath()
-    # Bounded as Arena bounds a reference. A Lightwheel kitchen's colliders are guides, half the prims listed.
-    bounds = UsdGeom.BBoxCache(Usd.TimeCode.Default(), includedPurposes=[UsdGeom.Tokens.default_])
+    caches: dict[str, UsdGeom.BBoxCache] = {}
+
+    def bounded(prim: Usd.Prim) -> bool:
+        """Bounded as Arena bounds a reference: on main, a collider by its own purpose, often a guide
+        in a Lightwheel kitchen; anything else, and all of it on release/0.4.0, by its default-purpose
+        geometry."""
+        purpose = get_bounds_purpose(prim)
+        cache = caches.setdefault(purpose, UsdGeom.BBoxCache(Usd.TimeCode.Default(), includedPurposes=[purpose]))
+        return not cache.ComputeWorldBound(prim).ComputeAlignedRange().IsEmpty()
+
     return [
         {
             "prim_path": record.relative_path,
             "object_type": record.object_type.value,
-            **({"joint_names": list(record.joint_names)} if record.joint_names else {}),
+            **({"joint_names": list(record.articulation.joint_names)} if record.articulation else {}),
         }
         for record in load_usd_prim_tree(usd_path)
-        if not bounds.ComputeWorldBound(stage.GetPrimAtPath(root.AppendPath(record.relative_path)))
-        .ComputeAlignedRange()
-        .IsEmpty()
+        if bounded(stage.GetPrimAtPath(root.AppendPath(record.relative_path)))
     ]
 
 
@@ -390,9 +426,11 @@ def _geometry(asset: Any, env: int = 0) -> dict[str, Any]:
     """Return the USD the asset spawns from in env `env`, plus what is needed to draw it."""
     if isinstance(asset, EmbodimentBase):
         # The robot USD is composed (arm + stand) at construction; joints must be posed to match.
+        # ponytail: a robot of two articulations, the bimanual YAM, draws one arm at its rig's middle
+        # (its box holds both); draw one per layout_pose_to_scene_writes(identity) when someone uses it.
         source = asset.get_placement_geometry_source()
         return {
-            "prim_path": asset.scene_config.robot.prim_path,
+            "prim_path": getattr(asset.scene_config, asset.get_scene_key()).prim_path,
             **_usd_paths(source.usd_path),
             "scale": list(source.scale),
             "joint_pos": dict(source.joint_pos),
@@ -433,9 +471,13 @@ def _bounding_box(asset: Any, env: int = 0) -> Any:
         per_env = asset.get_bounding_box_per_env(num_envs=len(asset.variant_indices_by_env))
         rows = slice(env, env + 1)
         return AxisAlignedBoundingBox(min_point=per_env.min_point[rows], max_point=per_env.max_point[rows])
+    # A light or a ground plane (check_placeable), or a reference no relation places whose prim has
+    # nothing Arena bounds (check_reference_boxes): an empty box, drawn as nothing.
+    empty = AxisAlignedBoundingBox(min_point=(0.0, 0.0, 0.0), max_point=(0.0, 0.0, 0.0))
     if _unplaceable(asset):
-        # A light or a ground plane (check_placeable): an empty box, drawn as nothing.
-        return AxisAlignedBoundingBox(min_point=(0.0, 0.0, 0.0), max_point=(0.0, 0.0, 0.0))
+        return empty
+    if isinstance(asset, ObjectReference):
+        return _reference_box(asset) or empty
     return asset.get_bounding_box()
 
 

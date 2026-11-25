@@ -66,18 +66,17 @@ under the same layer name, and ~1,100 more.
   `reindex_assets` returns `central_error` and `central_filter` as keys, and the reindex button's
   answer carries them as the panel's errors. The deadline is the build's own: huggingface_hub's
   client waits on a stalled connection for ever, and it is Arena's client too.
-- **A package lives in the Hugging Face cache, not here.** A resolve has Arena's
-  `download_and_wrap_central_asset` download it (`resolve_layout.check_usd_params`), and Arena builds
-  the prop from the wrapper layer that writes, so no Central URL reaches the mirror. One that reaches
-  `usd_assets.localize` anyway — through `Usd.Stage.Open`, or Arena's own `retrieve_file_path`,
-  which `_route_retrievals` sends there — is downloaded the same way: file by file with
-  `hf_hub_download` at the pinned commit, so the two share every file and `HF_HOME` moves them.
-  Nothing of it is mirrored into composer's cache, and none of its layers is relinked: the files are
-  the Hugging Face cache's, shared with Arena. The Hub is asked once a process for the package's
-  files, cached or not: a cached entry is no sign of a whole package, since Arena's loader downloads
-  in no order and may have been stopped halfway, and with the commit pinned a cached file costs a
-  stat. Only a Hub that cannot be reached is answered from the cache. Arena's loader asks the Hub
-  every time, so a resolve naming a Central prop needs huggingface.co either way.
+- **A package lives in the Hugging Face cache, not here.** Arena's `SimReadyCentralUsdSource`
+  hands a Central URL to `retrieve_file_path`, which `_route_retrievals` sends to
+  `usd_assets.localize`, as `Usd.Stage.Open` does: the resolve's check
+  (`resolve_layout.check_usd_params`) and Arena's build read one copy. It is downloaded file by file
+  with `hf_hub_download` at the pinned commit, so `HF_HOME` moves it. Nothing of it is mirrored into
+  composer's cache, and none of its layers is relinked: the files are the Hugging Face cache's.
+  Arena run in Isaac Sim, unpatched, mirrors the URL into Isaac Lab's temporary directory instead.
+  The Hub is asked once a process for the package's files, cached or not: a cached entry is no sign
+  of a whole package, since a download goes in no order and may have been stopped halfway, and with
+  the commit pinned a cached file costs a stat. Only a Hub that cannot be reached is answered from
+  the cache, so a Central prop already downloaded resolves offline.
 - **A picture is kept once, small.** Central publishes them at 1024 px whatever their `256x256`
   folder says, ~850 KB each. `simready.fetch_thumbnails` fetches each and keeps one 256 px copy,
   ~60 KB, under `simready-central/` in the asset cache, named by its layer and not the commit, so a

@@ -13,9 +13,32 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   page's `globalThis.arena_request`, and `view.serve` draws in any window that carries the same
   messages. When one process runs both, a solve and an MCP tool wait for each other, and two edits
   to one spec take turns rather than one writing over the other. `arena-view` itself is unchanged.
+- The SimReady Central props Arena now registers by name, such as `simready_central_small_wrench`
+  and `simready_central_slotted_screwdriver`, show their picture in the asset browser and are found
+  by their file name.
+- arena-composer runs on IsaacLab-Arena's `release/0.4.0` too, the first Arena release it runs on
+  (tested at a2f421e918). There a collider authored as a proxy or a guide has no box Arena places
+  by, so `get_prim_tree` leaves it out and an object reference to one is refused, as before.
 
 ### Changed
 
+- arena-composer runs on IsaacLab-Arena's `main` at aab4c7fb4a and no longer on 1a73ce1d00, where
+  Arena's SimReady Central loader sat elsewhere: install it into an Arena venv at that commit, or on
+  `release/0.4.0`. On `main`, reinstall Arena there too, since it moved its G1 and policy packages
+  into folders of their own. `next_to` layouts differ from the ones 1a73ce1d00 solved from the same
+  seed, on either Arena: it now starts the subject on the side asked for and takes any gap within
+  `tolerance_m`, where it pulled the gap to `distance_m`.
+- On Arena's `main`, `get_prim_tree` lists a collider authored as a proxy or a guide, which Arena
+  now places by there, and an object reference to one is no longer refused. One to the prim that
+  holds such colliders still is, and the line says to name the collider.
+- `check_spec` says what is wrong with a bare `on` under a relation's `kind` in Arena's words:
+  `YAML reads an unquoted 'on' as True; quote it: kind: 'on'`.
+- A SimReady Central prop already downloaded resolves without reaching huggingface.co.
+- A relation on a background with `collision_mode: mesh`, `is_anchor` included, is refused by
+  Arena's solve, and the `author-arena-spec` skill tells the agent to anchor an object reference to
+  the background's floor or counter instead.
+- The bimanual YAM, `yam_bimanual_abs_joint_pos`, new in Arena's `main`, resolves and draws as one
+  arm at the middle of its rig, inside the box that holds both arms.
 - A relation drawn over the layout lies on the surfaces its objects stand on, where it was lines in
   the air. What it allows is a tinted patch, rimmed where the relation bounds it and fading out
   where it leaves a side open. A bound `position_limits_box` or `position_limits_cylindrical` sets
@@ -27,6 +50,10 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
 
 ### Fixed
 
+- Removing an object or an object reference takes the references nested inside its references with
+  it, as Arena now lets a reference's parent be an earlier reference, a cabinet's drawer say. The
+  removal was refused, and an edit to a spec holding one reported the inner reference's parent as
+  neither the background nor an object.
 - A fresh install no longer takes huggingface-hub 2, which leaves out the `httpx` that fetching a
   SimReady Central package needs.
 - An asset registered with Arena's `register_asset_factory`, a function rather than a class, is
@@ -35,6 +62,11 @@ the wheel's, from `Cargo.toml`, and each is a GitHub Release whose notes are its
   such as an Openable, accepts it. Naming one stopped the checks of task params with
   `TypeError: issubclass() arg 1 must be a class` on stderr, and so did a task param naming an id of
   the wrong class, in any project that registers one.
+
+### Removed
+
+- `list_kinds` no longer says which kinds are `agent_ready`: Arena dropped the mark. Its own agent
+  now offers a fixed list, three tasks and six relations.
 
 ## [0.7.0] - 2026-11-04
 

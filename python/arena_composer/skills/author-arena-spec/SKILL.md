@@ -56,6 +56,8 @@ the conventions of a spec, and what to do when a check fails.
   name it after its `registry_name`.
 - Give the scene one anchor: `is_anchor` on the background, or on an object reference to the
   surface things stand on. An anchor takes no other relation: it stays where it is configured.
+  A background with `collision_mode: mesh`, a kitchen say, takes no relation at all, `is_anchor`
+  included: anchor object references to its floor and counter instead.
 - Read positions off the world boxes `describe_scene` returns, not off origins: a table's origin
   can sit far from its top, which is its `bbox_max[2]`. Its `frame` says which way the robot faces
   and where its left is. `next_to`'s `side` names a world axis, not the robot's.
@@ -72,7 +74,8 @@ the conventions of a spec, and what to do when a check fails.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `relations.N.kind: Input should be a valid string; ... quote it` | A bare `on` | Write `kind: 'on'` |
+| `relations.N.kind: YAML reads an unquoted 'on' as True; quote it` | A bare `on` | Write `kind: 'on'` |
+| `... Input should be a valid string; ... quote it` | A bare `on`, `off`, `yes` or `no` in another field | Quote it |
 | `Unknown asset registry_name 'x'; did you mean ...?` | A guessed name | Take one from `search_assets` |
 | `Unknown asset ...` with a note about `--import` | The project's own asset, not registered yet | Its module goes in `ARENA_COMPOSER_IMPORTS` in `bin/arena-mcp`; tell the user |
 | `... references unknown reference 'x'` or `... unknown node 'x'` | An id the spec does not declare | Add the object, or correct the id |
@@ -84,7 +87,8 @@ the conventions of a spec, and what to do when a check fails.
 | `K filters its contact sensor against 'x', an articulation` | A destination with no rigid body to sense contact with | Add an object reference to the part to place onto, from `get_prim_tree`, and name that |
 | `... Arena ignores this key` | A misspelt key, or a param written beside `params` | Correct it, or move it under `params` |
 | `object_references.N.prim_path: ... names none` | A reference with no prim | Take a `prim_path` from `get_prim_tree` |
-| `object_references.N.prim_path: ... has no box to place by` | A prim whose geometry Arena does not bound: a collision proxy, a guide, or none | Take a `prim_path` from `get_prim_tree`, which lists only prims with a box. If it lists none, relate to the parent itself |
+| `object_references.N.prim_path: ... has no box to place by` | A prim whose geometry Arena does not bound: proxy or guide colliders, or nothing | Take a `prim_path` from `get_prim_tree`, which lists only prims with a box. If it lists none, relate to the parent itself |
+| `Background 'x' has relations and mesh collision` from `describe_scene` | A relation, `is_anchor` included, on a background with `collision_mode: mesh` | Remove the background's relations, and anchor an object reference to its support prim from `get_prim_tree` |
 | `relations.N: ... with nothing to place; it takes no relation` | A relation on a light or a ground plane | Remove the relation |
 | `TypeError: object.__init__() takes exactly one argument` from `describe_scene` | A param an object or the background does not take. They take any name, so `check_spec` passes it | Correct or remove the `params` written on objects and the background |
 | `remaining_errors` on an edit that landed | Problems the spec already had | Fix them one edit at a time |

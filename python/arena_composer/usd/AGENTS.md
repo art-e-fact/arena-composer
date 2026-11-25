@@ -26,8 +26,8 @@ fixed, spherical or D6 joint at zero, and full-matches each key as an Isaac Lab 
 (`iiwa7_joint_(1|2|7)`). It is the one import of Arena here; reading an asset unposed takes `usd-core`
 alone. Arena's box is looser than the drawing: it bounds each gprim by its local box's corners, which
 stand off a link turned off its axes — 5 cm at the Franka's `panda_link4`. To check a robot against
-its box, box the drawn prims the same way: for kuka_allegro, franka_joint_pos, droid_abs_joint_pos,
-g1_wbc_joint and gr1_joint that agrees to under a millimetre.
+its box, box the drawn prims the same way: for franka_joint_pos, droid_abs_joint_pos, g1_wbc_joint and
+gr1_joint that agrees to under a millimetre.
 
 `material.py` resolves texture paths through `Sdf.AssetPath.resolvedPath`, never the authored string,
 and drops paths that do not exist — otherwise the viewer's asset server logs a miss per texture. A

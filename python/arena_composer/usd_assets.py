@@ -14,9 +14,9 @@ fetches.
 
 A layer in a SimReady package on Hugging Face — SimReady Central's, as
 :mod:`arena_composer.simready` indexes them — is not mirrored here at all. Its
-package goes into the Hugging Face cache, file for file where Arena's own
-Central loader puts it, so whichever of the two pulls a package first, the other
-reads it from there (:func:`_hf_package`).
+package goes into the Hugging Face cache, whole, and Arena's own Central source
+reads it from there too, since it asks ``retrieve_file_path`` for it
+(:func:`_hf_package`).
 """
 
 from __future__ import annotations
@@ -67,11 +67,6 @@ def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
     """Patch ``Usd.Stage.Open`` to localize remote paths first, and Isaac Lab's
     ``retrieve_file_path`` where Arena calls it without a directory, and return the cache
     directory.
-
-    Arena's wrapper of a SimReady Central prop is made once a process too: the composer's check
-    and Arena's build each ask for it, and each time costs a listing from the server and a
-    rewritten wrapper, whose new mtime would be a new copy of it for ``retrieve_file_path``. Arena
-    imports the function where it calls it, so replacing it on its module reaches every call.
     """
     global _cache_dir, _patched
     if cache_dir is not None:
@@ -84,9 +79,6 @@ def use_local_asset_cache(cache_dir: str | Path | None = None) -> Path:
 
         Usd.Stage.Open = staticmethod(open_local)
         _route_retrievals()
-        import isaaclab_arena.assets.simready_central_asset_loader as central
-
-        central.download_and_wrap_central_asset = functools.cache(central.download_and_wrap_central_asset)
         _patched = True
     return _cache_dir
 
@@ -178,8 +170,8 @@ def localize(usd_path: str) -> str:
         return usd_path
     if usd_path not in _local_paths:
         if (package := _HF_PACKAGE.fullmatch(usd_path)) is not None:
-            # Not relinked: those files are the Hugging Face cache's, shared
-            # with Arena, and a package's layers reference each other relatively.
+            # Not relinked: those files are the Hugging Face cache's, and a
+            # package's layers reference each other relatively.
             local_path = _hf_package(*package.groups())
         else:
             from isaaclab.utils.assets import retrieve_file_path
@@ -220,14 +212,16 @@ def _hf_package(repo_id: str, revision: str, filename: str) -> str:
     """`filename`, a package's entry layer, in the Hugging Face cache, with
     every file of its package beside it.
 
-    Downloaded as Arena's ``download_and_wrap_central_asset`` downloads it: the
-    package folder listed at the pinned commit, and each file through
-    ``hf_hub_download``. So the two share every file, `HF_HOME` moves both, and
-    none of it is copied into this module's cache.
+    The package folder listed at the pinned commit, and each file through
+    ``hf_hub_download``, so `HF_HOME` moves it and none of it is copied into
+    this module's cache. Arena's Central source asks ``retrieve_file_path`` for
+    the same URL, which :func:`_route_retrievals` sends here, so the composer's
+    check and Arena's build read one copy. Arena run in Isaac Sim, unpatched,
+    mirrors it into Isaac Lab's temporary directory instead.
 
     The Hub is asked every time, once a process (`localize` remembers): a
-    cached entry is no sign of a whole package, since Arena's loader downloads
-    in no order and may have been stopped halfway. With the commit pinned, a
+    cached entry is no sign of a whole package, since a download goes in no
+    order and may have been stopped halfway. With the commit pinned, a
     file already cached costs a stat, so asking completes a partial package
     for the price of a listing, and a reader beside a download waits on
     huggingface_hub's lock rather than reading half a file. Only a Hub that

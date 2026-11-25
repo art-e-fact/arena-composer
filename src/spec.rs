@@ -401,9 +401,8 @@ mod tests {
         assert_eq!(params["z_limits"].as_range(), None);
     }
 
-    /// Python describes a kind with more than the form needs — whether Arena
-    /// marked it `agent_ready`, the params no control edits — for the MCP
-    /// server's `list_kinds`. A field this side does not know is skipped, so
+    /// Python describes a kind with more than the form needs — the params no
+    /// control edits — for the MCP server's `list_kinds`. A field this side does not know is skipped, so
     /// the vocabulary keeps decoding as Python's grows.
     #[test]
     fn a_kind_carrying_more_than_the_form_needs_decodes() {
@@ -413,7 +412,6 @@ mod tests {
                 "fields": [],
                 "summary": "Rests on.",
                 "unary": false,
-                "agent_ready": true,
                 "other_params": {"target_x_range": {"type": "tuple[float, float] | None", "required": false}},
             }],
         }))

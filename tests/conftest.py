@@ -2,9 +2,22 @@
 new test that needs Arena fails there until it is listed."""
 
 import importlib.util
+import os
 import sys
+from pathlib import Path
 
 import pytest
+
+# ARENA_COMPOSER_TEST_ARENA=<a checkout of another Arena>: test against it in place of the venv's own
+# (docs/development.md#tests). The venv's editable install would still serve what the checkout lacks.
+if arena := os.environ.get("ARENA_COMPOSER_TEST_ARENA"):
+    roots = [Path(arena), Path(arena, "isaaclab_arena_embodiments"), Path(arena, "isaaclab_arena_policies")]
+    sys.path[:0] = [str(root) for root in roots if root.is_dir()]
+    for name, finder in list(sys.modules.items()):
+        if name.startswith("__editable___isaaclab"):
+            mapping = getattr(finder, "MAPPING", {})
+            for package in [package for package in mapping if package.startswith("isaaclab_arena")]:
+                del mapping[package]
 
 if importlib.util.find_spec("isaaclab_arena") is None:
     collect_ignore = [

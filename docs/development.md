@@ -130,6 +130,24 @@ ARENA_COMPOSER_PAYLOAD=/tmp/scene.msgpack cargo test -- --ignored
 ARENA_COMPOSER_PAYLOAD=/tmp/scene.msgpack pytest
 ```
 
+pytest tests the Arena in the venv it runs in, and the package runs on two: `main` at the commit the
+README's [Arena section](../README.md#which-arena-it-runs-on) names, and the release branch beside
+it. Where they differ, the code asks Arena what it has, never its version number, which neither
+bumps: `resolve_layout.COLLIDERS_BOUNDED` says whether Arena bounds a guide or proxy collider
+(#1723, on `main` only), and the tests that expect one or the other branch on it too. A change near
+what differs, and every release, runs pytest on each. While the two pin the same Isaac Lab, the
+other Arena needs no venv of its own: check it out, and point the tests at it.
+
+```bash
+git -C <Arena's checkout> worktree add /tmp/arena-release origin/release/0.4.0
+```
+
+```bash
+ARENA_COMPOSER_TEST_ARENA=/tmp/arena-release pytest
+```
+
+[tests/conftest.py](../tests/conftest.py) then imports that checkout's Arena, none of the venv's.
+
 CI ([ci.yml](../.github/workflows/ci.yml)) has no Arena. It runs `cargo test`, and runs pytest
 against the wheel it built, skipping the files [tests/conftest.py](../tests/conftest.py) lists. A new
 test file that imports Arena has to be added to that list, or CI fails.
@@ -261,9 +279,11 @@ changes behaviour bumps the minor version and one that only fixes bumps the patc
 1. In [CHANGELOG.md](../CHANGELOG.md), rename `## [Unreleased]` to `## [<version>] - <date>`, put a
    fresh `## [Unreleased]` above it, and point the compare links at its foot at the new tag.
 2. Set the version in `Cargo.toml`.
-3. Run the whole suite locally, opt-in tests included: CI has no Arena.
+3. Run the whole suite locally, opt-in tests included: CI has no Arena. Run pytest on each Arena the
+   README names, the release branch at its tip ([Tests](#tests)).
 4. In the README's [Arena section](../README.md#which-arena-it-runs-on), record the Arena `main`
-   commit the release is synced with, in a table with a row per release.
+   commit the release is synced with, and the Arena release branch it runs on with the commit it
+   was tested at, in a table with a row per release.
 5. Merge, then push a tag `v<version>` on `main`.
 6. Approve the tag's run deploying to `pypi`: Review deployments, on the run's page.
 

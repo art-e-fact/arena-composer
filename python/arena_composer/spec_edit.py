@@ -1250,9 +1250,10 @@ def _files(path: Path) -> SpecFiles | Result:
 
 def _message(entry: dict[str, Any]) -> str:
     """One pydantic error as a line an agent can act on."""
-    # Arena's validators are bare `assert`s, which pydantic reports under this
-    # prefix; the sentence after it is the one the author wrote.
-    message = entry["msg"].removeprefix("Assertion failed, ")
+    # Arena's validators are bare `assert`s or `ValueError`s, which pydantic
+    # reports under these prefixes; the sentence after one is the one the author wrote.
+    message = re.sub(r"^(Assertion failed|Value error), ", "", entry["msg"])
+    # Arena explains a bare `on` under `kind` itself; any other string field takes this.
     if entry.get("type") == "string_type" and isinstance(entry.get("input"), bool):
         message += (
             "; Arena reads YAML 1.1, where a bare on, off, yes or no is a boolean, so quote it"
@@ -1536,9 +1537,9 @@ def _normalised(line: str) -> str:
 
 def _dangling(spec: Any) -> list[tuple[tuple[str, str], str]]:
     """Each slot of `spec` naming an id it does not declare — or one Arena
-    does not allow there: a reference's parent is the background or an
-    object, an override's target is one of those or the embodiment — as
-    ``((normalised path, id), line)``.
+    does not allow there: a reference's parent is the background, an object
+    or an earlier reference, an override's target is the background, an
+    object or the embodiment — as ``((normalised path, id), line)``.
 
     Computed here rather than read off Arena's validator, whose
     cross-reference checks are asserts in one validator: it reports the first
@@ -1546,9 +1547,15 @@ def _dangling(spec: Any) -> list[tuple[tuple[str, str], str]]:
     introduced it.
     """
     ids, allowed = _id_pools(spec)
+    references = _indexed(spec, "object_references")
     found = []
     for container, key, where in _id_slots(spec):
-        declared, expected = allowed.get(where.split(".")[0], (ids, "an id this spec declares"))
+        section = where.split(".")[0]
+        declared, expected = allowed.get(section, (ids, "an id this spec declares"))
+        if section == "object_references":
+            # Arena takes the references in order, each a parent for those after it.
+            index = int(where.split(".")[1])
+            declared = declared | {entry.get("id") for at, entry in references if at < index}
         if (value := container[key]) not in declared:
             found.append(((_normalised(where), value), f"{where}: {value!r} is not {expected}"))
     return found
@@ -1556,8 +1563,9 @@ def _dangling(spec: Any) -> list[tuple[tuple[str, str], str]]:
 
 def _id_pools(spec: Any) -> tuple[set[str], dict[str, tuple[set[str], str]]]:
     """Every id `spec` declares, and the ones the slots under a section are
-    narrowed to, with how to say so: a reference's parent is the background
-    or an object, an override's target one of those or the embodiment."""
+    narrowed to, with how to say so: a reference's parent is the background,
+    an object or an earlier reference (`_dangling` adds those), an override's
+    target the background, an object or the embodiment."""
     singles = {
         role: spec[role].get("id")
         for role in ("embodiment", "background")
@@ -1568,7 +1576,10 @@ def _id_pools(spec: Any) -> tuple[set[str], dict[str, tuple[set[str], str]]]:
         for section in _ID_SECTIONS
     }
     allowed = {
-        "object_references": ({singles.get("background")} | ids["objects"], "the background or an object"),
+        "object_references": (
+            {singles.get("background")} | ids["objects"],
+            "the background, an object or an earlier object reference",
+        ),
         "cli_override_specs": (set(singles.values()) | ids["objects"], "the embodiment, the background or an object"),
     }
     return set(singles.values()).union(*ids.values()), allowed
@@ -1663,17 +1674,19 @@ def _drop_dependents(files: SpecFiles, node_id: str) -> list[str]:
     of thing dropped.
 
     The relations naming it, since a relation pointing at an asset that has
-    gone stops the spec loading at all. And the object references whose parent
-    it is, with their relations in turn: a reference is a prim inside its
-    parent's USD, and Arena allows it no parent but a background or an object,
-    so with the parent gone there is nothing for it to be — one outcome, hence
-    a cascade and not a refusal.
+    gone stops the spec loading at all. And the object references inside it,
+    with their relations in turn: a reference is a prim inside its parent's
+    USD, whose parent is the background, an object or another reference (a
+    cabinet's drawer), so with the parent gone there is nothing for it to be
+    — one outcome, hence a cascade down the chain and not a refusal.
     """
     gone, changed = [node_id], []
-    references = files.entries("object_references")
-    if inside := [reference for reference in references if reference.get("parent_id") == node_id]:
+    references, inside = files.entries("object_references"), []
+    while more := [r for r in references if r.get("parent_id") in gone and all(r is not seen for seen in inside)]:
+        inside += more
+        gone += [reference["id"] for reference in more if isinstance(reference.get("id"), str)]
+    if inside:
         _remove(files, "object_references", inside)
-        gone += [reference["id"] for reference in inside if isinstance(reference.get("id"), str)]
         changed.append(f"removed object reference(s) {gone[1:]} inside {node_id!r}")
     relations = files.entries("relations")
     if naming := [r for r in relations if r.get("subject") in gone or r.get("reference") in gone]:
@@ -1685,11 +1698,11 @@ def _drop_dependents(files: SpecFiles, node_id: str) -> list[str]:
 def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
     """Point everything naming `previous` at `node_id` instead: every slot
     :func:`_id_slots` finds in either file, and the prim path of an object
-    reference inside a renamed *object* where it is written whole, as
-    ``{ENV_REGEX_NS}/<parent id>/...`` — an asset is spawned under its id. A
-    relative one Arena expands under the parent's prim path, and a whole one
-    inside the background spells the background's registry name, which a
-    rename of its id leaves alone.
+    reference inside a renamed *object*, or inside one of its references,
+    where it is written whole, as ``{ENV_REGEX_NS}/<object id>/...`` — an
+    asset is spawned under its id. A relative one Arena expands under the
+    parent's prim path, and a whole one inside the background spells the
+    background's registry name, which a rename of its id leaves alone.
 
     A name left behind is a reference to an asset that no longer exists, which
     stops the spec loading — the same failure removing an asset without its
@@ -1706,9 +1719,8 @@ def _rename_node(files: SpecFiles, previous: str, node_id: str) -> int:
     object_ids = {entry.get("id") for entry in files.entries("objects")}
     prefix = f"{{ENV_REGEX_NS}}/{previous}/"
     for reference in files.entries("object_references"):
-        # `parent_id` already carries the new id by now.
         prim_path = reference.get("prim_path")
-        if reference.get("parent_id") == node_id and node_id in object_ids and str(prim_path).startswith(prefix):
+        if node_id in object_ids and str(prim_path).startswith(prefix):
             reference["prim_path"] = f"{{ENV_REGEX_NS}}/{node_id}/{prim_path.removeprefix(prefix)}"
             renamed += 1
     return renamed

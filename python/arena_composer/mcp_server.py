@@ -316,8 +316,8 @@ async def describe_scene(
     `frame` is Arena's world: metres, `up` along +z, and `robot_forward` and
     `robot_left`, the robot's own +x and +y in the world. An asset's heading
     is its +x, as `face_to` turns it, and a yaw turns it counter-clockwise
-    from world +x toward +y. Arena's robots reach along their +x, but the
-    KUKA-Allegro reaches along its -x. `next_to`'s `side` names a world axis,
+    from world +x toward +y. Arena's robots reach along their +x.
+    `next_to`'s `side` names a world axis,
     not the robot's: with `robot_left` at [0, 1, 0], the robot's left is
     `positive_y`.
 
@@ -440,9 +440,10 @@ async def get_prim_tree(
     A reference picks out part of an asset by its `prim_path` — a tabletop to
     anchor on, a drawer for an affordance task to open. Only prims in physics
     or collision can be one, so only those are listed, with their ancestors.
-    Of those, a prim with no default-purpose geometry — a collider authored as
-    a proxy or a guide, as many are — is left out too: Arena bounds only that,
-    so nothing could be placed on it or around it.
+    Of those, a prim with nothing Arena bounds is left out too, as nothing
+    could be placed on it or around it: Arena bounds a prim by its
+    default-purpose geometry, and on Arena's `main` a collider by its own
+    geometry too, a proxy or a guide as many are.
 
     Write a prim's `prim_path` as it comes, with `node_id` as the reference's
     `parent_id`: it is relative, and Arena expands it under that node's prim
@@ -667,8 +668,7 @@ def list_kinds() -> dict[str, Any]:
     either side of which may be `null` for an open side), whether it is
     `required`, and its `default`. `other_params` lists the params with a shape no field
     covers — a tuple range, a list of ids — by their annotated type.
-    `agent_ready` marks the kinds Arena vetted for its own agent; the rest are
-    registered all the same. A `unary` relation takes no `reference`.
+    A `unary` relation takes no `reference`.
     `compositions` is what `task.composition` may be.
 
     A task param that names entries — a `node_ref`, or a list of ids under
